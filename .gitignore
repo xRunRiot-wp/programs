@@ -1,0 +1,9 @@
+node_modules/
+*.log
+bridge/config.json
+bridge/state.json
+bridge/transcripts.json
+bridge/account.txt
+bin/
+obj/
+*.zip
