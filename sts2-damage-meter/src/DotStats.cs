@@ -39,6 +39,36 @@ internal sealed class DotTotals
     }
 }
 
+// "Debuff value": damage a player's debuffs added or prevented, credited to whoever applied them
+// (Joseph, 2026-09-27: "a more obvious way to check how much weaken/vuln/strength reduce someone has done").
+//   Vulnerable   = extra damage enemies took  (hit × (1 − 1/multiplier))
+//   Weak         = damage enemies didn't deal (hit × (1/multiplier − 1))
+//   StrengthDown = damage prevented by negative Strength on the attacker (|Strength| per hit)
+internal enum SupportKind { Vulnerable, Weak, StrengthDown }
+
+internal static class Support
+{
+    public static readonly SupportKind[] All = { SupportKind.Vulnerable, SupportKind.Weak, SupportKind.StrengthDown };
+    public static readonly Color VulnColor = new(1.00f, 0.55f, 0.30f);
+    public static readonly Color WeakColor = new(0.55f, 0.75f, 1.00f);
+    public static readonly Color StrColor = new(0.90f, 0.85f, 0.40f);
+
+    public static Color ColorOf(SupportKind k) => k == SupportKind.Vulnerable ? VulnColor : k == SupportKind.Weak ? WeakColor : StrColor;
+    public static string Name(SupportKind k) => k == SupportKind.Vulnerable ? "Vulnerable" : k == SupportKind.Weak ? "Weak" : "Strength down";
+    public static string What(SupportKind k) => k == SupportKind.Vulnerable ? "extra damage dealt" : "damage prevented";
+    public static string Sign(SupportKind k) => k == SupportKind.Vulnerable ? "+" : "−";
+
+    public static double Total(Dictionary<SupportKind, double> d) { double t = 0; foreach (var v in d.Values) t += v; return t; }
+    public static double Get(Dictionary<SupportKind, double> d, SupportKind k) => d.TryGetValue(k, out var v) ? v : 0;
+
+    public static Dictionary<SupportKind, double> Sum(Dictionary<SupportKind, double> a, Dictionary<SupportKind, double> b)
+    {
+        var r = new Dictionary<SupportKind, double>(a);
+        foreach (var kv in b) r[kv.Key] = Get(r, kv.Key) + kv.Value;
+        return r;
+    }
+}
+
 // One debuff currently on an enemy.
 internal readonly struct DebuffInfo
 {

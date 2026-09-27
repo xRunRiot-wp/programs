@@ -205,6 +205,17 @@ internal sealed class PostFightView
             var dd = L(ref lc, fR, DotReader.DoomColor);
             dd.Text = $"{DotReader.DoomName} {d.DoomTotal} ({DotReader.Pct(d.DoomTotal, ps.DealtTotal)}%, {d.DoomKills} kill{(d.DoomKills == 1 ? "" : "s")})";
             dd.SetPosition(new Vector2(_w * 0.5f, y));
+            y += rowH;
+            var sv = L(ref lc, fR, Support.VulnColor);
+            sv.Text = $"Vulnerable +{MeterRows.Fmt(Support.Get(ps.Support, SupportKind.Vulnerable))}";
+            sv.SetPosition(new Vector2(pad, y));
+            var sw = L(ref lc, fR, Support.WeakColor);
+            sw.Text = $"Weak −{MeterRows.Fmt(Support.Get(ps.Support, SupportKind.Weak))}";
+            sw.SetPosition(new Vector2(_w * 0.36f, y));
+            var ss = L(ref lc, fR, Support.StrColor);
+            ss.Text = $"Str down −{MeterRows.Fmt(Support.Get(ps.Support, SupportKind.StrengthDown))}";
+            ss.SetPosition(new Vector2(_w * 0.64f, y));
+            _rowTips.Add((new Rect2(pad, y, _w - pad * 2, rowH), MeterRows.SupportTipPublic(title, ps, turns)));
             y += rowH + 4f * sc;
 
             y = Section(ref lc, ref rc, ref ic, "DAMAGE DEALT", ps.Dealt, ps.DealtTotal, turns, pc, false, DealtRows, y, sc, rowH, pad, d);

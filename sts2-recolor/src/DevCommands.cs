@@ -121,6 +121,24 @@ internal static class DevCommands
 			case "mload":
 				ModEntry.Log("load: " + (ModelSwap.ImportIncoming() ?? "nothing"));
 				break;
+			case "selectat":
+				EditorUi.DevSelectAt(float.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture));
+				break;
+			case "picktint":
+				EditorUi.DevPickTint(float.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture));
+				break;
+			case "selectdebug":
+				EditorUi.SelectDebug = true;
+				break;
+			case "curpart":
+				ModEntry.Log("current part: " + (EditorUi.CurrentPart ?? "whole body"));
+				break;
+			case "picture":
+				EditorUi.SetPicture(string.Join(' ', a, 1, a.Length - 1));
+				break;
+			case "picmode":
+				EditorUi.DevPictureMode(a[1]);
+				break;
 			case "inspect":
 				EditorUi.DevInspect();
 				break;

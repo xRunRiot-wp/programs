@@ -29,6 +29,19 @@ public class TargetRecolor
 	[JsonPropertyName("tintStrength")] public float TintStrength { get; set; }
 	[JsonPropertyName("swaps")] public List<ColorSwap> Swaps { get; set; } = new();
 
+	/// <summary>A picture (file in textures/) laid over the colors like a texture. Null = none.</summary>
+	[JsonPropertyName("picture")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Picture { get; set; }
+	/// <summary>0..1 — how strongly the picture shows.</summary>
+	[JsonPropertyName("pictureOpacity")] public float PictureOpacity { get; set; } = 0.6f;
+	/// <summary>"colors" = the picture's colors (keeps the part's shading); "texture" = only its light/dark detail.</summary>
+	[JsonPropertyName("pictureMode")] public string PictureMode { get; set; } = "colors";
+	/// <summary>How many times the picture repeats across the art (bigger = smaller pattern).</summary>
+	[JsonPropertyName("pictureScale")] public float PictureScale { get; set; } = 4f;
+
+	[JsonIgnore] public bool HasPicture => !string.IsNullOrWhiteSpace(Picture) && PictureOpacity > 0.001f;
+
 	/// <summary>Characters only: use the repainted part PNGs from models/&lt;character&gt;/.</summary>
 	[JsonPropertyName("customModel")] public bool CustomModel { get; set; } = true;
 
@@ -47,13 +60,14 @@ public class TargetRecolor
 
 	public bool LookIsIdentity =>
 		Math.Abs(Hue) < 0.01f && Math.Abs(Saturation - 1f) < 0.001f && Math.Abs(Brightness - 1f) < 0.001f
-		&& Math.Abs(Contrast - 1f) < 0.001f && TintStrength < 0.001f && Swaps.Count == 0;
+		&& Math.Abs(Contrast - 1f) < 0.001f && TintStrength < 0.001f && Swaps.Count == 0 && !HasPicture;
 
 	/// <summary>Copy of the look settings (no parts) — a new part starts out matching the whole body.</summary>
 	public TargetRecolor CloneLook() => new()
 	{
 		Enabled = Enabled, Hue = Hue, Saturation = Saturation, Brightness = Brightness, Contrast = Contrast,
 		Tint = Tint, TintStrength = TintStrength,
+		Picture = Picture, PictureOpacity = PictureOpacity, PictureMode = PictureMode, PictureScale = PictureScale,
 		Swaps = Swaps.ConvertAll(s => new ColorSwap { From = s.From, To = s.To, Range = s.Range })
 	};
 }

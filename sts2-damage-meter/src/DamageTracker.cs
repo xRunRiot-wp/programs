@@ -53,6 +53,7 @@ internal sealed class PlayerSources
     public DotTotals Dots = new(); // dedicated Doom & Poison stats (dealt)
     public long BlockedTotal;      // incoming damage your block actually absorbed
     public int BlockedHits;        // hits that were (at least partly) blocked
+    public Dictionary<SupportKind, double> Support = new(); // debuff value credited to this player
 }
 
 internal sealed class ChartRow
@@ -102,6 +103,7 @@ internal sealed class DamageTracker
     private readonly Dictionary<int, Dictionary<string, SourceAcc>> _takenBySource = new();
     private readonly Dictionary<int, DotTotals> _dots = new();
     private readonly Dictionary<int, (long Total, int Hits)> _blocked = new();
+    private readonly Dictionary<int, Dictionary<SupportKind, double>> _support = new();
     private readonly Dictionary<string, string> _sourceIcon = new(); // source label -> texture resource path
     private readonly Dictionary<(int Round, int Slot), List<DealtSeg>> _dealtSegs = new();
     private readonly Dictionary<int, long> _healByPlayer = new();   // slot -> total healed
@@ -129,6 +131,7 @@ internal sealed class DamageTracker
             _blockByPlayer.Clear();
             _dots.Clear();
             _blocked.Clear();
+            _support.Clear();
             _log.Clear();
             _maxRound = 0;
             CurrentRound = 0;
@@ -177,6 +180,16 @@ internal sealed class DamageTracker
                 d.DoomTotal += amount;
                 if (killed) d.DoomKills++;
             }
+        }
+    }
+
+    public void AddSupport(int slot, SupportKind kind, double amount)
+    {
+        if (amount <= 0 || slot < 0 || amount > 100_000) return;
+        lock (_lock)
+        {
+            if (!_support.TryGetValue(slot, out var d)) { d = new Dictionary<SupportKind, double>(); _support[slot] = d; }
+            d[kind] = (d.TryGetValue(kind, out var cur) ? cur : 0) + amount;
         }
     }
 
@@ -268,6 +281,7 @@ internal sealed class DamageTracker
                 _blockByPlayer.TryGetValue(s, out ps.BlockTotal);
                 if (_dots.TryGetValue(s, out var d)) ps.Dots = d.Clone();
                 if (_blocked.TryGetValue(s, out var bl)) { ps.BlockedTotal = bl.Total; ps.BlockedHits = bl.Hits; }
+                if (_support.TryGetValue(s, out var sup)) ps.Support = new Dictionary<SupportKind, double>(sup);
                 perPlayer[s] = ps;
             }
             int from = Math.Max(0, _log.Count - LogShow);

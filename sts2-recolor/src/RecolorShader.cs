@@ -1,4 +1,4 @@
-﻿namespace SpireRecolor;
+namespace SpireRecolor;
 
 internal static class RecolorShader
 {
@@ -22,6 +22,13 @@ uniform float rc_tint_amt = 0.0;
 uniform int rc_swap_count = 0;
 uniform vec4 rc_src[8];
 uniform vec4 rc_dst[8];
+uniform sampler2D rc_pic : repeat_enable, filter_linear_mipmap;
+uniform float rc_pic_amt = 0.0;
+uniform int rc_pic_mode = 0;
+uniform float rc_pic_scale = 4.0;
+// Click-to-select: for one frame every part is drawn as a flat, unique ID color (never shown to the player).
+uniform float rc_id_on = 0.0;
+uniform vec3 rc_id = vec3(0.0);
 
 varying vec4 modulate_color;
 
@@ -101,6 +108,26 @@ void fragment() {
 	vec3 tinted = hsv2rgb(vec3(rc_tint_hsv.x, rc_tint_hsv.y, rgb2hsv(outc).z * rc_tint_hsv.z));
 	outc = mix(outc, tinted, rc_tint_amt);
 
+	// Picture texture, pinned to the art (UV) so it moves and bends with every animation.
+	if (rc_pic_amt > 0.001) {
+		vec4 pic = texture(rc_pic, UV * rc_pic_scale);
+		float a = rc_pic_amt * pic.a;
+		if (rc_pic_mode == 0) {
+			// Picture colors, keeping this art's own light and shadow.
+			vec3 ph = rgb2hsv(pic.rgb);
+			float light = clamp(rgb2hsv(outc).z * 1.25, 0.0, 1.0);
+			vec3 shaded = hsv2rgb(vec3(ph.x, ph.y, clamp(ph.z * light, 0.0, 1.0)));
+			outc = mix(outc, shaded, a);
+		} else {
+			// Texture only: the picture's light/dark detail pressed into the existing colors (overlay blend).
+			float l = dot(pic.rgb, vec3(0.299, 0.587, 0.114));
+			vec3 lo = 2.0 * outc * l;
+			vec3 hi = vec3(1.0) - 2.0 * (vec3(1.0) - outc) * (1.0 - l);
+			vec3 ov = mix(lo, hi, step(vec3(0.5), outc));
+			outc = mix(outc, clamp(ov, 0.0, 1.0), a);
+		}
+	}
+
 	mat3 RGB_to_YIQ = mat3(
 		vec3(0.2989,  0.5959,  0.2115),
 		vec3(0.5870, -0.2774, -0.5229),
@@ -115,6 +142,9 @@ void fragment() {
 	outc = inverse(RGB_to_YIQ) * yiq;
 
 	COLOR = vec4(outc, col.a) * modulate_color;
+	if (rc_id_on > 0.5) {
+		COLOR = vec4(rc_id, step(0.3, col.a * modulate_color.a));
+	}
 }
 ";
 }

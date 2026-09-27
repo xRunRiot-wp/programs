@@ -1,0 +1,10 @@
+{
+  "id": "STS2_QuickReload",
+  "name": "Quick Reload (co-op)",
+  "author": "Joseph",
+  "description": "Press F5 in a multiplayer run you're hosting to Save & Quit and go straight back into the load lobby, waiting for your friends to rejoin. Same as Save & Quit then Multiplayer > Load, in one key. On the main menu, F5 loads your co-op save. Only the host needs this mod.",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}

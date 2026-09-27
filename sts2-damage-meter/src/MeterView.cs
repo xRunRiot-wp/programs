@@ -5,7 +5,7 @@ using Godot;
 namespace STS2_DamageCharts;
 
 // The meter's display modes, cycled with the ◀ ▶ arrows (or a click on the title), Details!-style.
-internal enum MeterMode { DamageDone, PerTurn, Taken, Blocked, Differential, DoomPoison, Debuffs }
+internal enum MeterMode { DamageDone, PerTurn, Taken, Blocked, Differential, DebuffValue, DoomPoison, Debuffs }
 
 // Hover tooltip content: a title plus icon / left text / right-aligned value lines.
 internal sealed class MeterTip
@@ -51,6 +51,7 @@ internal static class MeterRows
         MeterMode.Taken => "Damage Taken",
         MeterMode.Blocked => "Damage Blocked",
         MeterMode.Differential => "Differential",
+        MeterMode.DebuffValue => "Debuff Value",
         MeterMode.DoomPoison => "Doom & Poison",
         _ => "Enemy Debuffs",
     };
@@ -217,6 +218,43 @@ internal static class MeterRows
                 return rows;
             }
 
+            case MeterMode.DebuffValue:
+            {
+                // What Vulnerable / Weak / Strength-down were worth, credited to whoever applied them.
+                strip = $"Vuln +{Fmt(Support.Get(ps.Support, SupportKind.Vulnerable))}  ·  Weak −{Fmt(Support.Get(ps.Support, SupportKind.Weak))}  ·  Str down −{Fmt(Support.Get(ps.Support, SupportKind.StrengthDown))}";
+                if (snap.PlayerCount > 1)
+                {
+                    for (int s = 0; s < snap.PlayerCount; s++)
+                    {
+                        var p = snap.PerPlayer[s];
+                        double tot = Support.Total(p.Support);
+                        var segs = new List<(double, Color)>();
+                        foreach (var k in Support.All) segs.Add((Support.Get(p.Support, k), Support.ColorOf(k)));
+                        rows.Add(new MeterRow
+                        {
+                            Name = s < snap.Labels.Length ? snap.Labels[s] : $"P{s + 1}",
+                            Icon = s < snap.PlayerIcons.Length ? snap.PlayerIcons[s] : null, NameColor = UiTheme.Gold,
+                            Value = tot, Segs = segs,
+                            Right = $"{Fmt(tot)}  (+{Fmt(Support.Get(p.Support, SupportKind.Vulnerable))} / −{Fmt(Support.Get(p.Support, SupportKind.Weak))} / −{Fmt(Support.Get(p.Support, SupportKind.StrengthDown))})",
+                            Color = inp.Palette[Math.Min(s, inp.Palette.Length - 1)],
+                            Tip = SupportTip(s < snap.Labels.Length ? snap.Labels[s] : "", p, turns),
+                        });
+                    }
+                    break;
+                }
+                var st = SupportTip("Debuff Value", ps, turns);
+                foreach (var k in Support.All)
+                {
+                    double v = Support.Get(ps.Support, k);
+                    rows.Add(new MeterRow
+                    {
+                        Name = $"{Support.Name(k)} ({Support.What(k)})", Value = v, Color = Support.ColorOf(k), Tip = st, Pinned = true,
+                        Right = $"{Support.Sign(k)}{Fmt(v)}  ({Rate(v / turns)}/turn)",
+                    });
+                }
+                return rows; // fixed order
+            }
+
             case MeterMode.DoomPoison:
             {
                 var d = ps.Dots;
@@ -316,6 +354,24 @@ internal static class MeterRows
         }
         t.Add("Per turn", Rate(e.Total / (double)turns));
         t.Add(taken ? "% of damage taken" : "% of your damage", $"{DotReader.Pct(e.Total, total)}%");
+        return t;
+    }
+
+    public static MeterTip SupportTipPublic(string name, PlayerSources p, int turns) => SupportTip(name, p, turns);
+
+    private static MeterTip SupportTip(string name, PlayerSources p, int turns)
+    {
+        var t = new MeterTip { Title = name };
+        foreach (var k in Support.All)
+        {
+            double v = Support.Get(p.Support, k);
+            t.Add($"{Support.Name(k)}: {Support.What(k)}", $"{Support.Sign(k)}{Fmt(v)}", Support.ColorOf(k));
+        }
+        double tot = Support.Total(p.Support);
+        t.Add("Total value", Fmt(tot), UiTheme.Gold);
+        t.Add("Per turn", Rate(tot / turns));
+        t.Add("Credited to whoever applied the debuff.", "", new Color(1, 1, 1, 0.55f));
+        t.Add("Vulnerable counts blocked damage too.", "", new Color(1, 1, 1, 0.55f));
         return t;
     }
 

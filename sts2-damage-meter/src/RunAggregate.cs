@@ -27,6 +27,7 @@ internal sealed class RunAggregate
     private DotTotals[] _dots = Array.Empty<DotTotals>();
     private long[] _blockedT = Array.Empty<long>();
     private int[] _blockedH = Array.Empty<int>();
+    private Dictionary<SupportKind, double>[] _support = Array.Empty<Dictionary<SupportKind, double>>();
     private int _rounds; // turns summed over every folded fight
     private readonly Dictionary<string, string> _sourceIcon = new();
 
@@ -66,6 +67,7 @@ internal sealed class RunAggregate
         _dealtBySource = _takenBySource = Array.Empty<Dictionary<string, SourceAcc>>();
         _dots = Array.Empty<DotTotals>();
         _blockedT = Array.Empty<long>(); _blockedH = Array.Empty<int>();
+        _support = Array.Empty<Dictionary<SupportKind, double>>();
         _rounds = 0;
         _sourceIcon.Clear();
         _encDealt.Clear();
@@ -98,6 +100,7 @@ internal sealed class RunAggregate
             _block[s] += ps.BlockTotal;
             _dots[s].Add(ps.Dots);
             _blockedT[s] += ps.BlockedTotal; _blockedH[s] += ps.BlockedHits;
+            _support[s] = Support.Sum(_support[s], ps.Support);
             Merge(_dealtBySource[s], ps.Dealt);
             Merge(_takenBySource[s], ps.Taken);
             encD[s] = (int)Math.Min(int.MaxValue, ps.DealtTotal);
@@ -129,6 +132,8 @@ internal sealed class RunAggregate
         _takenBySource = new Dictionary<string, SourceAcc>[_playerCount];
         _dots = new DotTotals[_playerCount];
         _blockedT = new long[_playerCount]; _blockedH = new int[_playerCount];
+        _support = new Dictionary<SupportKind, double>[_playerCount];
+        for (int s = 0; s < _playerCount; s++) _support[s] = new Dictionary<SupportKind, double>();
         for (int s = 0; s < _playerCount; s++)
         {
             _dealtBySource[s] = new Dictionary<string, SourceAcc>();
@@ -166,6 +171,7 @@ internal sealed class RunAggregate
                 Dots = a.Dots.Clone(),
                 BlockedTotal = a.BlockedTotal + b.BlockedTotal,
                 BlockedHits = a.BlockedHits + b.BlockedHits,
+                Support = Support.Sum(a.Support, b.Support),
             };
             ps.Dots.Add(b.Dots);
             ps.DealtTotal = dt; ps.TakenTotal = tt;
@@ -201,6 +207,7 @@ internal sealed class RunAggregate
                 Dots = _dots[s].Clone(),
                 BlockedTotal = _blockedT[s],
                 BlockedHits = _blockedH[s],
+                Support = new Dictionary<SupportKind, double>(_support[s]),
             };
             ps.DealtTotal = dt;
             ps.TakenTotal = tt;

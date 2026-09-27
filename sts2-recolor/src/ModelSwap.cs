@@ -377,6 +377,9 @@ internal static class ModelSwap
 		using (var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
 		{
 			zip.CreateEntryFromFile(Palette.FilePath, "palette.json");
+			if (Directory.Exists(PictureStore.Dir))
+				foreach (string f in Directory.GetFiles(PictureStore.Dir, "*.png"))
+					zip.CreateEntryFromFile(f, "textures/" + Path.GetFileName(f));
 			if (Directory.Exists(ModelsDir))
 			{
 				foreach (string charDir in Directory.GetDirectories(ModelsDir))
@@ -423,7 +426,8 @@ internal static class ModelSwap
 						targets += Palette.ImportShareCode(sr.ReadToEnd());
 						continue;
 					}
-					if (!entry.FullName.StartsWith("models/", StringComparison.Ordinal) || !entry.FullName.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+					bool picture = entry.FullName.StartsWith("textures/", StringComparison.Ordinal);
+					if ((!entry.FullName.StartsWith("models/", StringComparison.Ordinal) && !picture) || !entry.FullName.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
 						continue;
 					string dest = Path.GetFullPath(Path.Combine(ModEntry.ModDir, entry.FullName));
 					if (!dest.StartsWith(root, StringComparison.OrdinalIgnoreCase))
