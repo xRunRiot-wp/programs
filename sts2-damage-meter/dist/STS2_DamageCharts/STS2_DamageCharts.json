@@ -1,10 +1,10 @@
 {
-    "id":  "STS2_DamageCharts",
-    "name":  "Damage Charts (Details meter)",
-    "author":  "zaxnyd; Details-style fork by Joseph",
-    "description":  "Details!-style damage meter for STS2: Damage Done, DPS per turn, Damage Taken, a dedicated Doom \u0026 Poison section, and live enemy debuffs. Hover a bar for a breakdown; whole-run numbers between fights. Hotkey C opens the full breakdown. Cosmetic only, multiplayer safe.",
-    "version":  "0.2.0",
-    "has_pck":  false,
-    "has_dll":  true,
-    "affects_gameplay":  false
+  "id": "STS2_DamageCharts",
+  "name": "Damage Charts (Details meter)",
+  "author": "zaxnyd; Details-style fork by Joseph",
+  "description": "Details!-style damage meter for STS2: Damage Done, DPS per turn, Damage Taken, a dedicated Doom & Poison section, and live enemy debuffs. Hover a bar for a breakdown; whole-run numbers between fights. Hotkey C opens the full breakdown. Cosmetic only, multiplayer safe.",
+  "version": "0.3.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
 }
