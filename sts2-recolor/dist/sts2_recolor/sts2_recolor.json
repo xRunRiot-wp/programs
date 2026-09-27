@@ -3,7 +3,7 @@
   "name": "Spire Recolor",
   "author": "Joseph",
   "description": "Recolor characters and act bosses with an in-game palette editor (press F8). Characters can also be repainted part by part. Cosmetic only, multiplayer safe. Share your palette with a share code.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "has_pck": false,
   "has_dll": true,
   "dependencies": [],
