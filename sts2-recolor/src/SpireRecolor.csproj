@@ -10,7 +10,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
-    <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64</GameDir>
+    <GameDir>H:\SteamLibrary\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64</GameDir>
   </PropertyGroup>
 
   <ItemGroup>

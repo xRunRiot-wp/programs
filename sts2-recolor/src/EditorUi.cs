@@ -20,7 +20,7 @@ internal static class EditorUi
 		public string Key = "";
 		public string Label = "";
 		public string Group = "";
-		public Func<NCreatureVisuals>? Create;
+		public Func<Node>? Create;          // a combat creature (NCreatureVisuals) or, for Ancients, their event scene
 		public MonsterModel? Monster;
 		public int ItemIndex;
 	}
@@ -39,16 +39,30 @@ internal static class EditorUi
 	private static CheckBox _enabled = null!;
 	private static CheckBox _showOriginal = null!;
 	private static HSlider _hue = null!, _sat = null!, _bright = null!, _contrast = null!, _tintAmt = null!;
+	private static HSlider _picAmt = null!, _picScale = null!;
+	private static OptionButton _picMode = null!;
+	private static Label _picName = null!;
 	private static ColorPickerButton _tint = null!;
 	private static VBoxContainer _swapList = null!;
 	private static Label _status = null!;
 	private static SubViewportContainer _vpContainer = null!;
 	private static SubViewport _vp = null!;
 	private static Node2D _holder = null!;
-	private static NCreatureVisuals? _preview;
+	private static ulong _fitFor;       // preview the framing below was measured for
+	private static Rect2? _fitRect;     // whole-skeleton outline, grown over the animation
+	private static Node? _preview;
+
+	// The Spine body inside whatever the preview shows (a creature's Body, or the first SpineSprite in a scene).
+	private static Node? PreviewBody => _preview is NCreatureVisuals v ? v.Body : (_preview != null && GodotObject.IsInstanceValid(_preview) ? Recolorer.FindSpine(_preview) : null);
 	private static int _previewAge;
 
 	private static int _pickSwap = -1;
+	// What the eyedropper fills: a swap's "from" (original colors), a swap's "to" or the tint (colors as you see them).
+	private enum PickWhat { SwapFrom, SwapTo, Tint }
+	private static PickWhat _pickWhat = PickWhat.SwapFrom;
+	// Click-to-select: frames left before reading the ID pass (0 = idle).
+	private static int _selectFrames;
+	private static Vector2 _selectPos;
 	private static bool _pickArmed;
 	private static int _pickFrames;
 	private static Vector2 _pickPos;
@@ -132,6 +146,8 @@ internal static class EditorUi
 
 		if (_pickFrames > 0 && --_pickFrames == 0)
 			FinishPick();
+		if (_selectFrames > 0 && --_selectFrames == 0)
+			FinishSelect();
 	}
 
 	private static void FlushSave()
@@ -254,8 +270,34 @@ internal static class EditorUi
 		_tint = new ColorPickerButton { CustomMinimumSize = new Vector2(70, 32), EditAlpha = false, TooltipText = "Paint the whole creature this color (use Tint strength)." };
 		_tint.ColorChanged += c => Edit(t => t.Tint = Recolorer.ToHex(c));
 		tintRow.AddChild(_tint);
+		var pickTint = new Button { Text = "Pick", TooltipText = "Click, then click a spot on the preview to use its color" };
+		pickTint.Pressed += BeginPickTint;
+		tintRow.AddChild(pickTint);
 		col.AddChild(tintRow);
 		_tintAmt = SliderRow(col, "Tint strength", 0, 1, 0.01, v => Edit(t => t.TintStrength = (float)v), v => $"{v * 100:0}%");
+
+		// Picture texture: a picture laid over the colors (this part, or the whole body).
+		col.AddChild(Header("Picture texture"));
+		var picRow = new HBoxContainer();
+		var choose = new Button { Text = "Choose picture…", TooltipText = "Pick a PNG/JPG/WEBP. It's copied into the mod's textures folder." };
+		choose.Pressed += ChoosePicture;
+		picRow.AddChild(choose);
+		_picName = new Label { Text = "none", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, ClipText = true };
+		picRow.AddChild(_picName);
+		var removePic = new Button { Text = "Remove", TooltipText = "Stop using a picture here." };
+		removePic.Pressed += () => Edit(t => t.Picture = null);
+		picRow.AddChild(removePic);
+		col.AddChild(picRow);
+		var modeRow = new HBoxContainer();
+		modeRow.AddChild(new Label { Text = "Picture mode", CustomMinimumSize = new Vector2(120, 0) });
+		_picMode = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		_picMode.AddItem("Picture colors (keeps the shading)");
+		_picMode.AddItem("Texture only (light & dark detail)");
+		_picMode.ItemSelected += i => Edit(t => t.PictureMode = i == 1 ? "texture" : "colors");
+		modeRow.AddChild(_picMode);
+		col.AddChild(modeRow);
+		_picAmt = SliderRow(col, "Picture opacity", 0, 1, 0.01, v => Edit(t => t.PictureOpacity = (float)v), v => $"{v * 100:0}%");
+		_picScale = SliderRow(col, "Picture size", 0.5, 32, 0.1, v => Edit(t => t.PictureScale = (float)v), v => $"{v:0.0}x repeat");
 
 		col.AddChild(Header("Color swaps  (turn one color into another)"));
 		col.AddChild(new Label
@@ -406,9 +448,39 @@ internal static class EditorUi
 		try
 		{
 			foreach (var c in ModelDb.AllCharacters)
+			{
 				_entries.Add(new Entry { Key = c.Id.Entry.ToLowerInvariant(), Label = SafeTitle(() => c.Title.GetFormattedText(), c.Id.Entry), Group = "Characters", Create = c.CreateVisuals });
+				// Osty, the Necrobinder's pet, right after her (Joseph, 2026-09-27: "osty is the only pet").
+				if (c.Id.Entry.Equals("NECROBINDER", StringComparison.OrdinalIgnoreCase)
+				    && ModelDb.All.OfType<MonsterModel>().FirstOrDefault(m => m.Id.Entry.Equals("OSTY", StringComparison.OrdinalIgnoreCase)) is { } osty)
+					_entries.Add(new Entry { Key = osty.Id.Entry.ToLowerInvariant(), Label = SafeTitle(() => osty.Title.GetFormattedText(), "Osty") + "  (Necrobinder's pet)", Group = "Characters", Create = osty.CreateVisuals, Monster = osty });
+			}
 		}
 		catch (Exception ex) { ModEntry.Log($"Character list failed: {ex.Message}"); }
+
+
+		// Ancients (Joseph, 2026-09-27: "make the ancients recolorable"): each one is drawn inside its event's
+		// background scene, so the preview shows that scene and the recolor touches only its Spine art.
+		try
+		{
+			foreach (var an in ModelDb.AllAncients.GroupBy(x => x.Id.Entry).Select(g => g.First())
+				         .OrderBy(x => SafeTitle(() => x.Title.GetFormattedText(), x.Id.Entry)))
+			{
+				string key = an.Id.Entry.ToLowerInvariant();
+				_entries.Add(new Entry
+				{
+					Key = key, Label = SafeTitle(() => an.Title.GetFormattedText(), an.Id.Entry), Group = "Ancients",
+					Create = () =>
+					{
+						var scene = an.CreateBackgroundScene().Instantiate<Control>(PackedScene.GenEditState.Disabled);
+						scene.SetMeta(Recolorer.KeyMeta, key);
+						scene.Size = new Vector2(1920, 1080);
+						return scene;
+					},
+				});
+			}
+		}
+		catch (Exception ex) { ModEntry.Log($"Ancient list failed: {ex.Message}"); }
 
 		var bossKeys = new HashSet<string>();
 		try
@@ -521,7 +593,7 @@ internal static class EditorUi
 		var export = new Button { Text = "Export parts to edit", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		export.Pressed += () =>
 		{
-			if (_current == null || _preview?.Body is not Node body || body.GetClass() != "SpineSprite")
+			if (_current == null || PreviewBody is not Node body || body.GetClass() != "SpineSprite")
 			{
 				SetStatus("Wait for the preview to appear, then try again.");
 				return;
@@ -634,15 +706,15 @@ internal static class EditorUi
 			return;
 		try
 		{
-			if (_current?.Monster != null)
-				_preview.SetUpSkin(_current.Monster);
+			if (_current?.Monster != null && _preview is NCreatureVisuals cv)
+				cv.SetUpSkin(_current.Monster);
 		}
 		catch (Exception ex) { ModEntry.Log($"Preview skin setup skipped: {ex.Message}"); }
 		try
 		{
-			var body = _preview.SpineBody;
+			var body = (_preview as NCreatureVisuals)?.SpineBody;
 			if (body == null)
-				return;
+				return; // Ancient scenes animate themselves
 			foreach (string anim in new[] { "idle_loop", "idle", "Idle", "idle_1" })
 			{
 				if (body.HasAnimation(anim))
@@ -666,12 +738,41 @@ internal static class EditorUi
 		Rect2 b = new Rect2(-150, -350, 300, 350);
 		try
 		{
-			var bounds = _preview.Bounds;
+			var bounds = (_preview as NCreatureVisuals)?.Bounds;
 			if (bounds != null && bounds.Size.X > 1 && bounds.Size.Y > 1)
 				b = new Rect2(bounds.Position, bounds.Size);
 		}
 		catch { }
-		float scale = Mathf.Clamp(Mathf.Min(area.X * 0.75f / b.Size.X, area.Y * 0.75f / b.Size.Y), 0.15f, 4f);
+		// The game's Bounds box is a hitbox and leaves out long pieces like the Necrobinder's scythe (Joseph,
+		// 2026-09-27: "you cant preview the end of the necrobinders scythe"). Also frame the whole drawn skeleton,
+		// grown over the animation so the view settles instead of wobbling.
+		if (_fitFor != _preview.GetInstanceId()) { _fitFor = _preview.GetInstanceId(); _fitRect = null; }
+		try
+		{
+			if (_preview is NCreatureVisuals && PreviewBody is Node2D body && body.GetClass() == "SpineSprite")
+			{
+				var skel = body.Call("get_skeleton").AsGodotObject();
+				if (skel != null)
+				{
+					Rect2 sb = skel.Call("get_bounds").AsRect2();
+					if (sb.Size.X > 1 && sb.Size.Y > 1)
+					{
+						Transform2D x = ((CanvasItem)_preview).GetGlobalTransform().AffineInverse() * body.GetGlobalTransform();
+						Rect2 local = new Rect2(x * sb.Position, Vector2.Zero)
+							.Expand(x * new Vector2(sb.End.X, sb.Position.Y))
+							.Expand(x * new Vector2(sb.Position.X, sb.End.Y))
+							.Expand(x * sb.End);
+						// creatures: never smaller than their hitbox; Ancient scenes: just the Ancient's skeleton
+						_fitRect = _fitRect is { } r ? r.Merge(local) : (_preview is NCreatureVisuals ? local.Merge(b) : local);
+					}
+				}
+			}
+		}
+		catch { }
+		if (_fitRect is { } fit) b = fit;
+		else if (_preview is Control && _preview is not NCreatureVisuals)
+			b = new Rect2(0, 0, 1920, 1080); // an Ancient's picture fills its whole scene
+		float scale = Mathf.Clamp(Mathf.Min(area.X * 0.85f / b.Size.X, area.Y * 0.85f / b.Size.Y), 0.15f, 4f);
 		_holder.Scale = Vector2.One * scale;
 		_holder.Position = area / 2f - (b.Position + b.Size / 2f) * scale;
 	}
@@ -680,7 +781,7 @@ internal static class EditorUi
 	{
 		if (_preview == null || !GodotObject.IsInstanceValid(_preview))
 			return;
-		if (_showOriginal.ButtonPressed || _pickFrames > 0)
+		if (_showOriginal.ButtonPressed || (_pickFrames > 0 && _pickWhat == PickWhat.SwapFrom))
 			_preview.SetMeta("sts2rc_bypass", true);
 		else if (_preview.HasMeta("sts2rc_bypass"))
 			_preview.RemoveMeta("sts2rc_bypass");
@@ -692,14 +793,96 @@ internal static class EditorUi
 	private static void BeginPick(int swapIndex)
 	{
 		_pickSwap = swapIndex;
+		_pickWhat = PickWhat.SwapFrom;
 		_pickArmed = true;
 		SetStatus($"Swap #{swapIndex + 1}: click the color you want to change on the preview.");
 	}
 
+	private static void BeginPickTo(int swapIndex)
+	{
+		_pickSwap = swapIndex;
+		_pickWhat = PickWhat.SwapTo;
+		_pickArmed = true;
+		SetStatus($"Swap #{swapIndex + 1}: click the color on the preview it should turn into.");
+	}
+
+	private static void BeginPickTint()
+	{
+		_pickSwap = -1;
+		_pickWhat = PickWhat.Tint;
+		_pickArmed = true;
+		SetStatus("Click a spot on the preview to use its color as the tint color.");
+	}
+
+	// Click-to-select: draw every part as an ID color for a couple of frames, read the pixel, select that part.
+	private static void BeginSelect(Vector2 pos)
+	{
+		if (_current == null || _preview == null || !GodotObject.IsInstanceValid(_preview)) return;
+		_selectPos = pos;
+		Recolorer.IdPickKey = _current.Key;
+		Recolorer.Apply(_preview);
+		_selectFrames = 3;
+	}
+
+	private static void FinishSelect()
+	{
+		string? slot = null;
+		try
+		{
+			Image img = _vp.GetTexture().GetImage();
+			Vector2 ratio = new Vector2(img.GetWidth() / Mathf.Max(_vpContainer.Size.X, 1), img.GetHeight() / Mathf.Max(_vpContainer.Size.Y, 1));
+			int x = Mathf.Clamp((int)(_selectPos.X * ratio.X), 0, img.GetWidth() - 1);
+			int y = Mathf.Clamp((int)(_selectPos.Y * ratio.Y), 0, img.GetHeight() - 1);
+			Color px = img.GetPixel(x, y);
+			slot = Recolorer.SlotFromIdPixel(px);
+			if (SelectDebug)
+			{
+				ModEntry.Log($"select: click ({_selectPos.X:0},{_selectPos.Y:0}) -> image ({x},{y}) of {img.GetWidth()}x{img.GetHeight()}, container {_vpContainer.Size}, pixel {px} -> {slot ?? "none"} ({Recolorer.IdSlots.Count} slots)");
+				img.SavePng(System.IO.Path.Combine(ModEntry.ModDir, "_select_debug.png"));
+			}
+		}
+		catch (Exception ex) { SetStatus("Couldn't read the preview: " + ex.Message); }
+		finally
+		{
+			Recolorer.IdPickKey = null;
+			if (_preview != null && GodotObject.IsInstanceValid(_preview)) Recolorer.Apply(_preview);
+		}
+		if (slot == null)
+		{
+			SetStatus("No part there (background or an effect). Click directly on the character.");
+			return;
+		}
+		if (!_partNames.Contains(slot)) PopulateParts();
+		SelectPart(slot);
+		SetStatus($"Selected part: {slot}");
+	}
+
+	/// <summary>Test hook: the tint "Pick" button, then a click on the preview at (x, y).</summary>
+	public static void DevPickTint(float x, float y)
+	{
+		BeginPickTint();
+		_pickArmed = false;
+		_pickPos = new Vector2(x, y);
+		_pickFrames = 3;
+		ApplyPreviewBypass();
+	}
+
+	/// <summary>Test hook: same as clicking the preview at (x, y) to select the part there.</summary>
+	public static void DevSelectAt(float x, float y) => BeginSelect(new Vector2(x, y));
+
+	public static string? CurrentPart => _currentPart;
+	public static bool SelectDebug;   // test hook: log the ID-pass pixel and save the ID frame
+
 	private static void OnPreviewInput(InputEvent ev)
 	{
-		if (!_pickArmed || ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb)
+		if (ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb)
 			return;
+		if (!_pickArmed)
+		{
+			// Not picking a color: a click selects the part under the cursor.
+			if (_selectFrames == 0 && _pickFrames == 0) BeginSelect(mb.Position);
+			return;
+		}
 		_pickArmed = false;
 		_pickPos = mb.Position;
 		_pickFrames = 3; // show the original colors for a couple of frames, then read the pixel
@@ -721,16 +904,17 @@ internal static class EditorUi
 	/// <summary>Test hook: export the current character's parts (same as the button, minus opening Explorer).</summary>
 	public static int DevExport()
 	{
-		if (_current == null || _preview?.Body is not Node body)
+		if (_current == null || PreviewBody is not Node body)
 			throw new InvalidOperationException("no preview");
 		return ModelSwap.Export(_current.Key, body);
 	}
 
 	public static void DevInspect()
 	{
-		if (_preview?.Body is not Node body)
+		if (PreviewBody is not Node body)
 		{
 			ModEntry.Log("inspect: no preview body");
+			if (_preview != null && GodotObject.IsInstanceValid(_preview)) DumpTree(_preview, 0);
 			return;
 		}
 		ModEntry.Log($"inspect: body class={body.GetClass()} normal_material={body.Call("get_normal_material")}");
@@ -739,6 +923,51 @@ internal static class EditorUi
 			string extra = c.GetClass() == "SpineSlotNode" ? $" slot={c.Get("slot_name")} mat={c.Get("normal_material")} props=" + string.Join(",", c.GetPropertyList().Select(p => p["name"].AsString()).Where(n => n.Contains("material") || n.Contains("slot"))) : "";
 			ModEntry.Log($"inspect:   child {c.Name} class={c.GetClass()}{extra}");
 		}
+		// The whole creature, not just the Spine body: effects like the Necrobinder's head flames can be
+		// separate nodes (particles / sprites) or slots with their own material (2026-09-27).
+		if (_preview != null && GodotObject.IsInstanceValid(_preview)) DumpTree(_preview, 0);
+	}
+
+	private static void DumpTree(Node n, int depth)
+	{
+		if (depth > 12) return;
+		string info = $"{new string(' ', depth * 2)}{n.Name} [{n.GetClass()}]";
+		try
+		{
+			if (n is CanvasItem ci)
+			{
+				info += ci.Visible ? "" : " hidden";
+				if (ci.Material is { } m) info += $" material={m.GetClass()}:{m.ResourcePath}" + (m is ShaderMaterial sm && sm.Shader != null ? $" shader={sm.Shader.ResourcePath}" : "") + (m is CanvasItemMaterial cim ? $" blend={cim.BlendMode}" : "");
+				if (ci.Modulate != Colors.White) info += $" modulate={ci.Modulate}";
+				if (ci.SelfModulate != Colors.White) info += $" self_modulate={ci.SelfModulate}";
+			}
+			foreach (var prop in new[] { "texture", "slot_name", "normal_material", "additive_material", "process_material", "sprite_frames", "skeleton_data_res" })
+			{
+				try { var v = n.Get(prop); if (v.VariantType != Variant.Type.Nil) info += $" {prop}={(v.Obj is Resource r ? r.GetClass() + ":" + r.ResourcePath : v.ToString())}"; } catch { }
+			}
+		}
+		catch { }
+		ModEntry.Log("tree: " + info);
+		try
+		{
+			// Where an effect's color comes from: shader parameters, and particle color/gradients.
+			if (n is CanvasItem ci2 && ci2.Material is ShaderMaterial sm2 && sm2.Shader != null)
+				foreach (var u in sm2.Shader.GetShaderUniformList())
+				{
+					string name = u.AsGodotDictionary()["name"].AsString();
+					var v = sm2.GetShaderParameter(name);
+					string desc = v.Obj is GradientTexture1D gt && gt.Gradient != null ? $"Gradient[{string.Join(" ", gt.Gradient.Colors)}]"
+						: v.Obj is Resource r ? r.GetClass() + ":" + r.ResourcePath : v.ToString();
+					ModEntry.Log($"tree: {new string(' ', depth * 2)}  uniform {name} = {desc}");
+				}
+			if (n.Get("process_material").Obj is ParticleProcessMaterial pm)
+			{
+				string ramp(Texture2D? t) => t is GradientTexture1D g && g.Gradient != null ? string.Join(" ", g.Gradient.Colors) : t?.GetClass() ?? "none";
+				ModEntry.Log($"tree: {new string(' ', depth * 2)}  particles color={pm.Color} ramp={ramp(pm.ColorRamp)} initRamp={ramp(pm.ColorInitialRamp)}");
+			}
+		}
+		catch (Exception ex) { ModEntry.Log("tree: uniform read failed " + ex.Message); }
+		foreach (Node c in n.GetChildren()) DumpTree(c, depth + 1);
 	}
 
 	/// <summary>Test hook: move a slider exactly as a user would (goes through the normal edit path).</summary>
@@ -747,6 +976,7 @@ internal static class EditorUi
 		HSlider s = name switch
 		{
 			"hue" => _hue, "saturation" => _sat, "brightness" => _bright, "contrast" => _contrast, "tint" => _tintAmt,
+			"picopacity" => _picAmt, "picsize" => _picScale,
 			_ => throw new ArgumentException("unknown slider " + name)
 		};
 		s.Value = value;
@@ -768,6 +998,22 @@ internal static class EditorUi
 			{
 				SetStatus("That spot is empty background — click directly on the creature.");
 				_pickArmed = true;
+			}
+			else if (_pickWhat == PickWhat.Tint)
+			{
+				c.A = 1f;
+				Edit(tt => { tt.Tint = Recolorer.ToHex(c); if (tt.TintStrength < 0.001f) tt.TintStrength = 0.6f; });
+				LoadControls();
+				SetStatus($"Tint color set to {Recolorer.ToHex(c)}.");
+			}
+			else if (_pickWhat == PickWhat.SwapTo && t != null && _pickSwap >= 0 && _pickSwap < t.Swaps.Count)
+			{
+				c.A = 1f;
+				t.Swaps[_pickSwap].To = Recolorer.ToHex(c);
+				Changed();
+				RebuildSwaps();
+				SetStatus($"Swap #{_pickSwap + 1} now turns into {Recolorer.ToHex(c)}.");
+				_pickSwap = -1;
 			}
 			else if (t != null && _pickSwap >= 0 && _pickSwap < t.Swaps.Count)
 			{
@@ -831,13 +1077,26 @@ internal static class EditorUi
 	private static void PopulateParts()
 	{
 		_partNames.Clear();
-		if (_preview?.Body is Node body && body.GetClass() == "SpineSprite")
-			_partNames.AddRange(Recolorer.GetSlotNames(body).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+		_groupSizes.Clear();
+		var slots = PreviewBody is Node body && body.GetClass() == "SpineSprite" ? Recolorer.GetSlotNames(body) : new List<string>();
+		var effects = _preview != null && GodotObject.IsInstanceValid(_preview) ? EffectRecolor.PartNames(_preview) : new List<string>();
+		// 1) groups, biggest first: "Clothes (12 parts)", "Left arm (9 parts)", ..., "All flames"
+		var groups = PartGroups.For(slots);
+		if (effects.Contains(EffectRecolor.AllFlames))
+			groups.Add((EffectRecolor.AllFlames, PartGroups.MembersOf(EffectRecolor.AllFlames, slots)));
+		foreach (var (key, members) in groups.OrderByDescending(g => g.Members.Count))
+		{
+			_partNames.Add(key);
+			_groupSizes[key] = members.Count;
+		}
+		// 2) then every individual piece, and the individual effects ("Effect: Head flames")
+		_partNames.AddRange(slots.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+		_partNames.AddRange(effects.Where(e => e != EffectRecolor.AllFlames));
 		_suppress = true;
 		_part.Clear();
 		_part.AddItem("Whole body");
 		foreach (string n in _partNames)
-			_part.AddItem(n);
+			_part.AddItem(PartLabel(n));
 		int sel = _currentPart == null ? 0 : _partNames.IndexOf(_currentPart) + 1;
 		_part.Select(Math.Max(sel, 0));
 		_suppress = false;
@@ -851,7 +1110,19 @@ internal static class EditorUi
 		var parts = Palette.Get(_current.Key)?.Parts;
 		_part.SetItemText(0, parts is { Count: > 0 } ? $"Whole body  ({parts.Count} part(s) customised)" : "Whole body");
 		for (int i = 0; i < _partNames.Count; i++)
-			_part.SetItemText(i + 1, (parts != null && parts.ContainsKey(_partNames[i]) ? "* " : "   ") + _partNames[i]);
+			_part.SetItemText(i + 1, (parts != null && parts.ContainsKey(_partNames[i]) ? "* " : "   ") + PartLabel(_partNames[i]));
+	}
+
+	private static readonly Dictionary<string, int> _groupSizes = new();
+
+	// "grp:Left arm" → "Left arm  (9 parts)"; "fx:Head flames" → "Effect: Head flames"; slots unchanged.
+	private static string PartLabel(string key)
+	{
+		if (key.StartsWith(PartGroups.Prefix))
+			return $"{key[PartGroups.Prefix.Length..]}  ({(_groupSizes.TryGetValue(key, out var n) ? n : 0)} parts)";
+		if (key == EffectRecolor.AllFlames)
+			return EffectRecolor.Display(key);
+		return EffectRecolor.Display(key);
 	}
 
 	public static void SelectPart(string? part)
@@ -859,7 +1130,7 @@ internal static class EditorUi
 		if (part != null && !_partNames.Contains(part))
 			throw new ArgumentException("unknown part " + part);
 		_currentPart = part;
-		_settingsHeader.Text = part == null ? "Whole body" : "Part: " + part;
+		_settingsHeader.Text = part == null ? "Whole body" : (part.StartsWith(PartGroups.Prefix) || part == EffectRecolor.AllFlames ? "Group: " : "Part: ") + PartLabel(part);
 		_pickSwap = -1;
 		_pickArmed = false;
 		_suppress = true;
@@ -896,6 +1167,39 @@ internal static class EditorUi
 		Changed();
 	}
 
+	// Picture texture: the OS file picker, then copy the picture into textures/ and use it here.
+	private static void ChoosePicture()
+	{
+		if (_current == null) return;
+		var dlg = new FileDialog
+		{
+			FileMode = FileDialog.FileModeEnum.OpenFile, Access = FileDialog.AccessEnum.Filesystem,
+			UseNativeDialog = true, Title = "Choose a picture to use as a texture",
+			Filters = new[] { "*.png, *.jpg, *.jpeg, *.webp ; Pictures" },
+		};
+		dlg.FileSelected += path =>
+		{
+			try { SetPicture(path); }
+			catch (Exception ex) { SetStatus("Couldn't use that picture: " + ex.Message); }
+			dlg.QueueFree();
+		};
+		dlg.Canceled += () => dlg.QueueFree();
+		_layer!.AddChild(dlg);
+		dlg.PopupCentered(new Vector2I(900, 600));
+	}
+
+	/// <summary>Use a picture file on the current part/body (also the test hook "picture &lt;path&gt;").</summary>
+	public static void SetPicture(string path)
+	{
+		string name = PictureStore.Import(path);
+		bool wasSuppressed = _suppress;
+		Edit(t => { t.Picture = name; if (t.PictureOpacity <= 0.001f) t.PictureOpacity = 0.6f; });
+		LoadControls();
+		SetStatus($"Using picture {name}. Adjust Picture opacity, size and mode.");
+	}
+
+	public static void DevPictureMode(string mode) => Edit(t => t.PictureMode = mode == "texture" ? "texture" : "colors");
+
 	private static void LoadControls()
 	{
 		var t = ViewTarget();
@@ -907,6 +1211,10 @@ internal static class EditorUi
 		_contrast.Value = t.Contrast;
 		_tint.Color = Recolorer.ParseColor(t.Tint, Colors.White);
 		_tintAmt.Value = t.TintStrength;
+		_picName.Text = string.IsNullOrEmpty(t.Picture) ? "none" : t.Picture + (PictureStore.Get(t.Picture) == null ? "  (missing file)" : "");
+		_picMode.Select(t.PictureMode == "texture" ? 1 : 0);
+		_picAmt.Value = t.PictureOpacity;
+		_picScale.Value = t.PictureScale;
 		_suppress = false;
 	}
 
@@ -935,6 +1243,9 @@ internal static class EditorUi
 			var to = new ColorPickerButton { Color = Recolorer.ParseColor(swap.To, Colors.Blue), CustomMinimumSize = new Vector2(56, 32), EditAlpha = false, TooltipText = "New color" };
 			to.ColorChanged += c => Edit(tt => tt.Swaps[idx].To = Recolorer.ToHex(c));
 			row.AddChild(to);
+			var pickTo = new Button { Text = "Pick", TooltipText = "Click, then click a spot on the preview to use its color as the new color" };
+			pickTo.Pressed += () => BeginPickTo(idx);
+			row.AddChild(pickTo);
 
 			row.AddChild(new Label { Text = "  Range" });
 			var range = new HSlider { MinValue = 0.02, MaxValue = 1, Step = 0.01, Value = swap.Range, CustomMinimumSize = new Vector2(110, 0), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
@@ -972,7 +1283,7 @@ internal static class EditorUi
 		row.AddChild(slider);
 		row.AddChild(value);
 		var reset = new Button { Text = "↺", TooltipText = "Reset" };
-		double def = name switch { "Hue shift" => 0, "Tint strength" => 0, _ => 1 };
+		double def = name switch { "Hue shift" => 0, "Tint strength" => 0, "Picture opacity" => 0.6, "Picture size" => 4, _ => 1 };
 		reset.Pressed += () => slider.Value = def;
 		row.AddChild(reset);
 		parent.AddChild(row);

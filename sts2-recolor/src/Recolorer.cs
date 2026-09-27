@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.RestSite;
@@ -40,6 +41,12 @@ internal static class Recolorer
 			{
 				key = KeyFromScenePath(node.SceneFilePath, "/merchant/characters/", "_merchant");
 			}
+			else if (node is Control && node.SceneFilePath.Contains("/events/background_scenes/", StringComparison.Ordinal))
+			{
+				// An Ancient's event scene (res://scenes/events/background_scenes/<ancient>.tscn)
+				string? k = node.HasMeta(KeyMeta) ? node.GetMeta(KeyMeta).AsString() : KeyFromScenePath(node.SceneFilePath, "/events/background_scenes/", "");
+				if (k != null && IsAncientKey(k)) key = k;
+			}
 			if (string.IsNullOrEmpty(key))
 				return;
 			node.SetMeta(KeyMeta, key);
@@ -52,6 +59,17 @@ internal static class Recolorer
 		{
 			ModEntry.Log($"OnNodeAdded failed: {ex}");
 		}
+	}
+
+	private static HashSet<string>? _ancientKeys;
+	public static bool IsAncientKey(string key)
+	{
+		if (_ancientKeys == null)
+		{
+			try { _ancientKeys = MegaCrit.Sts2.Core.Models.ModelDb.AllAncients.Select(a => a.Id.Entry.ToLowerInvariant()).ToHashSet(); }
+			catch { return false; }
+		}
+		return _ancientKeys.Contains(key);
 	}
 
 	private static string? KeyFromScenePath(string path, string folder, string suffix)
@@ -85,10 +103,14 @@ internal static class Recolorer
 			ModelSwap.EnsureApplied(key, spineNode);
 		TargetRecolor? t = Palette.Get(key);
 		bool highlighted = Highlight is { } hl && hl.key == key;
-		bool active = ((t != null && !t.IsIdentity) || highlighted) && !root.HasMeta("sts2rc_bypass");
+		bool idPass = IdPickKey == key;
+		bool active = (((t != null && !t.IsIdentity) || highlighted) && !root.HasMeta("sts2rc_bypass")) || idPass;
 		if (active && t == null)
 			t = new TargetRecolor();
 		Walk(root, root, t, active);
+		// Fire / particle effects next to the body (e.g. the Necrobinder's head flames).
+		try { EffectRecolor.Apply(root, key, t, active); }
+		catch (Exception ex) { ModEntry.Log($"effect recolor failed: {ex.Message}"); }
 	}
 
 	public static Node? FindSpine(Node n)
@@ -107,10 +129,19 @@ internal static class Recolorer
 		if (node != root && node.HasMeta(KeyMeta))
 			return;
 
+		bool ancient = IsAncientKey(FindKey(root));
 		if (node.GetClass() == "SpineSprite")
 			ApplySpine(node, t, active);
-		else if (node is Sprite2D or AnimatedSprite2D or Polygon2D)
-			ApplyCanvasItem((CanvasItem)node, t, active);
+		else if (node is Sprite2D or AnimatedSprite2D or Polygon2D && !ancient)
+			ApplyCanvasItem((CanvasItem)node, t, active); // (Ancient scenes: never the room's lights/props)
+		else if (ancient && node is TextureRect tr && tr.Texture is { } tex && tex.ResourcePath.Contains("/images/ancients/", StringComparison.Ordinal))
+		{
+			// Placeholder Ancients (Darv, Pael, Vakuu, ...) are one painted picture.
+			if (tr.Material == null || (tr.Material is ShaderMaterial m0 && m0.Shader == Shader))
+				ApplyCanvasItem(tr, t, active);
+			else
+				ApplyPictureCopy(tr, t, active); // drawn through the game's own shader (water ripples): recolor a copy
+		}
 
 		foreach (Node child in node.GetChildren())
 			Walk(root, child, t, active);
@@ -160,6 +191,22 @@ internal static class Recolorer
 	/// <summary>Editor hook: briefly paints one part bright yellow so you can see which piece it is.</summary>
 	public static (string key, string part)? Highlight;
 	private static readonly TargetRecolor HighlightLook = new() { Tint = "#ffe030", TintStrength = 0.85f, Brightness = 1.25f };
+	public static TargetRecolor HighlightLookPublic => HighlightLook;
+
+	/// <summary>Click-to-select: while set to a creature key, every slot of that creature draws as its ID color.</summary>
+	public static string? IdPickKey;
+	/// <summary>The slot order the ID colors were assigned in (index i → color IdColor(i)).</summary>
+	public static List<string> IdSlots = new();
+
+	public static Vector3 IdColor(int i) => new Vector3((i + 1) * 3 / 255f, 0.5f, 0.25f);
+
+	/// <summary>Which slot an ID-pass pixel belongs to, or null (background / an effect / not an ID pixel).</summary>
+	public static string? SlotFromIdPixel(Color c)
+	{
+		if (c.A < 0.5f || Math.Abs(c.G - 0.5f) > 0.06f || Math.Abs(c.B - 0.25f) > 0.06f) return null;
+		int i = (int)Math.Round(c.R * 255f / 3f) - 1;
+		return i >= 0 && i < IdSlots.Count ? IdSlots[i] : null;
+	}
 
 	/// <summary>Slot names of a SpineSprite, in skeleton draw order.</summary>
 	public static List<string> GetSlotNames(Node spine)
@@ -191,9 +238,31 @@ internal static class Recolorer
 		var wanted = new Dictionary<string, TargetRecolor>();
 		if (t?.Parts != null)
 			foreach (var kv in t.Parts)
-				wanted[kv.Key] = kv.Value;
+				if (!kv.Key.StartsWith(EffectRecolor.Prefix) && !kv.Key.StartsWith(PartGroups.Prefix))
+					wanted[kv.Key] = kv.Value;
+		if (IdPickKey == key)
+		{
+			// Click-to-select pass: every slot gets its own flat ID color, including additive/glow slots.
+			IdSlots = GetSlotNames(spine);
+			foreach (var slot in IdSlots) wanted[slot] = HighlightLook;
+		}
+		// Groups ("Left arm", "Clothes", "All flames"...): pieces without their own colors take the colors of the
+		// smallest group covering them.
+		List<string>? slots = null;
+		if (t?.Parts != null && t.Parts.Keys.Any(k => k.StartsWith(PartGroups.Prefix) || k == EffectRecolor.AllFlames))
+		{
+			slots = GetSlotNames(spine);
+			foreach (var (slot, look) in PartGroups.Resolve(slots, t.Parts))
+				if (!wanted.ContainsKey(slot)) wanted[slot] = look;
+		}
 		if (bodyMat != null && Highlight is { } hl && hl.key == key)
-			wanted[hl.part] = HighlightLook;
+		{
+			if (hl.part.StartsWith(PartGroups.Prefix) || hl.part == EffectRecolor.AllFlames)
+				foreach (var slot in PartGroups.MembersOf(hl.part, slots ?? GetSlotNames(spine)))
+					wanted[slot] = HighlightLook;
+			else if (!hl.part.StartsWith(EffectRecolor.Prefix))
+				wanted[hl.part] = HighlightLook;
+		}
 
 		// Existing slot nodes (the game's own, or ones we added earlier), by slot name.
 		var slotNodes = new Dictionary<string, Node>();
@@ -221,6 +290,13 @@ internal static class Recolorer
 				node.Set("normal_material", node.HasMeta(PartOrigMeta) ? node.GetMeta(PartOrigMeta) : new Variant());
 				node.RemoveMeta(PartMeta);
 				node.RemoveMeta(PartOrigMeta);
+				// put back the game's own glow/blend materials swapped out for a click-to-select pass
+				foreach (string blend in new[] { "additive_material", "multiply_material", "screen_material" })
+					if (node.HasMeta("sts2rc_idorig_" + blend))
+					{
+						node.Set(blend, node.GetMeta("sts2rc_idorig_" + blend));
+						node.RemoveMeta("sts2rc_idorig_" + blend);
+					}
 			}
 		}
 
@@ -250,7 +326,24 @@ internal static class Recolorer
 			if (bodyMat != null)
 				CopyGameHsv(bodyMat, mat);
 			Configure(mat, look);
+			int idIndex = IdPickKey == key ? IdSlots.IndexOf(slot) : -1;
+			mat.SetShaderParameter("rc_id_on", idIndex >= 0 ? 1f : 0f);
+			if (idIndex >= 0) mat.SetShaderParameter("rc_id", IdColor(idIndex));
 			node.Set("normal_material", mat);
+			// glow slots draw with their additive material: during the ID pass use ours for those too
+			foreach (string blend in new[] { "additive_material", "multiply_material", "screen_material" })
+			{
+				if (idIndex >= 0)
+				{
+					if (!node.HasMeta("sts2rc_idorig_" + blend)) node.SetMeta("sts2rc_idorig_" + blend, node.Get(blend));
+					node.Set(blend, mat);
+				}
+				else if (node.HasMeta("sts2rc_idorig_" + blend))
+				{
+					node.Set(blend, node.GetMeta("sts2rc_idorig_" + blend));
+					node.RemoveMeta("sts2rc_idorig_" + blend);
+				}
+			}
 		}
 	}
 
@@ -277,6 +370,41 @@ internal static class Recolorer
 		{
 			item.Material = null;
 		}
+	}
+
+	// Orobas / Tanx: their picture goes through the game's water shader, so the recolor shader can't be added.
+	// Instead the picture itself is replaced by a recolored copy (hue, saturation, brightness, contrast, tint).
+	private const string OrigTexMeta = "sts2rc_origtex";
+	private const string CopyLookMeta = "sts2rc_copylook";
+
+	private static void ApplyPictureCopy(TextureRect tr, TargetRecolor? t, bool active)
+	{
+		if (!tr.HasMeta(OrigTexMeta)) tr.SetMeta(OrigTexMeta, tr.Texture);
+		var orig = tr.GetMeta(OrigTexMeta).As<Texture2D>();
+		if (!active || t == null || !t.Enabled || orig == null)
+		{
+			if (orig != null && tr.Texture != orig) tr.Texture = orig;
+			tr.RemoveMeta(CopyLookMeta);
+			return;
+		}
+		string sig = $"{t.Hue}|{t.Saturation}|{t.Brightness}|{t.Contrast}|{t.Tint}|{t.TintStrength}";
+		if (tr.HasMeta(CopyLookMeta) && tr.GetMeta(CopyLookMeta).AsString() == sig) return;
+		var img = orig.GetImage();
+		if (img == null) return;
+		if (img.IsCompressed()) img.Decompress();
+		img.Convert(Image.Format.Rgba8);
+		byte[] data = img.GetData();
+		for (int i = 0; i < data.Length; i += 4)
+		{
+			if (data[i + 3] == 0) continue;
+			var c = EffectRecolor.Transform(new Color(data[i] / 255f, data[i + 1] / 255f, data[i + 2] / 255f, 1f), t);
+			data[i] = (byte)Math.Clamp((int)(c.R * 255f + 0.5f), 0, 255);
+			data[i + 1] = (byte)Math.Clamp((int)(c.G * 255f + 0.5f), 0, 255);
+			data[i + 2] = (byte)Math.Clamp((int)(c.B * 255f + 0.5f), 0, 255);
+		}
+		var outImg = Image.CreateFromData(img.GetWidth(), img.GetHeight(), false, Image.Format.Rgba8, data);
+		tr.Texture = ImageTexture.CreateFromImage(outImg);
+		tr.SetMeta(CopyLookMeta, sig);
 	}
 
 	private static ShaderMaterial NewMaterial(Material? previous)
@@ -320,6 +448,11 @@ internal static class Recolorer
 			src[i] = new Vector4(a.H, a.S, a.V, t.Swaps[i].Range);
 			dst[i] = new Vector4(b.H, b.S, b.V, 0f);
 		}
+		Texture2D? pic = t.HasPicture ? PictureStore.Get(t.Picture) : null;
+		mat.SetShaderParameter("rc_pic_amt", pic != null ? Math.Clamp(t.PictureOpacity, 0f, 1f) : 0f);
+		if (pic != null) mat.SetShaderParameter("rc_pic", pic);
+		mat.SetShaderParameter("rc_pic_mode", t.PictureMode == "texture" ? 1 : 0);
+		mat.SetShaderParameter("rc_pic_scale", Math.Clamp(t.PictureScale, 0.1f, 64f));
 		mat.SetShaderParameter("rc_swap_count", n);
 		mat.SetShaderParameter("rc_src", src);
 		mat.SetShaderParameter("rc_dst", dst);

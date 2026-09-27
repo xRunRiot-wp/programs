@@ -12,7 +12,7 @@ namespace SpireRecolor;
 public static class ModEntry
 {
 	public const string ModId = "sts2_recolor";
-	private static readonly Harmony Harmony = new("xrunri." + ModId);
+	private static readonly Harmony Harmony = new("mod." + ModId);
 	private static bool _hooked;
 	public static string ModDir { get; private set; } = ".";
 	private static bool _f8WasDown;
@@ -73,6 +73,7 @@ public static class ModEntry
 			}
 			EditorUi.Tick();
 			DevCommands.Tick();
+			EffectRecolor.Tick();
 		}
 		catch (Exception ex)
 		{

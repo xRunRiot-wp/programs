@@ -50,6 +50,81 @@ public static partial class DamageChartsMod
     private const int PendingFreshFrames = 300; // ~5 s at 60 fps: covers the hooks awaited mid-Damage
     private const int MaxSaneHit = 100_000;    // no real single hit is this big; placeholder HP pools are
 
+    // Debuff-value credits riding on the current hit to a creature (see SupportKind). Frac × each part of
+    // the hit (HP lost, blocked); Abs once per hit. Set in DamagePrefix, spent as the hit lands.
+    private sealed class SupportTag { public int Slot; public SupportKind Kind; public double Frac; public double Abs; }
+    private static readonly Dictionary<Creature, List<SupportTag>> _supportTags = new();
+
+    private static int ApplierSlot(MegaCrit.Sts2.Core.Models.PowerModel p)
+    {
+        try
+        {
+            var a = p.Applier;
+            if (a == null) return -1;
+            if (a.IsPlayer) return SlotOf(a.Player);
+            if (a.IsPet) return SlotOf(a.PetOwner);
+        }
+        catch { }
+        return -1;
+    }
+
+    private static void TagSupport(Creature t, decimal amount, MegaCrit.Sts2.Core.ValueProps.ValueProp props, Creature? dealer, CardModel? cardSource)
+    {
+        _supportTags.Remove(t);
+        try
+        {
+            var tags = new List<SupportTag>();
+            if (!t.IsPlayer)
+            {
+                // A player (or pet/DoT) hitting a Vulnerable enemy: the game's own multiplier for THIS hit.
+                var v = t.GetPower<MegaCrit.Sts2.Core.Models.Powers.VulnerablePower>();
+                if (v != null)
+                {
+                    decimal m = v.ModifyDamageMultiplicative(t, amount, props, dealer, cardSource, null);
+                    int s = ApplierSlot(v);
+                    if (m > 1m && s >= 0) tags.Add(new SupportTag { Slot = s, Kind = SupportKind.Vulnerable, Frac = 1.0 - 1.0 / (double)m });
+                }
+            }
+            else if (dealer != null && dealer.IsMonster)
+            {
+                // An enemy hitting a player while Weak and/or at negative Strength.
+                double mW = 1.0;
+                var w = dealer.GetPower<MegaCrit.Sts2.Core.Models.Powers.WeakPower>();
+                if (w != null)
+                {
+                    decimal m = w.ModifyDamageMultiplicative(t, amount, props, dealer, cardSource, null);
+                    int s = ApplierSlot(w);
+                    if (m > 0m && m < 1m)
+                    {
+                        mW = (double)m;
+                        if (s >= 0) tags.Add(new SupportTag { Slot = s, Kind = SupportKind.Weak, Frac = 1.0 / (double)m - 1.0 });
+                    }
+                }
+                var st = dealer.GetPower<MegaCrit.Sts2.Core.Models.Powers.StrengthPower>();
+                if (st != null && st.Amount < 0)
+                {
+                    decimal add = st.ModifyDamageAdditive(t, amount, props, dealer, cardSource, null);
+                    int s = ApplierSlot(st);
+                    if (add < 0m && s >= 0) tags.Add(new SupportTag { Slot = s, Kind = SupportKind.StrengthDown, Abs = (double)(-add) * mW });
+                }
+            }
+            if (tags.Count > 0) _supportTags[t] = tags;
+        }
+        catch { }
+    }
+
+    // Credit the debuff value for `amount` of this hit (HP lost or blocked) landing on `c`.
+    private static void ApplySupport(Creature c, int amount)
+    {
+        if (amount <= 0 || !_supportTags.TryGetValue(c, out var tags)) return;
+        foreach (var tag in tags)
+        {
+            double v = tag.Frac * amount + tag.Abs;
+            tag.Abs = 0; // absolute part only once per hit
+            if (v > 0) _tracker.AddSupport(tag.Slot, tag.Kind, v);
+        }
+    }
+
     private static void SetPending(Creature c, (string Label, Creature? Dealer, string? Icon, DotKind Dot) p)
     {
         _pending[c] = p;
@@ -59,7 +134,7 @@ public static partial class DamageChartsMod
     private static bool PendingFresh(Creature c)
         => _pending.ContainsKey(c) && _pendingFrame.TryGetValue(c, out long f) && _frame - f <= PendingFreshFrames;
 
-    private static void ConsumePending(Creature c) { _pending.Remove(c); _pendingFrame.Remove(c); }
+    private static void ConsumePending(Creature c) { _pending.Remove(c); _pendingFrame.Remove(c); _supportTags.Remove(c); }
     // Set by a power's hook just before it deals damage; consumed by the next non-card hit. Only valid
     // for ~1 frame (a damaging hook stamps-and-deals synchronously) so a stale stamp from a passive
     // relic hook can't mislabel a later unrelated hit (e.g. a potion).
@@ -469,6 +544,7 @@ public static partial class DamageChartsMod
             {
                 int slot = SlotOf(__instance.Player);
                 if (slot >= 0) _tracker.AddBlocked(slot, (int)__result);
+                if (PendingFresh(__instance)) ApplySupport(__instance, (int)__result);
                 return;
             }
             // Enemy block soaked part of a player's hit: that still counts as damage done (Joseph:
@@ -483,6 +559,7 @@ public static partial class DamageChartsMod
             int blocked = (int)__result;
             bool fullyBlocked = __result >= amount;
             _tracker.AddDealt(round, dslot, blocked, src, pend.Icon, countHit: fullyBlocked);
+            ApplySupport(__instance, blocked);
             _tracker.AddLog(round, $"{src} → {TextHelper.SafeGetText(() => __instance.Monster!.Title) ?? "Enemy"}  {blocked} (blocked)", false);
         }
         catch { }
@@ -711,7 +788,7 @@ public static partial class DamageChartsMod
         catch { }
     }
 
-    private static void DamagePrefix(IEnumerable<Creature> targets, decimal amount, Creature dealer, CardModel cardSource)
+    private static void DamagePrefix(IEnumerable<Creature> targets, decimal amount, MegaCrit.Sts2.Core.ValueProps.ValueProp props, Creature dealer, CardModel cardSource)
     {
         try
         {
@@ -770,6 +847,7 @@ public static partial class DamageChartsMod
                     owner = td == DotKind.Poison ? PowerApplier(t, typeof(MegaCrit.Sts2.Core.Models.Powers.PoisonPower))
                           : srcType != null ? SourceOwner(t, srcType) : null;
                 SetPending(t, (tl, owner, ti, td));
+                TagSupport(t, amount, props, dealer, cardSource);
             }
         }
         catch { /* never disrupt damage resolution */ }
@@ -868,7 +946,8 @@ public static partial class DamageChartsMod
                 // On-demand run recap: a full-screen takeover shown out of combat (e.g. over the run's
                 // victory/death screen). Unlike the in-combat takeover this is NOT gated by blocking UI,
                 // so it can appear on top of the game's end screen.
-                _bars?.Hide(); _tooltip?.Hide(); _meter?.Hide(); _summaryActive = false;
+                // The fight summary (if up) stays pending underneath and comes back when the recap closes.
+                _bars?.Hide(); _tooltip?.Hide(); _meter?.Hide(); _post?.Hide();
                 _detail.SummaryMode = false; _detail.RecapMode = true; _detail.ShowRunHistory = false; _detail.UiScaleMul = _uiScale; _detail.SetVisible(true);
                 _detail.Render(_run.RunSourceSnapshot(), _run.RunChartSnapshot(), Palette);
                 _detail.UpdateMouse(Input.IsMouseButtonPressed(MouseButton.Left));
@@ -964,15 +1043,16 @@ public static partial class DamageChartsMod
             {
                 _detailVisible = !_detailVisible; _detail?.SetVisible(_detailVisible);
             }
-            else if (_summaryActive)
-            {
-                // The end-of-combat summary takes priority: the hotkey dismisses it (next press opens recap).
-                _summaryActive = false; _detail?.SetVisible(false);
-            }
             else if (_recapEnabled && _run.HasData())
             {
+                // Opens the run recap on top of whatever is up (fight summary, meter); closing it brings
+                // those back exactly as they were.
                 _recapVisible = !_recapVisible;
                 if (!_recapVisible) _detail?.SetVisible(false);
+            }
+            else if (_summaryActive)
+            {
+                _summaryActive = false; _detail?.SetVisible(false);
             }
             else { _detailVisible = !_detailVisible; _detail?.SetVisible(_detailVisible); }
         }
@@ -1015,7 +1095,7 @@ public static partial class DamageChartsMod
         _localSlot = localSlot;
         _tracker.Reset(_players.Count, labels, localSlot, icons);
         Palette = colors;
-        _pending.Clear(); _pendingFrame.Clear();
+        _pending.Clear(); _pendingFrame.Clear(); _supportTags.Clear();
         UnsubscribeAll();
         EnsureViews();
         GD.Print($"[STS2 Damage] combat start ({_players.Count} player(s))");
@@ -1024,7 +1104,7 @@ public static partial class DamageChartsMod
     private static void OnCombatEnd()
     {
         UnsubscribeAll();
-        _pending.Clear(); _pendingFrame.Clear();
+        _pending.Clear(); _pendingFrame.Clear(); _supportTags.Clear();
         _bars?.Hide();
         _tooltip?.Hide();
         _meter?.Hide();
@@ -1100,7 +1180,7 @@ public static partial class DamageChartsMod
         if (_meter.TakeRowClick())
         {
             if (inCombat && !postFight) { _detailVisible = true; _detail?.SetVisible(true); }
-            else if (_recapEnabled && _run.HasData()) { _summaryActive = false; _recapVisible = true; } // → run recap
+            else if (_recapEnabled && _run.HasData()) { _recapVisible = true; } // → run recap (summary returns after)
         }
     }
 
@@ -1258,7 +1338,7 @@ public static partial class DamageChartsMod
             {
                 int slot = SlotOf(creature.Player);
                 if (slot < 0) return;
-                if (PendingFresh(creature)) ConsumePending(creature); else pend = default;
+                if (PendingFresh(creature)) { ApplySupport(creature, lost); ConsumePending(creature); } else pend = default;
                 string attacker = (pend.Dealer != null && pend.Dealer.IsMonster)
                     ? (TextHelper.SafeGetText(() => pend.Dealer!.Monster!.Title) ?? "Enemy")
                     : (pend.Label ?? ConsumeActive().Label ?? "Unknown");
@@ -1277,7 +1357,7 @@ public static partial class DamageChartsMod
                 if (act.Label == null) return;
                 pend = (act.Label, null, act.Icon, DotKind.None);
             }
-            else ConsumePending(creature);
+            else { ApplySupport(creature, lost); ConsumePending(creature); }
             int dslot = DealtSlot(pend.Dealer); // pet → its owner; dealer-less → applier/owner or you
             if (dslot < 0) return;              // genuine enemy-on-enemy, not player damage
             string src = pend.Label ?? "Status"; string? icon = pend.Icon;
