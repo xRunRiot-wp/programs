@@ -1,11 +1,13 @@
-"""Build the portable PixelDex folder (no .exe, opens in the browser).
+"""Build the portable PixelDex folder (no .exe; PixelDex.vbs opens it in its own window with the bundled Python).
 
 Reads Pixelmon's own data files from the mod jar (species, palettes, sprites,
 evolutions, structure spawns) plus the v1 spawn tables (baseline/v1_spawns.json.gz,
 which hold the per-biome % numbers PixelDex v1 shipped with), and writes:
 
-    <out>/PixelDex/PixelDex.html   <- double-click this
-    <out>/PixelDex/app/...          data.js, app.js, style.css, sprites/
+    <out>/PixelDex/PixelDex.vbs    <- double-click this
+    <out>/PixelDex/pixeldex.pyw     the window (pywebview, like v1)
+    <out>/PixelDex/app/...          index.html, data.js, app.js, style.css, sprites/
+    <out>/PixelDex/runtime/         portable Python (see --runtime)
 
 Usage: python build.py [--jar PATH] [--out DIR] [--version 2]
 """
@@ -140,7 +142,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--jar", default=str(DEFAULT_JAR))
     ap.add_argument("--out", default=str(Path("H:/HomeDashboard/work/pixeldex2/out")))
-    ap.add_argument("--version", default="2")
+    ap.add_argument("--version", default="2.1")
+    ap.add_argument("--runtime", default="H:/HomeDashboard/work/pixeldex2/runtime",
+                    help="portable Python (embeddable 3.12 + pywebview) copied in as runtime/")
     a = ap.parse_args()
 
     z = zipfile.ZipFile(a.jar)
@@ -292,8 +296,17 @@ def main():
 
     for f in ("app.js", "style.css", "nbt.js"):
         shutil.copy(HERE / "web" / f, out / "app" / f)
-    shutil.copy(HERE / "web" / "PixelDex.html", out / "PixelDex.html")
-    shutil.copy(HERE / "web" / "README.txt", out / "README.txt")
+    # the page lives in app/ and is opened in its own window by pixeldex.pyw (started from PixelDex.vbs)
+    html = (HERE / "web" / "PixelDex.html").read_text(encoding="utf-8").replace('"app/', '"')
+    (out / "app" / "index.html").write_text(html, encoding="utf-8")
+    shutil.copy(HERE / "web" / "pixeldex.pyw", out / "pixeldex.pyw")
+    for f in ("PixelDex.vbs", "Start PixelDex (backup).bat", "README.txt"):   # Windows line endings for these
+        text = (HERE / "web" / f).read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
+        (out / f).write_bytes(text.replace(chr(10), chr(13) + chr(10)).encode("utf-8"))
+    if Path(a.runtime).is_dir():
+        shutil.copytree(a.runtime, out / "runtime", ignore=shutil.ignore_patterns("__pycache__", "bin"))
+    else:
+        print("WARNING: no portable Python runtime at", a.runtime)
     print(f"species {len(out_species)}  sprites {sum(1 for v in sprite_cache.values() if v)}  "
           f"missing {len(missing_sprites)}  structure rows {sum(len(v) for v in struct_spawns.values())}  edges {len(ev)}")
     for m in missing_sprites[:20]:

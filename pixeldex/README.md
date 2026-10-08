@@ -2,7 +2,7 @@
 
 A Pokédex companion for Pixelmon Reforged (Minecraft 1.21.1; data from Pixelmon 9.4.1).
 
-**Download:** the newest `pixeldex-v…` zip on the Releases page. Unzip it and double-click `PixelDex.html` — it opens in your browser. Portable: no .exe, nothing to install.
+**Download:** the newest `pixeldex-v…` zip on the Releases page. Unzip it and double-click `PixelDex.vbs` — PixelDex opens in its own window. Portable: no .exe, nothing to install (its own Python is in the folder).
 
 **Rebuild the data** (after a Pixelmon update): `python source/build.py --jar <path to Pixelmon jar> --out <folder>`.
 
