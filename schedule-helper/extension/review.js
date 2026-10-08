@@ -5,8 +5,9 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const DAYNAME = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
 
-  const prefs = { nameOverrides: { ...D.nameOverrides }, jobMap: { ...D.jobMap }, confirm: D.confirm, paceName: "normal", ...((await S.get("sh_prefs")) || {}) };
-  let raw = "", filename = "", shifts = [], off = new Set(), jobEdits = {};
+  const prefs = { nameOverrides: { ...D.nameOverrides }, jobMap: { ...D.jobMap }, usualJob: {}, confirm: D.confirm, paceName: "normal", ...((await S.get("sh_prefs")) || {}) };
+  let raw = "", filename = "", shifts = [], off = new Set(), jobEdits = {}, usual = {};
+  prefs.usualJob = prefs.usualJob || {};
 
   $("#openk").href = D.kronosUrl;
   document.querySelector(`[name=confirm][value=${prefs.confirm}]`).checked = true;
@@ -32,6 +33,7 @@
     }
     shifts = res.shifts;
     shifts.forEach((s) => { if (jobEdits[s.id]) s.kronosJob = jobEdits[s.id]; });
+    usual = R.markJobChanges(shifts, prefs.usualJob).usual;
     $("#problems").innerHTML = res.problems.map((p) => `<div class="sh-warn">${esc(p)}</div>`).join("");
     $("#step2").hidden = $("#step3").hidden = !shifts.length;
     render();
@@ -43,8 +45,19 @@
     const doubles = new Set();
     const seen = {};
     shifts.forEach((s) => { const k = s.employee + s.date; if (seen[k]) doubles.add(k); seen[k] = 1; });
-    $("#summary").innerHTML = `<b>${kept.length}</b> shifts for <b>${people.length}</b> people, week of <b>${esc($("#week").value)}</b>. Untick anything that shouldn't go into Kronos.`;
-    $("#names").innerHTML = people.map((p) => `<label>${esc(p)} <input type="text" data-name="${esc(p)}" value="${esc(R.kronosNameFor(p, prefs.nameOverrides))}"></label>`).join("");
+    const changes = kept.filter((s) => s.jobChange).length;
+    $("#summary").innerHTML = `<b>${kept.length}</b> shifts for <b>${people.length}</b> people, week of <b>${esc($("#week").value)}</b>. Untick anything that shouldn't go into Kronos.`
+      + (changes ? `<br><span class="tag job">${changes} job-change shift${changes > 1 ? "s" : ""}</span> Kronos puts in each person's usual job, so these shifts need the job changed for that one shift (for example a server working Bar).` : "");
+    const allJobs = [...new Set(shifts.map((s) => s.kronosJob).filter(Boolean))].sort();
+    $("#names").innerHTML = people.map((p) => {
+      const u = usual[p] || { job: "", how: "auto", jobs: [] };
+      const opts = [...new Set([u.job, ...allJobs].filter(Boolean))];
+      return `<div class="person"><label>${esc(p)} <input type="text" data-name="${esc(p)}" value="${esc(R.kronosNameFor(p, prefs.nameOverrides))}"></label>
+      <label class="sh-small">Usual job in Kronos <select data-usual="${esc(p)}">
+        <option value="">auto: ${esc(u.jobs[0] || "")}</option>
+        ${opts.map((j) => `<option ${prefs.usualJob[p] === j ? "selected" : ""}>${esc(j)}</option>`).join("")}</select>
+        ${u.how === "tie" ? '<span class="tag job" title="Works as many shifts in two jobs - check which one Kronos has as their main job">check</span>' : ""}</label></div>`;
+    }).join("");
     const scheds = [...new Set(shifts.map((s) => s.schedule))].filter(Boolean).sort();
     $("#jobs").innerHTML = scheds.map((sc) => {
       const fallback = (shifts.find((s) => s.schedule === sc) || {}).job || sc;
@@ -59,7 +72,7 @@
         <td>${esc(s.kronosName)}${doubles.has(s.employee + s.date) ? ' <span class="tag">double</span>' : ""}</td>
         <td>${R.niceTime(s.start)}</td><td>${R.niceTime(s.end)}${s.overnight ? ' <span class="tag next">next day</span>' : ""}</td>
         <td class="hide-sm">${esc(s.schedule)}</td>
-        <td><input type="text" data-sjob="${esc(s.id)}" value="${esc(s.kronosJob)}"></td></tr>`).join("")}</table>`;
+        <td><input type="text" data-sjob="${esc(s.id)}" value="${esc(s.kronosJob)}">${s.jobChange ? ` <span class="tag job" title="Usually ${esc(s.usualJob)} in Kronos">job change</span>` : ""}</td></tr>`).join("")}</table>`;
     }).join("");
   }
 
@@ -75,6 +88,10 @@
       build();
     }
     if (t.dataset.job) { prefs.jobMap[t.dataset.job] = t.value.trim(); build(); }
+    if (t.dataset.usual !== undefined) {
+      if (t.value) prefs.usualJob[t.dataset.usual] = t.value; else delete prefs.usualJob[t.dataset.usual];
+      S.set("sh_prefs", prefs); build();
+    }
     if (t.dataset.sjob) { jobEdits[t.dataset.sjob] = t.value.trim(); build(); }
   });
 

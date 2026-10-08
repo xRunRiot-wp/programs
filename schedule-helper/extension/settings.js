@@ -18,6 +18,9 @@ globalThis.SH_DEFAULTS = {
   // Which Kronos job each HotSchedules "Schedule" becomes.
   // Anything not listed uses the HotSchedules "Job" column as-is
   // (the export already says Job = Server for Cocktail shifts).
+  // Each person's usual Kronos job (the one Kronos fills in) is worked out from the
+  // week; shifts with a different job are flagged. Set it per person on the review
+  // screen ("Usual job in Kronos") if the guess is wrong.
   jobMap: {
     Cocktail: "Server",
   },

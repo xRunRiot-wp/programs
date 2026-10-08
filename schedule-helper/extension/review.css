@@ -10,7 +10,9 @@ h3 { font-size: 15px; margin: 12px 0 6px; }
 .btn { display: inline-block; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 16px; }
 .grid2 label { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 13px; }
-.grid2 input { width: 150px; }
+.grid2 input, .grid2 select { width: 150px; }
+.person { border-bottom: 1px solid #eef0f3; padding-bottom: 4px; }
+.person .sh-small { color: var(--muted); margin-top: 2px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 10px; }
 th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eef0f3; }
 th { background: #f7f8fa; }
@@ -18,6 +20,7 @@ td input[type=text] { width: 100%; min-width: 80px; }
 tr.off td { color: var(--muted); text-decoration: line-through; }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef0f3; }
 .tag.next { background: var(--warn-bg); color: var(--warn); }
+.tag.job { background: #fde2e1; color: #b42318; font-weight: 600; }
 @media (max-width: 640px) {
   main { padding: 8px; }
   .hide-sm { display: none; }

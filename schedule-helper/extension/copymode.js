@@ -67,8 +67,10 @@
       root.innerHTML = `
         <div class="sh-card ${done[s.id] ? "sh-isdone" : ""}">
           <div class="sh-cardtop">${esc(DAYNAME[s.day])} ${shortDate(s.date)} &middot; shift ${st.idx + 1} of ${data.shifts.length} &middot; ${left} left${done[s.id] ? " &middot; <b>done</b>" : ""}</div>
+          ${s.jobChange ? `<div class="sh-jobflag">&#9888; ${esc(R.jobWord(s.kronosJob))} shift &ndash; change the job for this one<br>
+            <span>Kronos will fill in ${esc(s.usualJob)}. Change it to <b>${esc(valueOf(s, "job"))}</b> for this shift only (copy it below).</span></div>` : ""}
           <div class="sh-fields">
-            ${ORDER.map((f, k) => `<button class="sh-field ${k === st.field ? "sh-active" : ""}" data-copy="${f}" title="Copy ${LABEL[f]}">
+            ${ORDER.map((f, k) => `<button class="sh-field ${k === st.field ? "sh-active" : ""} ${f === "job" && s.jobChange ? "sh-jobchange" : ""}" data-copy="${f}" title="Copy ${LABEL[f]}">
               <span class="sh-flabel">${LABEL[f]}</span><span class="sh-fval">${esc(valueOf(s, f))}${f === "end" && s.overnight ? ' <i>(next day)</i>' : ""}</span></button>`).join("")}
           </div>
           <button class="sh-big" data-act="nextfield">Copy next field &#9654;</button>
@@ -85,7 +87,7 @@
         <ol class="sh-list">
           ${list.map(({ x, i }) => `<li class="${i === st.idx ? "sh-cur" : ""} ${done[x.id] ? "sh-done" : ""}" data-go="${i}">
             <input type="checkbox" data-tick="${i}" ${done[x.id] ? "checked" : ""} title="Done">
-            <span>${esc(x.day)} ${shortDate(x.date)}</span><b>${esc(x.kronosName)}</b><span>${R.niceTime(x.start)}&ndash;${R.niceTime(x.end)}</span><span class="sh-muted">${esc(x.kronosJob)}</span></li>`).join("")}
+            <span>${esc(x.day)} ${shortDate(x.date)}</span><b>${esc(x.kronosName)}</b><span>${R.niceTime(x.start)}&ndash;${R.niceTime(x.end)}</span><span class="${x.jobChange ? "sh-jobtag" : "sh-muted"}" ${x.jobChange ? `title="Job change: usually ${esc(x.usualJob)}"` : ""}>${x.jobChange ? "&#9888; " : ""}${esc(x.kronosJob)}</span></li>`).join("")}
         </ol>
         <details class="sh-small"><summary>Text formats (match what Kronos expects)</summary>
           <div class="sh-fmts">Name ${fmtSel("name")} Date ${fmtSel("date")} Start ${fmtSel("start")} End ${fmtSel("end")}</div>
@@ -99,7 +101,7 @@
       const v = valueOf(s, f);
       const ok = await copyText(v, doc);
       st.field = ORDER.indexOf(f);
-      note = ok ? `Copied <b>${esc(v)}</b> &mdash; click the ${LABEL[f]} box in Kronos and press Ctrl+V.` : `Couldn't copy. Select the text and copy it by hand: <b>${esc(v)}</b>`;
+      note = ok ? `Copied <b>${esc(v)}</b> &mdash; click the ${LABEL[f]} box in Kronos and press Ctrl+V.${f === "job" && s.jobChange ? ` (Kronos will have ${esc(s.usualJob)} there &mdash; replace it.)` : ""}` : `Couldn't copy. Select the text and copy it by hand: <b>${esc(v)}</b>`;
       save(); render();
     }
 

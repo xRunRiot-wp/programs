@@ -275,7 +275,7 @@
     if (m.type === "check") post(window.top, { type: "check-result", reqId: m.reqId, flagged: checkExisting(m.shifts) });
     if (!IS_TOP) return;
     // a frame that just opened (e.g. the add-shift form) asks whether we're watching
-    if (m.type === "hello" && teaching === "watching" && e.source) post(e.source, { type: "rec-start" });
+    if (m.type === "hello" && (teaching === "watching" || teaching === "job") && e.source) post(e.source, { type: "rec-start" });
     if ((m.type === "rec-step" || m.type === "rec-update") && onRecStep) onRecStep(m);
     if (m.type === "ack") acked.add(m.reqId);
     if (m.type === "result" && pending[m.reqId]) { pending[m.reqId](m); delete pending[m.reqId]; }
@@ -409,7 +409,7 @@
       el.onclick = (e) => { const t = e.target; if (t.dataset.del) { recSteps.splice(Number(t.dataset.del), 1); renderTeach(); } };
       $("#recsave").onclick = async () => {
         if (!recSteps.some((s) => s.isSave)) { alert("Please pick which click was the Save button."); return; }
-        await S.set("sh_recipe", { steps: recSteps, taughtAt: Date.now() });
+        await S.set("sh_recipe", { steps: recSteps, jobSteps: recipe?.jobSteps || null, taughtAt: Date.now() });
         if ($("#exdone").checked) await S.markDone(example.id, true);
         teaching = false; await loadAll(); renderTeach();
       };
@@ -418,9 +418,25 @@
     }
     el.onchange = el.onclick = null;
     const left = data.shifts.filter((s) => !done[s.id]);
+    const plain = left.find((s) => !s.jobChange);
+    const flaggedLeft = left.filter((s) => s.jobChange);
+    const jobInMain = recipe && recipe.steps.some((x) => x.map && x.map.field === "job");
     el.innerHTML = `${recipe ? `<p>&#10003; I know how to add a shift (${recipe.steps.length} steps). You can show me again any time.</p>` : `<p>Show me once how you add one shift in Kronos. I'll watch, then repeat it for the rest.</p>`}
-      <label>Shift to add while I watch:<br><select id="ex" style="width:100%">${left.map((s) => `<option value="${esc(s.id)}">${esc(s.day)} ${esc(s.kronosName)} ${R.niceTime(s.start)}-${R.niceTime(s.end)}</option>`).join("")}</select></label>
-      <div class="sh-row"><button class="sh-primary" id="recgo" ${left.length ? "" : "disabled"}>Start watching</button></div>`;
+      <label>Shift to add while I watch:<br><select id="ex" style="width:100%">${left.map((s) => `<option value="${esc(s.id)}" ${s === plain ? "selected" : ""}>${esc(s.day)} ${esc(s.kronosName)} ${R.niceTime(s.start)}-${R.niceTime(s.end)}${s.jobChange ? ` &#9888; ${esc(s.kronosJob)} (job change)` : ""}</option>`).join("")}</select></label>
+      <p class="sh-small sh-muted">Pick a normal shift for this (no &#9888;). Job-change shifts are part 2 below.</p>
+      <div class="sh-row"><button class="sh-primary" id="recgo" ${left.length ? "" : "disabled"}>Start watching</button></div>
+      ${recipe ? `<hr><p><b>Part 2 (optional): job-change shifts.</b> ${
+        jobInMain ? "You changed the job while I watched, so I already set the job on every shift." :
+        recipe.jobSteps ? `&#10003; I know how to change the job on one shift (${recipe.jobSteps.length} steps). I only do it on &#9888; shifts.` :
+        "Kronos fills in each person's usual job. For a shift with a different job (a server working Bar) the job has to be changed. Show me once how you do it: I fill in the shift, then you change the job while I watch."}</p>
+      ${jobInMain ? "" : flaggedLeft.length ? `<label>Job-change shift:<br><select id="exjob" style="width:100%">${flaggedLeft.map((s) => `<option value="${esc(s.id)}">${esc(s.day)} ${esc(s.kronosName)} ${R.niceTime(s.start)}-${R.niceTime(s.end)}: ${esc(s.usualJob)} &rarr; ${esc(s.kronosJob)}</option>`).join("")}</select></label>
+        <div class="sh-row"><button class="sh-primary" id="jobgo">${recipe.jobSteps ? "Show me again on this shift" : "Show me on this shift"}</button>${recipe.jobSteps ? '<button id="jobforget">Forget part 2</button>' : ""}</div>`
+        : `<p class="sh-small sh-muted">No job-change shifts left this week.</p>`}` : ""}`;
+    if ($("#jobgo")) $("#jobgo").onclick = () => {
+      const s = data.shifts.find((x) => x.id === $("#exjob").value);
+      showTab("auto"); runOne(s);
+    };
+    if ($("#jobforget")) $("#jobforget").onclick = async () => { await S.set("sh_recipe", { ...recipe, jobSteps: null }); await loadAll(); renderTeach(); };
     $("#recgo").onclick = () => {
       example = data.shifts.find((s) => s.id === $("#ex").value);
       recSteps = []; teaching = "watching";
@@ -429,6 +445,7 @@
     };
   }
   onRecStep = (m) => {
+    if (teaching === "job") return onJobRec && onJobRec(m);
     if (teaching !== "watching") return;
     if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) s.value = m.value; }
     else recSteps.push({ ...m.step, frameKey: m.frameKey });
@@ -479,7 +496,7 @@
     $("#auto").innerHTML = `${html}<button class="sh-stop sh-danger" id="stopnow">Stop</button>`;
     $("#stopnow").onclick = () => { stopAsked = true; $("#stopnow").textContent = "Stopping after this step..."; };
   }
-  const shiftLine = (s) => `<b>${esc(s.kronosName)}</b> ${R.niceTime(s.start)} &ndash; ${R.niceTime(s.end)}${s.overnight ? " (next day)" : ""} &middot; ${esc(s.kronosJob)}`;
+  const shiftLine = (s) => `<b>${esc(s.kronosName)}</b> ${R.niceTime(s.start)} &ndash; ${R.niceTime(s.end)}${s.overnight ? " (next day)" : ""} &middot; ${s.jobChange ? `<span class="sh-jobtag" title="Usually ${esc(s.usualJob)} in Kronos">&#9888; ${esc(s.kronosJob)} (job change)</span>` : esc(s.kronosJob)}`;
 
   async function runAll() {
     running = true; stopAsked = false;
@@ -522,31 +539,151 @@
     }
   }
 
+  // Part 2 of "Show me once": fill in one job-change shift, then watch Zack change the job.
+  async function runOne(s) {
+    running = true; stopAsked = false;
+    const { pace } = settings();
+    let r = "stop";
+    try {
+      r = await enterShift(s, pace, "day", `Part 2: job change<br>`, { teachJob: true });
+      if (r === "saved") done = await S.markDone(s.id, true);
+    } finally {
+      running = false; teaching = false;
+      await loadAll();
+      $("#auto").innerHTML = `<p>${r === "saved" ? "Saved. " : ""}${recipe?.jobSteps ? "I'll change the job like that on every &#9888; job-change shift." : "I haven't learned the job change yet."}</p><div class="sh-row"><button id="again">OK</button></div>`;
+      $("#again").onclick = renderAuto;
+    }
+  }
+
+  // One step with this shift's values; asks Zack if it can't be done. "ok" | "skipped" | "stop"
+  async function doStep(st, s, pace, head, isJob) {
+    const value = st.map ? R.formatValue(s, st.map) : st.value;
+    const wantText = st.action === "click" && st.map ? value : null;
+    for (;;) {
+      const res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key }, value, wantText, pace }, 20000);
+      if (res.ok) return "ok";
+      const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${isJob ? "Changing the job: " : ""}${esc(res.why)}</div>
+        <p>${isJob ? `Change the job to <b>${esc(R.formatValue(s, { field: "job", fmt: "Kronos job" }))}</b> yourself and press <b>I did it</b>, or try again.` : "You can do this step by hand and press <b>I did it</b>, or try again."}</p>`,
+        [["retry", "Try again", "sh-primary"], ["manual", "I did it"], ["skip", "Skip this shift"]]);
+      if (a === "stop") return "stop";
+      if (a === "skip") return "skipped";
+      if (a === "manual") return "ok";
+    }
+  }
+
+  // A job-change shift: Kronos filled in the person's usual job; change it for this shift only.
+  // Returns "ok" | "saved" (Zack pressed Save himself while showing me) | "skipped" | "stop"
+  async function changeJob(s, pace, head, teach) {
+    const job = R.formatValue(s, { field: "job", fmt: "Kronos job" });
+    const flag = `<div class="sh-jobflag">&#9888; ${esc(R.jobWord(job))} shift &ndash; change the job for this one<br><span>Kronos filled in ${esc(s.usualJob)}; this shift is <b>${esc(job)}</b>.</span></div>`;
+    if (recipe.jobSteps && recipe.jobSteps.length && !teach) {
+      for (let k = 0; k < recipe.jobSteps.length; k++) {
+        if (stopAsked) return "stop";
+        showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Changing the job to ${esc(job)} (step ${k + 1} of ${recipe.jobSteps.length})...</span>`);
+        const r = await doStep(recipe.jobSteps[k], s, pace, head, true);
+        if (r !== "ok") return r;
+        await sleep(rand(pace.stepMin, pace.stepMax));
+      }
+      return "ok";
+    }
+    if (!teach) {
+      const a = await ask(`${head}${shiftLine(s)}${flag}<p>I haven't learned how to change the job yet. The form is filled in and I'm waiting before Save.</p>`,
+        [["teach", "Show me now (I'll remember)", "sh-primary"], ["manual", "I changed it myself"], ["skip", "Skip this shift"]]);
+      if (a === "stop") return "stop";
+      if (a === "skip") return "skipped";
+      if (a === "manual") return "ok";
+    }
+    return teachJob(s, head, flag);
+  }
+
+  // Watch Zack change the job on the open form, then let him check what was seen.
+  let onJobRec = null;
+  async function teachJob(s, head, flag) {
+    const el = $("#auto");
+    const saveStep = recipe.steps.find((x) => x.isSave);
+    let rec = [];
+    teaching = "job";
+    broadcast({ type: "rec-start" });
+    const ans = await new Promise((res) => {
+      const draw = () => {
+        el.innerHTML = `${head}${shiftLine(s)}${flag}<p><b>I'm watching.</b> In the Kronos form, change the job to <b>${esc(s.kronosJob)}</b> the way you normally do. <b>Don't press Save</b> &ndash; I'll do that next.</p>
+          <ol class="sh-steps">${rec.map((x) => `<li>${STEP_WORD[x.action]} ${esc(x.action === "click" ? x.text || x.desc.label || "" : x.action === "key" ? x.key : x.value)}</li>`).join("")}</ol>
+          <div class="sh-row"><button class="sh-primary" id="jobdone" data-ans="done">I changed it &ndash; done</button><button data-ans="cancel">Cancel</button></div>`;
+      };
+      onJobRec = (m) => {
+        if (m.type === "rec-update") { const x = rec.find((y) => y.seq === m.seq); if (x) x.value = m.value; }
+        else rec.push({ ...m.step, frameKey: m.frameKey });
+        draw();
+      };
+      draw();
+      el.onclick = (e) => { const b = e.target.closest("[data-ans]"); if (b) { el.onclick = null; res(b.dataset.ans); } };
+    });
+    broadcast({ type: "rec-stop" });
+    teaching = false; onJobRec = null;
+    if (ans === "cancel") {
+      const a = await ask(`${head}${shiftLine(s)}${flag}<p>OK, I won't learn it now. Change the job yourself, then press <b>I changed it</b>.</p>`,
+        [["manual", "I changed it", "sh-primary"], ["skip", "Skip this shift"]]);
+      return a === "manual" ? "ok" : a === "skip" ? "skipped" : "stop";
+    }
+    // tidy up: no empty typing; pressing Save isn't part of changing the job
+    rec = rec.filter((x) => x.action !== "type" || x.value !== "");
+    const isSave = (x) => saveStep && x.action === "click" && x.frameKey === saveStep.frameKey && x.desc.tag === saveStep.desc.tag && (x.text || "") === (saveStep.text || "");
+    const savedByZack = rec.some(isSave);
+    rec = rec.filter((x) => !isSave(x));
+    for (const x of rec) {
+      const v = x.action === "click" ? x.text : x.action === "key" ? "" : x.value;
+      x.map = v ? R.guessMapping(v, s, { click: x.action === "click" }) : null;
+      if (x.map && x.map.field !== "job") x.map = null; // only the job changes here
+      if (!x.map && v && x.action !== "click" && v.length >= 2 && norm(s.kronosJob).startsWith(norm(v))) x.map = { field: "job", fmt: "Kronos job" };
+    }
+    if (!rec.length) {
+      const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">I didn't see you change anything.</div>`, [["manual", "It's changed now", "sh-primary"], ["skip", "Skip this shift"]]);
+      return a === "manual" ? (savedByZack ? "saved" : "ok") : a === "skip" ? "skipped" : "stop";
+    }
+    const keep = await new Promise((res) => {
+      const draw = () => {
+        el.innerHTML = `<p>Here's how you changed the job. The step where the job name changes from shift to shift should say <b>Job</b>.</p>
+          <ol class="sh-steps">${rec.map((x, i) => `<li>${STEP_WORD[x.action]} <b>${esc(x.action === "key" ? x.key : x.action === "click" ? x.text || x.desc.label || x.desc["aria-label"] || "(a spot)" : x.value)}</b>
+            ${x.action === "type" || x.action === "select" || (x.action === "click" && x.text) ? `<br>This is: ${mappingSelect(x, i)}` : ""}
+            <button class="sh-small" data-del="${i}">remove</button></li>`).join("")}</ol>
+          ${rec.some((x) => x.map) ? "" : '<div class="sh-warn">None of these steps is marked as the Job, so I would pick the same job every time. Mark the step where you picked the job.</div>'}
+          <div class="sh-row"><button class="sh-primary" id="jobkeep" data-ans="keep">Remember these steps</button><button data-ans="once">Just this once</button></div>`;
+      };
+      draw();
+      el.onchange = (e) => { const t = e.target; if (t.dataset.map) { const [field, fmt] = t.value.split("|"); rec[t.dataset.map].map = field === "fixed" ? null : { field, fmt }; draw(); } };
+      el.onclick = (e) => {
+        const t = e.target;
+        if (t.dataset.del) { rec.splice(Number(t.dataset.del), 1); return draw(); }
+        const b = t.closest("[data-ans]"); if (b) { el.onclick = el.onchange = null; res(b.dataset.ans); }
+      };
+    });
+    if (keep === "keep") { recipe = { ...recipe, jobSteps: rec }; await S.set("sh_recipe", recipe); }
+    return savedByZack ? "saved" : "ok";
+  }
+
   // One shift: do every learned step with this shift's values. Returns "saved" | "skipped" | "stop".
-  async function enterShift(s, pace, confirm, head) {
+  async function enterShift(s, pace, confirm, head, opts = {}) {
     const steps = recipe.steps;
     const saveAt = steps.findIndex((x) => x.isSave);
+    const jobInMain = steps.some((x) => x.map && x.map.field === "job");
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i];
       if (stopAsked) return "stop";
-      if (i === saveAt && confirm === "shift") {
+      if (i === saveAt && s.jobChange && !jobInMain) {
+        const r = await changeJob(s, pace, head, opts.teachJob);
+        if (r === "saved") return "saved";
+        if (r !== "ok") return r;
+      }
+      if (i === saveAt && (confirm === "shift" || opts.teachJob)) {
         const a = await ask(`${head}<p>Everything is filled in for ${shiftLine(s)}.<br>Check the Kronos form. Save it?</p>`,
           [["save", "Save", "sh-primary"], ["skip", "Skip (close the form yourself)"]]);
         if (a === "stop") return "stop";
         if (a === "skip") return "skipped";
       }
       showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Step ${i + 1} of ${steps.length}: ${STEP_WORD[st.action]}...</span>`);
-      const value = st.map ? R.formatValue(s, st.map) : st.value;
-      const wantText = st.action === "click" && st.map ? value : null;
-      for (;;) {
-        const res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key }, value, wantText, pace }, 20000);
-        if (res.ok) break;
-        const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${esc(res.why)}</div><p>You can do this step by hand and press <b>I did it</b>, or try again.</p>`,
-          [["retry", "Try again", "sh-primary"], ["manual", "I did it"], ["skip", "Skip this shift"]]);
-        if (a === "stop") return "stop";
-        if (a === "skip") return "skipped";
-        if (a === "manual") break;
-      }
+      const r = await doStep(st, s, pace, head);
+      if (r !== "ok") return r;
+      const wantText = st.action === "click" && st.map ? R.formatValue(s, st.map) : null;
       if (i === saveAt) {
         // wait for Kronos to close the form; if it doesn't, it probably showed an error
         await sleep(1500);
