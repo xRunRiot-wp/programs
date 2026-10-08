@@ -1,0 +1,7 @@
+{
+  "key.categories.pixeldexoverlay": "PixelDex Structure Overlay",
+  "key.pixeldexoverlay.toggle": "Show / hide structure outlines",
+  "pixeldexoverlay.on": "Structure outlines ON",
+  "pixeldexoverlay.off": "Structure outlines OFF",
+  "pixeldexoverlay.noserver": "Structure outlines: this server doesn't have PixelDex Structure Overlay installed"
+}

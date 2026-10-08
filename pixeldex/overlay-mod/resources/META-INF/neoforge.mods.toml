@@ -1,0 +1,18 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="pixeldexoverlay"
+version="1.0.0"
+displayName="PixelDex Structure Overlay"
+authors="xRunRiot"
+description='''Press . (period, rebindable in Controls) to outline every nearby structure - Pixelmon ones (graveyards, haunted towers, temples, shrines...) in gold, vanilla ones in blue - with its name. Companion to PixelDex. Needs to be on the server/host too.'''
+displayTest="IGNORE_ALL_VERSION"
+
+[[dependencies.pixeldexoverlay]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
