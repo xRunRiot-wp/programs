@@ -59,7 +59,7 @@ try:
 
     cmd("Runtime.enable")
     cmd("Page.enable")
-    cmd("Page.navigate", url=(OUT / "PixelDex.html").as_uri())
+    cmd("Page.navigate", url=(OUT / "app" / "index.html").as_uri())
     time.sleep(3)
     print("cards:", ev("document.querySelectorAll('#grid .card').length"))
     # every card picture must load
@@ -117,6 +117,42 @@ try:
     shot("8_graveyard")
     ev("document.getElementById('biomeSelect').value='Mystic Grove'; document.getElementById('biomeSelect').dispatchEvent(new Event('change'))")
     print("Mystic Grove rows:", ev("document.querySelectorAll('.biome-row').length"))
+    ev("showTab('pokedex')")
+    # every Pokemon's page must show both directions wherever the evolution data has them
+    bad = ev("""(() => {
+      const bad = [];
+      for (const sp of species) {
+        const wantFrom = ancestors(sp.k).map(x => x.n), wantInto = descendants(sp.k).map(x => x.n);
+        openDetail(sp.d);
+        const root = document.getElementById('detailContent');
+        const labels = [...root.querySelectorAll('.prior-evo-label')].map(l => l.textContent);
+        const groups = [...root.querySelectorAll('.prior-evo-chips')].map(g => [...g.querySelectorAll('.prior-evo-name')].map(n => n.textContent));
+        const shownFrom = labels[0] === 'Evolves from' ? groups[0] : [];
+        const shownInto = labels.includes('Evolves into') ? groups[labels.indexOf('Evolves into')] : [];
+        const famNames = [...root.querySelectorAll('.fam-chip .fam-name')].map(n => n.textContent);
+        const rows = root.innerText;
+        const missing = [];
+        if (wantFrom.join() !== shownFrom.join()) missing.push('header-from');
+        if (wantInto.join() !== shownInto.join()) missing.push('header-into');
+        for (const n of [...wantFrom, ...wantInto]) if (!famNames.includes(n)) missing.push('family:' + n);
+        if ((evoIn.get(sp.k) || []).length && !rows.includes('Evolves from ')) missing.push('list-from');
+        if ((evoOut.get(sp.k) || []).length && !rows.includes('Evolves into ')) missing.push('list-into');
+        if (missing.length) bad.push(sp.n + ': ' + missing.join(','));
+      }
+      closeDetail();
+      return bad;
+    })()""")
+    print("pokemon missing an evolution direction:", len(bad), bad[:20])
+    for dex in (2, 1, 3, 133, 490, 489, 292, 26, 105):
+        ev(f"openDetail({dex})")
+        print(dex, ev("document.querySelector('.detail-header').innerText.split(String.fromCharCode(10)).filter(Boolean).join(' | ')"))
+    ev("openDetail(2)")
+    time.sleep(0.4)
+    shot("9_ivysaur")
+    ev("showTab('forms')")
+    print("forms note:", ev("document.getElementById('formCount').textContent"))
+    ev("showTab('palettes')")
+    print("palettes note:", ev("document.getElementById('palCount').textContent"))
     ev("showTab('pokedex')")
     print("JS errors:", errors)
 finally:

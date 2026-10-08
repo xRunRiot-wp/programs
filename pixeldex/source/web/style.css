@@ -332,3 +332,10 @@ hr { border: none; border-top: 1px solid var(--border); margin: 16px 0 8px; }
 
 .card.uncaught-soft img { opacity: .5; }
 .card.uncaught-soft .name { color: var(--text-dim); }
+
+.prior-evo-label.later { margin-top: 8px; }
+.prior-evo-chip.not-caught .prior-evo-icon { filter: brightness(0.35) saturate(0); }
+.prior-evo { max-width: 46%; }
+
+.detail-header .prior-evo-icon { width: 32px; height: 32px; }
+.detail-header .prior-evo { margin-right: 36px; }

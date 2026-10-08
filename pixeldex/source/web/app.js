@@ -1,7 +1,7 @@
 // PixelDex v2 — runs straight from the folder (file://), no server.
 const D = window.PIXELDEX_DATA;
 const S = D.strings;
-const SPRITES = 'app/sprites/';
+const SPRITES = document.currentScript.src.replace(/app\.js([?#].*)?$/, '') + 'sprites/';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = n => String(n).padStart(4, '0');
@@ -14,7 +14,10 @@ const palName = idx => D.palNames[S[idx]] || S[idx];
 // ---------- storage (per-browser; wrapped so a blocked storage never breaks the page) ----------
 const store = {
   get(k, dflt) { try { const v = localStorage.getItem('pixeldex.' + k); return v == null ? dflt : JSON.parse(v); } catch { return dflt; } },
-  set(k, v) { try { localStorage.setItem('pixeldex.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  set(k, v) {
+    try { localStorage.setItem('pixeldex.' + k, JSON.stringify(v)); } catch { /* ignore */ }
+    if (window.pywebview && window.pywebview.api) window.pywebview.api.save_setting(k, JSON.stringify(v));   // desktop: also to userdata/settings.json
+  },
 };
 let manual = new Set(store.get('manual', []).map(String));
 let picks = store.get('picks', {});
@@ -71,6 +74,30 @@ function family(key) {
   for (const k of seen) (stages[stage.get(k)] ||= []).push(byKey.get(k));
   stages.forEach(col => col.sort((x, y) => x.d - y.d));
   return stages;
+}
+
+function ancestors(key) {               // nearest first -> base last, then reversed so the base comes first
+  const out = [], seen = new Set([key]);
+  let layer = [key];
+  while (layer.length) {
+    const next = [];
+    for (const k of layer) for (const e of evoIn.get(k) || []) if (!seen.has(e.from)) { seen.add(e.from); next.push(e.from); }
+    out.push(...next);
+    layer = next;
+  }
+  return out.reverse().map(k => byKey.get(k));
+}
+function descendants(key) {             // next stage first, then the stages after it
+  const out = [], seen = new Set([key]);
+  let layer = [key];
+  while (layer.length) {
+    const next = [];
+    for (const k of layer) for (const e of evoOut.get(k) || []) if (!seen.has(e.to)) { seen.add(e.to); next.push(e.to); }
+    next.sort((a, b) => byKey.get(a).d - byKey.get(b).d);
+    out.push(...next);
+    layer = next;
+  }
+  return out.map(k => byKey.get(k));
 }
 
 // ---------- caught status ----------
@@ -147,9 +174,15 @@ function renderGrid() {
 }
 
 // ---------- Forms tab ----------
+// Pokémon with a huge set of variants are left out of the Forms / Palettes tabs (too many to be useful there,
+// e.g. Unown, Alcremie); their own page still shows every one.
+const MAX_FORMS = 20, MAX_PALETTES = 30;
+const SKIPPED_FORMS = species.filter(sp => sp.f.filter(f => f.s).length > MAX_FORMS);
+const palCountOf = sp => sp.f.reduce((t, f) => t + f.p.filter(p => p[2] && S[p[0]] !== 'none' && !isShinyPal(S[p[0]])).length, 0);
+const SKIPPED_PALS = species.filter(sp => palCountOf(sp) > MAX_PALETTES);
 const FORM_ITEMS = [];
 for (const sp of species) {
-  if (sp.f.length < 2) continue;
+  if (sp.f.length < 2 || SKIPPED_FORMS.includes(sp)) continue;
   for (const f of sp.f) {
     if (!f.s || (f.n === 'base' && f.n === sp.df)) continue;
     const n = f.n;
@@ -167,7 +200,8 @@ function renderForms() {
     const c = caughtForm(sp.d, f.n);
     return !(cf === 'caught' && !c) && !(cf === 'uncaught' && c);
   });
-  $('formCount').textContent = `${items.length} forms · ${items.filter(i => caughtForm(i.sp.d, i.f.n)).length} caught`;
+  $('formCount').textContent = `${items.length} forms · ${items.filter(i => caughtForm(i.sp.d, i.f.n)).length} caught` +
+    (SKIPPED_FORMS.length ? ` · left out (too many forms, see their own page): ${SKIPPED_FORMS.map(x => x.n).join(', ')}` : '');
   $('formGrid').innerHTML = items.map(({ sp, f }) => {
     const c = caughtForm(sp.d, f.n);
     return `<div class="card ${c ? '' : 'uncaught-soft'}" data-dex="${sp.d}">
@@ -179,7 +213,7 @@ function renderForms() {
 // ---------- Palettes tab ----------
 const PAL_ITEMS = [];
 const palCounts = new Map();
-for (const sp of species) for (const f of sp.f) for (const [pi, g, file] of f.p) {
+for (const sp of species) if (!SKIPPED_PALS.includes(sp)) for (const f of sp.f) for (const [pi, g, file] of f.p) {
   const name = S[pi];
   if (name === 'none' || !file) continue;
   PAL_ITEMS.push({ sp, f, pal: name, g, file });
@@ -208,7 +242,8 @@ function renderPalettes() {
   if (sort === 'palette') items.sort((a, b) => pn(a).localeCompare(pn(b)) || a.sp.d - b.sp.d);
   else if (sort === 'name') items.sort((a, b) => a.sp.n.localeCompare(b.sp.n) || pn(a).localeCompare(pn(b)));
   else if (sort === 'uncaught') items.sort((a, b) => caughtPal(a.sp.d, a.f.n, a.pal) - caughtPal(b.sp.d, b.f.n, b.pal) || a.sp.d - b.sp.d);
-  $('palCount').textContent = `${items.length} shown · ${items.filter(i => caughtPal(i.sp.d, i.f.n, i.pal)).length} caught`;
+  $('palCount').textContent = `${items.length} shown · ${items.filter(i => caughtPal(i.sp.d, i.f.n, i.pal)).length} caught` +
+    (SKIPPED_PALS.length ? ` · left out (too many palettes, see their own page): ${SKIPPED_PALS.map(x => x.n).join(', ')}` : '');
   $('palGrid').innerHTML = items.map(it => {
     const c = caughtPal(it.sp.d, it.f.n, it.pal);
     const formTag = it.f.n !== it.sp.df ? ` · ${esc(it.f.dn)}` : '';
@@ -315,19 +350,30 @@ function renderDetail(sp) {
   }
   wild.sort((a, b) => (b[0][3] ?? -1) - (a[0][3] ?? -1));
   raid.sort((a, b) => (b[0][3] ?? -1) - (a[0][3] ?? -1));
-  const pre = [...new Map((evoIn.get(sp.k) || []).map(e => [e.from, byKey.get(e.from)])).values()];
-  const preHtml = pre.length ? `<div class="prior-evo"><span class="prior-evo-label">Evolves from</span><div class="prior-evo-chips">${pre.map(p =>
-    `<span class="prior-evo-chip clickable" data-dex="${p.d}">${img(lookFor(p).sprite, 'prior-evo-icon')}<span class="prior-evo-name">${esc(p.n)}</span></span>`).join('')}</div></div>` : '';
+  // whole chain both ways: every earlier stage back to the base, every later stage incl. branches
+  const chipList = list => list.map(p =>
+    `<span class="prior-evo-chip clickable ${caughtSpecies(p.d) ? '' : 'not-caught'}" data-dex="${p.d}" title="${caughtSpecies(p.d) ? 'Caught' : 'Not caught'}">${img(lookFor(p).sprite, 'prior-evo-icon')}<span class="prior-evo-name">${esc(p.n)}</span></span>`).join('');
+  const before = ancestors(sp.k), after = descendants(sp.k);
+  const preHtml = (before.length || after.length) ? `<div class="prior-evo">
+    ${before.length ? `<span class="prior-evo-label">Evolves from</span><div class="prior-evo-chips">${chipList(before)}</div>` : ''}
+    ${after.length ? `<span class="prior-evo-label later">Evolves into</span><div class="prior-evo-chips">${chipList(after)}</div>` : ''}
+  </div>` : '';
   const badges = [sp.leg ? '<span class="type-badge gold">Legendary / Mythical</span>' : '',
     sp.structOnly ? '<span class="type-badge struct">Only found in structures</span>' : ''].join('');
 
   const evoInto = [];
+  for (const e of evoIn.get(sp.k) || []) {
+    const f = byKey.get(e.from);
+    const myForm = sp.f.find(x => x.n === e.toForm);
+    evoInto.push(`<div class="spawn-row">${myForm && e.toForm !== sp.df ? `${esc(myForm.dn)} form: ` : ''}Evolves from <b class="link" data-dex="${f.d}">${esc(f.n)}</b> — ${esc(e.txt)}</div>`);
+  }
   for (const e of evoOut.get(sp.k) || []) {
     const t = byKey.get(e.to);
     const tf = t.f.find(f => f.n === e.toForm);
     evoInto.push(`<div class="spawn-row">Evolves into <b class="link" data-dex="${t.d}">${esc(t.n)}${tf && e.toForm !== t.df ? ` (${esc(tf.dn)})` : ''}</b> — ${esc(e.txt)}</div>`);
   }
   if (base.eg.length && !base.eg.includes('Undiscovered')) evoInto.push(`<div class="spawn-row meta">Egg groups: ${base.eg.map(esc).join(', ')} — breedable at a Daycare</div>`);
+  if (sp.k === 'Phione') evoInto.push('<div class="spawn-row meta">Phione does not evolve. It hatches from eggs bred from Manaphy (or Phione).</div>');
   if (sp.k === 'Manaphy') evoInto.push('<div class="spawn-row meta">Manaphy does not evolve. Its eggs hatch into Phione (Phione cannot evolve into Manaphy).</div>');
 
   const picked = picks[sp.d];
@@ -439,7 +485,8 @@ const idb = (() => {
     async del(k) { try { const db = await open(); await new Promise(res => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = res; }); } catch { /* ignore */ } },
   };
 })();
-const status = msg => { $('settingsStatus').textContent = msg; };
+let status_last = '';
+const status = msg => { status_last = msg; $('settingsStatus').textContent = msg; };
 
 // players: [{uuid, file (File), modified}]
 async function applyPlayers(world, players) {
@@ -486,7 +533,39 @@ async function readFromHandle(handle) {
     return applyPlayers(handle.name, []);
   }
 }
+// ---- desktop window (pywebview): Python picks the folder and reads the files, like v1 ----
+const native = () => window.pywebview && window.pywebview.api;
+async function nativeApply(r) {
+  if (!r) return false;
+  const players = r.players.map(p => ({ uuid: p.uuid, modified: p.modified,
+    file: new Blob([Uint8Array.from(atob(p.data), c => c.charCodeAt(0))]) }));
+  const ok = await applyPlayers(r.world, players);
+  if (ok) store.set('worldPath', r.path);
+  return ok;
+}
+window.addEventListener('pywebviewready', async () => {
+  // settings saved by the desktop app win over the window's own storage
+  const saved = await native().load_settings();
+  for (const [k, v] of Object.entries(saved || {})) { try { localStorage.setItem('pixeldex.' + k, v); } catch { /* ignore */ } }
+  manual = new Set(store.get('manual', []).map(String));
+  picks = store.get('picks', {});
+  saveCache = store.get('save', null);
+  $('lookMode').value = store.get('look', 'picks');
+  const v1 = await native().v1_config();            // carry over v1's world folder + "Mark as caught" marks
+  if (v1 && !store.get('v1Imported', false)) {
+    for (const d of v1.manual_caught || []) manual.add(String(d));
+    store.set('manual', [...manual]);
+    if (v1.save_dir && !store.get('worldPath', null)) store.set('worldPath', v1.save_dir);
+    if (v1.player_uuid && !store.get('player', null)) store.set('player', v1.player_uuid);
+    store.set('v1Imported', true);
+  }
+  $('resyncBtn').classList.toggle('hidden', !store.get('worldPath', null));
+  await resync(false);
+  refreshAll();
+});
+
 $('pickWorldBtn').addEventListener('click', async () => {
+  if (native()) { status('Waiting for folder selection…'); if (!(await nativeApply(await native().pick_world()))) status(status_last || 'No folder selected.'); return; }
   if (window.showDirectoryPicker) {
     try {
       const handle = await window.showDirectoryPicker({ id: 'pixeldex-world', mode: 'read' });
@@ -509,6 +588,12 @@ $('worldInput').addEventListener('change', async e => {
   e.target.value = '';
 });
 async function resync(interactive) {
+  if (native()) {
+    const path = store.get('worldPath', null);
+    if (path) await nativeApply(await native().read_world(path));
+    else if (interactive) $('settingsOverlay').classList.remove('hidden');
+    return;
+  }
   const handle = await idb.get('world');
   if (!handle) { if (interactive) { $('settingsOverlay').classList.remove('hidden'); status('Choose your world folder again to sync.'); } return; }
   let perm = await handle.queryPermission({ mode: 'read' });
@@ -518,6 +603,7 @@ async function resync(interactive) {
 $('resyncBtn').addEventListener('click', () => resync(true));
 window.addEventListener('focus', () => resync(false));
 $('disconnectBtn').addEventListener('click', async () => {
+  store.set('worldPath', null);
   await idb.del('world'); saveCache = null; store.set('save', null);
   $('resyncBtn').classList.add('hidden'); $('playerPicker').innerHTML = ''; status('Disconnected.');
   refreshAll();
