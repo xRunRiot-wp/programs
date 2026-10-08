@@ -3,7 +3,7 @@
 //   sh_done   = { shiftId: time } shifts already entered in Kronos
 //   sh_recipe = the steps learned in "Show me once"
 //   sh_copy   = copy mode: where Zack is up to, and the text formats
-//   sh_prefs  = review-screen choices kept for next week (name fixes, job map)
+//   sh_prefs  = review-screen choices kept for next week (name fixes, job map, usual job per person)
 globalThis.SHStore = {
   get(key) {
     return new Promise((res) => chrome.storage.local.get(key, (v) => res(v[key])));

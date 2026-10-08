@@ -35,6 +35,10 @@ button:disabled { opacity: .5; cursor: default; }
 .sh-steps { margin: 8px 0; padding-left: 20px; max-height: 260px; overflow: auto; }
 .sh-steps li { margin-bottom: 6px; }
 .sh-steps select { max-width: 150px; }
+.sh-jobflag { background: #fde2e1; color: #b42318; border: 1px solid #f4a5a0; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; font-weight: 700; }
+.sh-jobflag span { font-weight: 400; font-size: 12px; color: var(--fg); }
+.sh-field.sh-jobchange { border: 2px solid #b42318; background: #fff5f4; }
+.sh-jobtag { color: #b42318; font-weight: 600; }
 .sh-tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef0f3; }
 
 /* panel on the Kronos page */

@@ -31,6 +31,8 @@ require(path.join(EXT_SRC, "settings.js"));
 const R = require(path.join(EXT_SRC, "roster.js"));
 const roster = R.readRoster(fs.readFileSync(CSV, "utf8"), path.basename(CSV), { jobMap: SH_DEFAULTS.jobMap });
 const DIRECTORY = [...new Set(roster.shifts.map((s) => s.kronosName))];
+const { usual } = R.markJobChanges(roster.shifts);
+const PRIMARY = Object.fromEntries(roster.shifts.map((s) => [s.kronosName, usual[s.employee].job])); // Kronos' main job per person
 
 // static server for the mock
 const server = http.createServer((req, res) => {
@@ -101,7 +103,10 @@ async function page(url) {
     await rv.until("!document.querySelector('#step2').hidden");
     console.log("review summary:", await rv.ev("document.querySelector('#summary').innerText"));
     console.log("week box:", await rv.ev("document.querySelector('#week').value"));
-    console.log("next-day tags:", await rv.ev("document.querySelectorAll('.tag.next').length"), "double tags:", await rv.ev("document.querySelectorAll('.tag:not(.next)').length"));
+    console.log("next-day tags:", await rv.ev("document.querySelectorAll('.tag.next').length"), "double tags:", await rv.ev("document.querySelectorAll('#days .tag:not(.next):not(.job)').length"));
+    const jobTags = await rv.ev("document.querySelectorAll('#days .tag.job').length");
+    console.log("job-change tags on review:", jobTags);
+    assert.equal(jobTags, roster.shifts.filter((s) => s.jobChange).length);
     await rv.shot("1_review");
     await rv.ev("document.querySelector('#use').click()");
     await rv.until("document.querySelector('#used').textContent.includes('Sent')");
@@ -113,7 +118,7 @@ async function page(url) {
     const k = await page("http://test.mykronos.com/schedule.html");
     const P = "document.getElementById('schedule-helper-panel').shadowRoot";
     await k.until(`!!document.getElementById('schedule-helper-panel') && ${P}.querySelector('.sh-card')`, 20000, "panel");
-    await k.ev(`window.DIRECTORY = ${JSON.stringify(DIRECTORY)}`);
+    await k.ev(`window.DIRECTORY = ${JSON.stringify(DIRECTORY)}; window.PRIMARY = ${JSON.stringify(PRIMARY)}`);
     // copy mode
     await k.ev(`${P}.querySelector('[data-act=nextfield]').click()`);
     await sleep(300);
@@ -122,28 +127,42 @@ async function page(url) {
     console.log("copy note 2:", await k.ev(`${P}.querySelector('.sh-note').innerText`));
     await k.shot("2_copy_mode");
 
-    // show me once: add the first shift by hand with real clicks/typing
+    // copy mode on a job-change shift: badge + highlighted Job button
+    const fi = roster.shifts.findIndex((s) => s.jobChange);
+    await k.ev(`${P}.querySelector('[data-go="${fi}"]').click()`);
+    await k.until(`${P}.querySelector('.sh-jobflag')`, 5000, "job-change badge");
+    console.log("copy badge:", (await k.ev(`${P}.querySelector('.sh-jobflag').innerText`)).replace(/\n/g, " | "));
+    assert(await k.ev(`!!${P}.querySelector('.sh-field.sh-jobchange[data-copy=job]')`));
+    await k.ev(`${P}.querySelector('[data-copy=job]').click()`); await sleep(300);
+    console.log("copy job note:", await k.ev(`${P}.querySelector('.sh-note').innerText`));
+    await k.shot("2b_copy_job_change");
+
+    // the test day has job-change shifts; teach on a normal shift that day, part 2 on another day
+    const D = roster.shifts.find((s) => s.jobChange).day;
+    const ex = roster.shifts.find((s) => s.day === D && !s.jobChange);
+    const ex2 = roster.shifts.find((s) => s.jobChange && s.day !== D) || roster.shifts.filter((s) => s.jobChange)[1];
+
+    // show me once: add one shift by hand with real clicks/typing
     await k.ev(`${P}.querySelector('[data-tab=teach]').click()`);
     await k.until(`${P}.querySelector('#recgo')`);
-    const exId = await k.ev(`${P}.querySelector('#ex').value`);
-    const ex = roster.shifts.find((s) => s.id === exId);
+    await k.ev(`(() => { const s = ${P}.querySelector('#ex'); s.value = ${JSON.stringify(ex.id)}; })()`);
     console.log("teaching with", ex.day, ex.start, ex.end, ex.kronosJob);
     await k.ev(`${P}.querySelector('#recgo').click()`);
     await sleep(300);
     const box = async (js) => k.ev(`(() => { const e = ${js}; const r = e.getBoundingClientRect(); const f = document.getElementById('dlg').getBoundingClientRect(); const inF = e.ownerDocument !== document; return [r.left + r.width/2 + (inF ? f.left + 2 : 0), r.top + r.height/2 + (inF ? f.top + 2 : 0)]; })()`);
-    const D = "document.getElementById('dlg').contentDocument";
+    const DL = "document.getElementById('dlg').contentDocument";
     let [x, y] = await box("document.getElementById('quick')"); await k.mouse(x, y);
-    await k.until(`${D} && ${D}.getElementById('emp')`);
+    await k.until(`${DL} && ${DL}.getElementById('emp')`);
     await sleep(300);
     const last = ex.kronosName.split(",")[0];
-    [x, y] = await box(`${D}.getElementById('emp')`); await k.mouse(x, y); await k.type(last);
-    await k.until(`[...${D}.querySelectorAll('li')].some(l => l.textContent === ${JSON.stringify(ex.kronosName)})`);
-    [x, y] = await box(`[...${D}.querySelectorAll('li')].find(l => l.textContent === ${JSON.stringify(ex.kronosName)})`); await k.mouse(x, y);
-    [x, y] = await box(`${D}.getElementById('date')`); await k.mouse(x, y); await k.type(R.formatValue(ex, { field: "date", fmt: "MM/DD/YYYY" }));
-    [x, y] = await box(`${D}.getElementById('st')`); await k.mouse(x, y); await k.type(R.niceTime(ex.start));
-    [x, y] = await box(`${D}.getElementById('en')`); await k.mouse(x, y); await k.type(R.niceTime(ex.end));
-    await k.ev(`(() => { const s = ${D}.getElementById('job'); s.value = ${JSON.stringify(ex.kronosJob)}; s.dispatchEvent(new Event('change', {bubbles:true})); })()`);
-    [x, y] = await box(`${D}.getElementById('save')`); await k.mouse(x, y);
+    [x, y] = await box(`${DL}.getElementById('emp')`); await k.mouse(x, y); await k.type(last);
+    await k.until(`[...${DL}.querySelectorAll('li')].some(l => l.textContent === ${JSON.stringify(ex.kronosName)})`);
+    [x, y] = await box(`[...${DL}.querySelectorAll('li')].find(l => l.textContent === ${JSON.stringify(ex.kronosName)})`); await k.mouse(x, y);
+    [x, y] = await box(`${DL}.getElementById('date')`); await k.mouse(x, y); await k.type(R.formatValue(ex, { field: "date", fmt: "MM/DD/YYYY" }));
+    [x, y] = await box(`${DL}.getElementById('st')`); await k.mouse(x, y); await k.type(R.niceTime(ex.start));
+    [x, y] = await box(`${DL}.getElementById('en')`); await k.mouse(x, y); await k.type(R.niceTime(ex.end));
+    // the job is filled in by Kronos (primary job) - nothing to do for a normal shift
+    [x, y] = await box(`${DL}.getElementById('save')`); await k.mouse(x, y);
     await k.until("window.added.length === 1");
     await sleep(500);
     await k.shot("3_watching");
@@ -153,44 +172,95 @@ async function page(url) {
     console.log("learned steps:\n  " + steps.join("\n  "));
     await k.shot("4_review_steps");
     await k.ev(`${P}.querySelector('#recsave').click()`);
-    await k.until(`${P}.querySelector('#recgo')`);
+    await k.until(`${P}.querySelector('#jobgo')`, 10000, "part 2 button");
 
-    // auto-fill Monday
-    await k.ev(`${P}.querySelector('[data-tab=auto]').click()`);
+    // part 2: the helper fills in a job-change shift, Zack changes the job while it watches
+    await k.shot("4b_part2_offer");
+    await k.ev(`(() => { const s = ${P}.querySelector('#exjob'); s.value = ${JSON.stringify(ex2.id)}; })()`);
+    console.log("part 2 with", ex2.day, ex2.usualJob, "->", ex2.kronosJob);
+    await k.ev(`${P}.querySelector('#jobgo').click()`);
+    await k.until(`${P}.querySelector('#jobdone')`, 60000, "helper filled the form and is watching");
+    assert.equal(await k.ev(`${DL}.getElementById('job').textContent`), ex2.usualJob); // Kronos put the usual job
+    await k.shot("4c_part2_watching");
+    [x, y] = await box(`${DL}.getElementById('chg')`); await k.mouse(x, y);
+    await k.until(`[...${DL}.querySelectorAll('#jobmenu li')].length`);
+    [x, y] = await box(`[...${DL}.querySelectorAll('#jobmenu li')].find(l => l.textContent === ${JSON.stringify(ex2.kronosJob)})`); await k.mouse(x, y);
+    await sleep(500);
+    await k.ev(`${P}.querySelector('#jobdone').click()`);
+    await k.until(`${P}.querySelector('#jobkeep')`);
+    const jsteps = await k.ev(`[...${P}.querySelectorAll('.sh-steps > li')].map(li => li.innerText.split('\\n')[0] + ' => ' + (li.querySelector('select') ? li.querySelector('select').selectedOptions[0].text : '-'))`);
+    console.log("job-change steps:\n  " + jsteps.join("\n  "));
+    await k.shot("4d_part2_steps");
+    await k.ev(`${P}.querySelector('#jobkeep').click()`);
+    await k.until(`${P}.querySelector('[data-ans=save]')`, 10000, "save prompt");
+    await k.ev(`${P}.querySelector('[data-ans=save]').click()`);
+    await k.until("window.added.length === 2", 20000, "part-2 shift saved");
+    assert.equal((await k.ev("window.added"))[1].job, ex2.kronosJob);
+    await k.until(`${P}.querySelector('#again')`);
+    await k.ev(`${P}.querySelector('#again').click()`);
+
+    // auto-fill the test day (skip the days before it)
+    const toDay = async (day) => {
+      for (;;) {
+        await k.until(`${P}.querySelector('[data-ans=go]')`, 20000, "day list");
+        const head = await k.ev(`${P}.querySelector('#auto p').innerText`);
+        if (head.startsWith(day)) return head;
+        await k.ev(`${P}.querySelector('[data-ans=skip]').click()`); await sleep(200);
+      }
+    };
     await k.until(`${P}.querySelector('#go')`);
     await k.ev(`${P}.querySelector('#go').click()`);
-    await k.until(`${P}.querySelector('[data-ans=go]')`, 20000, "day list");
-    console.log("day list:", await k.ev(`${P}.querySelector('#auto p').innerText`), "| rows:", await k.ev(`${P}.querySelectorAll('[data-pick]').length`), "| flagged:", await k.ev(`${P}.querySelectorAll('.sh-flag').length`));
+    console.log("day list:", await toDay(D), "| rows:", await k.ev(`${P}.querySelectorAll('[data-pick]').length`), "| job-change tags:", await k.ev(`${P}.querySelectorAll('#auto .sh-jobtag').length`));
     await k.shot("5_day_list");
     await k.ev(`${P}.querySelector('[data-ans=go]').click()`);
-    const mon = roster.shifts.filter((s) => s.day === ex.day);
-    await k.until(`window.added.length === ${mon.length} || !!${P}.querySelector('.sh-warn')`, 180000, "Monday entered");
+    const day = roster.shifts.filter((s) => s.day === D);
+    await k.until(`window.added.length === ${day.length + (ex2.day === D ? 0 : 1)} || !!${P}.querySelector('.sh-warn')`, 240000, `${D} entered`);
     const warn = await k.ev(`${P}.querySelector('.sh-warn') && ${P}.querySelector('.sh-warn').innerText`);
     if (warn) { await k.shot("x_warn"); throw new Error("auto-fill stopped: " + warn); }
     await k.until(`${P}.querySelector('[data-ans=go]')`, 20000, "next day list");
-    await k.shot("6_after_monday");
+    await k.shot("6_after_day");
     await k.ev(`${P}.querySelector('[data-ans=stop]').click()`);
-    const added = await k.ev("window.added");
-    // every Monday shift entered exactly once, with the right values
-    const want = mon.map((s) => JSON.stringify({ name: s.kronosName, date: R.formatValue(s, { field: "date", fmt: "MM/DD/YYYY" }), start: R.niceTime(s.start), end: R.niceTime(s.end), job: s.kronosJob })).sort();
+    const md = R.formatValue(ex, { field: "date", fmt: "MM/DD/YYYY" });
+    const added = (await k.ev("window.added")).filter((a) => a.date === md);
+    // every shift that day entered exactly once, with the right values - including the job
+    const want = day.map((s) => JSON.stringify({ name: s.kronosName, date: md, start: R.niceTime(s.start), end: R.niceTime(s.end), job: s.kronosJob })).sort();
     const got = added.map((a) => JSON.stringify(a)).sort();
     assert.deepEqual(got, want);
-    console.log(`auto-fill entered ${added.length - 1} shifts + 1 by hand = all ${mon.length} ${ex.day} shifts, values match the roster`);
+    const jc = day.filter((s) => s.jobChange).length;
+    assert(jc > 0);
+    console.log(`auto-fill entered all ${day.length} ${D} shifts (${jc} job-change shifts got ${[...new Set(day.filter((s) => s.jobChange).map((s) => s.kronosJob))]}), values match the roster`);
 
-    // run again after unticking everything: Monday shifts should show "already there?"
+    // run again after unticking everything: that day's shifts should show "already there?"
     await rv.ev("new Promise(r => chrome.storage.local.set({sh_done: {}}, r))");
     await sleep(500);
-    await k.until(`${P}.querySelector('#again') || ${P}.querySelector('#go')`);
-    const again = await k.ev(`${P}.querySelector('#again')`); if (again !== null) await k.ev(`${P}.querySelector('#again').click()`);
-    await k.until(`${P}.querySelector('#go')`);
-    await k.ev(`${P}.querySelector('#go').click()`);
-    await k.until(`${P}.querySelector('[data-ans=go]')`);
+    const restart = async () => {
+      await k.until(`${P}.querySelector('#again') || ${P}.querySelector('#go')`);
+      const again = await k.ev(`${P}.querySelector('#again')`); if (again !== null) await k.ev(`${P}.querySelector('#again').click()`);
+      await k.until(`${P}.querySelector('#go')`);
+      await k.ev(`${P}.querySelector('#go').click()`);
+      await toDay(D);
+    };
+    await restart();
     const flagged = await k.ev(`${P}.querySelectorAll('.sh-flag').length`);
     const unticked = await k.ev(`[...${P}.querySelectorAll('[data-pick]')].filter(c => !c.checked).length`);
-    console.log(`already-there check: ${flagged} of ${mon.length} flagged, ${unticked} unticked`);
+    console.log(`already-there check: ${flagged} of ${day.length} flagged, ${unticked} unticked`);
     await k.shot("7_already_there");
-    assert.equal(flagged, mon.length);
+    assert.equal(flagged, day.length);
     await k.ev(`${P}.querySelector('[data-ans=stop]').click()`);
+
+    // Kronos without the job menu: auto-fill must stop and ask on a job-change shift
+    await k.ev("window.HIDE_JOB = true");
+    await restart();
+    const fIdx = day.findIndex((s) => s.jobChange);
+    await k.ev(`[...${P}.querySelectorAll('[data-pick]')].forEach((c, i) => { c.checked = i === ${fIdx}; })`);
+    await k.ev(`${P}.querySelector('[data-ans=go]').click()`);
+    await k.until(`${P}.querySelector('.sh-warn')`, 60000, "job-menu warning");
+    const jwarn = await k.ev(`${P}.querySelector('#auto').innerText`);
+    console.log("no job menu ->", jwarn.replace(/\n+/g, " | ").slice(0, 300));
+    assert(/Changing the job/.test(jwarn) && /couldn't find/i.test(jwarn));
+    await k.shot("9_job_menu_missing");
+    await k.ev(`${P}.querySelector('[data-ans=stop]').click()`);
+    await k.ev("window.HIDE_JOB = false");
     if (process.env.EXT_SHOT) { // picture of Chrome's extensions page for the instructions
       const ex = await page("chrome://extensions/");
       await sleep(1500);

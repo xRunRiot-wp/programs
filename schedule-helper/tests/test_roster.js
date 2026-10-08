@@ -37,6 +37,20 @@ assert.deepEqual(R.guessMapping("Aver", s), { field: "name", fmt: "Last" });
 assert.deepEqual(R.guessMapping("Server", s, { click: true }), { field: "job", fmt: "Kronos job" });
 assert.deepEqual(R.guessMapping("6", s, { click: true }), { field: "date", fmt: "D (calendar day)" });
 assert.equal(R.guessMapping("Shift", s, { click: true }), null);
+// usual job + job-change shifts (a server working Bar)
+const jc = R.markJobChanges(res.shifts);
+const flagged = res.shifts.filter((x) => x.jobChange);
+console.log("job-change shifts", jc.count, flagged.map((x) => `${x.day} ${x.usualJob}->${x.kronosJob}`));
+assert(jc.count > 0 && flagged.every((x) => x.usualJob === "Server" && x.kronosJob === "Bar"));
+assert(res.shifts.filter((x) => x.schedule === "Cocktail").every((x) => !x.jobChange || x.usualJob !== "Server"));
+const mk = (emp, job, start = "17:00", end = "23:00") => ({ employee: emp, kronosJob: job, start, end });
+const t = [mk("A", "Server"), mk("A", "Server"), mk("A", "Bar"), mk("B", "Bar", "10:00", "22:00"), mk("B", "Server")];
+const u = R.usualJobs(t);
+assert.equal(u.A.job, "Server"); assert.equal(u.A.how, "auto");
+assert.equal(u.B.job, "Bar"); assert.equal(u.B.how, "tie"); // tie -> more hours
+assert.equal(R.usualJobs(t, { A: "Bar" }).A.job, "Bar"); // Zack's per-person setting wins
+assert.equal(R.markJobChanges(t, { A: "Bar" }).count, 3);
+assert.equal(R.jobWord("Bar"), "BARTENDER");
 // header-only / junk
 assert.equal(R.readRoster("", "x.csv").shifts.length, 0);
 assert(R.readRoster("Name,Foo\nA,B", "x.csv").problems.length);

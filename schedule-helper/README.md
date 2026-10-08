@@ -25,6 +25,14 @@ easily on a phone.
    - A Stop button is always there. If it can't find something on the screen, it stops and asks you.
    - Shifts that already look like they're on the schedule are flagged and left unticked.
 
+4. **Job-change shifts.** Kronos fills in each person's usual (primary) job when a shift is added. The helper
+   works out everyone's usual job (most worked that week; you can set it per person on the review screen, and it's
+   remembered) and flags every shift with a different job, like a server working Bar:
+   - *Copy mode* shows a red "BARTENDER shift - change the job for this one" box and outlines the Job copy button.
+   - *Auto-fill* has an optional part 2 of Show me once: it fills in one flagged shift, waits before Save, and
+     watches you change the job. After that it repeats those steps only on flagged shifts, and stops to ask if it
+     can't find the job box or menu.
+
 ## What it doesn't do
 
 - It doesn't sign in, store passwords, send data anywhere, or call Kronos in the background.
@@ -66,6 +74,8 @@ a **mock** Schedule Planner, where the add-shift form sits in a frame:
 - Show me once (real clicks and typing)
 - auto-filling a full day (every value checked against the roster)
 - the "already there?" check
+- job-change shifts: the copy-mode badge, teaching the job change (part 2), auto-filling a day with Bar shifts for
+  servers, and stopping to ask when the job menu is missing
 
 It hasn't been run against the real Kronos yet. That's why the add-shift steps are learned with Show me once
 rather than written in by hand.

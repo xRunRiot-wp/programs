@@ -1,23 +1,28 @@
-<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px sans-serif;padding:8px}label{display:block;margin:6px 0}li{cursor:pointer;padding:2px}li:hover{background:#eee}#err{color:red}</style></head><body>
+<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px sans-serif;padding:8px}label{display:block;margin:6px 0}li{cursor:pointer;padding:2px}li:hover{background:#eee}#err{color:red}#jobmenu{border:1px solid #999;margin:2px 0;padding:2px 0}</style></head><body>
 <b>Add shift</b>
 <label>Employee <input id="emp" aria-label="Employee search"></label><ul id="list" role="listbox"></ul>
 <label for="date">Date</label><input id="date" placeholder="MM/DD/YYYY">
 <label>Start time <input id="st" aria-label="Start time"></label>
 <label>End time <input id="en" aria-label="End time"></label>
-<label>Job <select id="job" aria-label="Job"><option value="">--</option><option>Server</option><option>Bar</option><option>Bus</option><option>Host</option><option>Manager</option></select></label>
+<!-- Like Kronos: the job is filled in from the person's primary job; "Change job" opens a menu -->
+<div>Job: <span id="job">--</span> <button id="chg" aria-label="Change job">Change job</button></div>
+<ul id="jobmenu" role="menu" hidden></ul>
 <div id="err"></div><button id="save">Save</button> <button id="cancel">Cancel</button>
 <script>
 let picked = null;
-const dir = parent.DIRECTORY;
+const dir = parent.DIRECTORY, primary = parent.PRIMARY || {}, JOBS = ['Server','Bar','Bus','Host','Manager'];
 emp.addEventListener('input', () => { list.innerHTML=''; picked=null; const q = emp.value.toLowerCase(); if (q.length<2) return;
-  dir.filter(n => n.toLowerCase().includes(q)).slice(0,6).forEach(n => { const li=document.createElement('li'); li.setAttribute('role','option'); li.textContent=n; li.onclick=()=>{picked=n; emp.value=n; list.innerHTML='';}; list.appendChild(li); }); });
+  dir.filter(n => n.toLowerCase().includes(q)).slice(0,6).forEach(n => { const li=document.createElement('li'); li.setAttribute('role','option'); li.textContent=n;
+    li.onclick=()=>{picked=n; emp.value=n; list.innerHTML=''; job.textContent = primary[n] || '--';}; list.appendChild(li); }); });
+chg.onclick = () => { jobmenu.innerHTML=''; JOBS.forEach(j => { const li=document.createElement('li'); li.setAttribute('role','menuitem'); li.textContent=j; li.onclick=()=>{job.textContent=j; jobmenu.hidden=true;}; jobmenu.appendChild(li); }); jobmenu.hidden=false; };
+if (parent.HIDE_JOB) chg.remove();
 const T = /^(1[0-2]|[1-9]):[0-5]\d (AM|PM)$/, D = /^\d\d\/\d\d\/\d{4}$/;
 save.onclick = () => {
   if (!picked) return err.textContent='Pick an employee';
   if (!D.test(date.value)) return err.textContent='Bad date';
   if (!T.test(st.value) || !T.test(en.value)) return err.textContent='Bad time';
-  if (!job.value) return err.textContent='Pick a job';
-  parent.saveShift({name:picked, date:date.value, start:st.value, end:en.value, job:job.value});
+  if (job.textContent==='--') return err.textContent='No job';
+  parent.saveShift({name:picked, date:date.value, start:st.value, end:en.value, job:job.textContent});
 };
 cancel.onclick = () => parent.document.getElementById('dlg').style.display='none';
 </script></body></html>

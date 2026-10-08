@@ -70,6 +70,7 @@
         <li><b>Week starting</b> should be that week's Monday.</li>
         <li>Each day lists its shifts. "next day" means the shift ends after midnight. "double" means that person works twice that day.</li>
         <li>Names are written the Kronos way, "Last, First". If a name is wrong (two last names, a nickname), open <b>Names and jobs as Kronos spells them</b> and fix it there. The helper remembers your fixes for next week.</li>
+        <li>Shifts marked <b>job change</b> are shifts where someone works a different job than usual (for example a server on Bar). See section E.</li>
         <li>Untick any shift that shouldn't go into Kronos.</li>
       </ul>
       <img src="img/review.jpg" alt="The review page showing Monday's shifts with names, start, end and job">
@@ -119,9 +120,30 @@
 </section>
 
 <section>
-  <h2>E. If something looks wrong</h2>
+  <h2>E. Job-change shifts (a server working Bar)</h2>
+  <p>When you add a shift, Kronos fills in the person's <b>usual job</b>. So if a server has a bartending shift, the job has to be changed to Bar for that one shift. The helper works out everyone's usual job (the job they work most that week) and marks every shift with a different job.</p>
+  <ul>
+    <li><b>Copy mode:</b> those shifts show a red box, for example <b>&#9888; BARTENDER shift &ndash; change the job for this one</b>, and the Job button is outlined in red. Click it to copy the job, then change the job in Kronos for that shift.
+      <img class="narrow" src="img/jobchange_copy.jpg" alt="Copy tab showing a red BARTENDER shift warning and the Job button outlined in red">
+    </li>
+    <li><b>Auto-fill:</b> show it once how you change the job (it's part 2 of the <b>Show me once</b> tab):
+      <ol>
+        <li>Under <b>Part 2: job-change shifts</b>, pick a shift and click <b>Show me on this shift</b>.</li>
+        <li>The helper fills in that shift and waits <b>before Save</b>. Change the job in the Kronos form the way you normally do. Don't press Save.
+          <img src="img/jobchange_teach.jpg" alt="The add-shift form filled in, with the helper watching while the job is changed">
+        </li>
+        <li>Click <b>I changed it &ndash; done</b>. Check that the step where you picked the job says <b>Job</b>, then click <b>Remember these steps</b>. It asks before saving that shift.</li>
+      </ol>
+      After that, auto-fill changes the job only on the &#9888; shifts. If it can't find the job box or menu, it stops and asks you. If you haven't shown it yet, it stops at the first job-change shift and lets you show it there, or change the job yourself.</li>
+    <li><b>Wrong usual job?</b> If Kronos has someone under a different main job than the helper guessed, open <b>Names and jobs as Kronos spells them</b> on the load page and pick their <b>Usual job in Kronos</b>. It's remembered for next week.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>F. If something looks wrong</h2>
   <ol>
     <li><b>The box doesn't show up on Kronos:</b> refresh the page (<kbd>F5</kbd>). Make sure you're on the Schedule Planner, and that Schedule Helper is switched on at <code>chrome://extensions</code>.</li>
+    <li><b>A shift is marked "job change" but shouldn't be (or the other way round):</b> set that person's <b>Usual job in Kronos</b> on the load page, click <b>Use this schedule</b> again, and refresh Kronos.</li>
     <li><b>A name or job is wrong:</b> fix it on the load page (step B4), click <b>Use this schedule</b> again, and refresh Kronos.</li>
     <li><b>Shifts are on the wrong days:</b> check that <b>Week starting</b> is the Monday of that week.</li>
     <li><b>Auto-fill typed into the wrong box, or Kronos changed its form:</b> click Stop and delete the wrong shift in Kronos yourself. Then, on the load page, click <b>Forget "Show me once"</b> and show it again. You can always use Copy mode instead.</li>

@@ -127,8 +127,9 @@
     "H:mm": (t) => `${t.H}:${pad(t.M)}`,
   };
   const DATE = {
-    "M/D/YYYY": (d) => `${d.Mo}/${d.D}/${d.Y}`,
+    // padded first: when the example date can't tell (10/10/2026), 10/05 is the safer guess
     "MM/DD/YYYY": (d) => `${pad(d.Mo)}/${pad(d.D)}/${d.Y}`,
+    "M/D/YYYY": (d) => `${d.Mo}/${d.D}/${d.Y}`,
     "M/D/YY": (d) => `${d.Mo}/${d.D}/${String(d.Y).slice(2)}`,
     "MM/DD/YY": (d) => `${pad(d.Mo)}/${pad(d.D)}/${String(d.Y).slice(2)}`,
     "YYYY-MM-DD": (d) => `${d.Y}-${pad(d.Mo)}-${pad(d.D)}`,
@@ -201,7 +202,51 @@
 
   function niceTime(hhmm) { const t = timeParts(hhmm); return `${t.h}:${pad(t.M)} ${t.ap}`; }
 
-  const api = { parseCSV, readRoster, weekFromFilename, addDays, to24, kronosNameFor, FIELDS, FIELD_LABELS, formatValue, guessMapping, niceTime };
+  // ---- usual job per person ------------------------------------------------
+  // Kronos fills in a person's PRIMARY job when a shift is added, so a shift with a
+  // different job (a server working Bar) needs the job changed for that one shift.
+  // The usual job is the one they work most this week (ties: more hours, then A-Z);
+  // Zack can set it per person (overrides, remembered on the review screen).
+  function hours(s) {
+    const [a, b] = [s.start, s.end].map((t) => { const [H, M] = t.split(":").map(Number); return H * 60 + M; });
+    return ((b - a + 1440) % 1440 || 1440) / 60;
+  }
+  function usualJobs(shifts, overrides = {}) {
+    const per = {};
+    shifts.forEach((s) => {
+      if (!s.kronosJob) return;
+      const p = (per[s.employee] = per[s.employee] || {});
+      const j = (p[s.kronosJob] = p[s.kronosJob] || { n: 0, h: 0 });
+      j.n++; j.h += hours(s);
+    });
+    const out = {};
+    for (const [emp, jobs] of Object.entries(per)) {
+      const ranked = Object.entries(jobs).sort((a, b) => b[1].n - a[1].n || b[1].h - a[1].h || a[0].localeCompare(b[0]));
+      const tie = ranked.length > 1 && ranked[0][1].n === ranked[1][1].n;
+      out[emp] = overrides[emp]
+        ? { job: overrides[emp], how: "set" }
+        : { job: ranked[0][0], how: tie ? "tie" : "auto" };
+      out[emp].jobs = ranked.map(([j]) => j);
+    }
+    return out;
+  }
+  // adds usualJob + jobChange to every shift; returns how many need a job change
+  function markJobChanges(shifts, overrides = {}) {
+    const usual = usualJobs(shifts, overrides);
+    let n = 0;
+    shifts.forEach((s) => {
+      s.usualJob = usual[s.employee] ? usual[s.employee].job : "";
+      s.jobChange = !!(s.kronosJob && s.usualJob && norm(s.kronosJob) !== norm(s.usualJob));
+      if (s.jobChange) n++;
+    });
+    return { usual, count: n };
+  }
+  const norm = (x) => String(x || "").trim().toLowerCase();
+  // "Bar" -> "BARTENDER" for the copy-mode badge
+  const JOB_WORD = { bar: "BARTENDER", bartender: "BARTENDER", server: "SERVER", cocktail: "SERVER", host: "HOST", bus: "BUSSER", busser: "BUSSER", manager: "MANAGER" };
+  function jobWord(job) { return JOB_WORD[norm(job)] || String(job || "").toUpperCase(); }
+
+  const api = { parseCSV, readRoster, weekFromFilename, addDays, to24, kronosNameFor, FIELDS, FIELD_LABELS, formatValue, guessMapping, niceTime, usualJobs, markJobChanges, jobWord };
   globalThis.SHRoster = api;
   if (typeof module !== "undefined") module.exports = api;
 })();
