@@ -1,0 +1,51 @@
+/* Shared look for the Kronos panel and the review screen. */
+:host, .sh-root {
+  --bg: #ffffff; --fg: #1d2330; --muted: #667085; --line: #d0d5dd; --accent: #0b6e69; --accent-fg: #fff;
+  --soft: #e7f4f3; --warn: #b54708; --warn-bg: #fff4e5; --done: #12805c;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg);
+}
+* { box-sizing: border-box; }
+button, select, input { font: inherit; }
+button { border: 1px solid var(--line); background: #fff; color: var(--fg); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.sh-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.sh-danger { background: #b42318; color: #fff; border-color: #b42318; }
+.sh-big { width: 100%; padding: 10px; font-weight: 600; background: var(--soft); border-color: var(--accent); margin-top: 8px; }
+.sh-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.sh-row > button { flex: 1 1 auto; }
+.sh-small { font-size: 12px; }
+.sh-muted { color: var(--muted); }
+.sh-warn { color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px; margin: 8px 0; }
+.sh-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.sh-card.sh-isdone { border-color: var(--done); }
+.sh-cardtop { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.sh-fields { display: grid; gap: 4px; }
+.sh-field { display: flex; justify-content: space-between; gap: 8px; text-align: left; padding: 8px 10px; }
+.sh-field.sh-active { background: var(--soft); border-color: var(--accent); }
+.sh-flabel { color: var(--muted); min-width: 44px; }
+.sh-fval { font-weight: 600; text-align: right; }
+.sh-note { min-height: 20px; margin-top: 6px; font-size: 13px; }
+.sh-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 220px; overflow: auto; border-top: 1px solid var(--line); }
+.sh-list li { display: grid; grid-template-columns: 20px 62px 1fr auto auto; gap: 6px; align-items: center; padding: 4px 2px; border-bottom: 1px solid #eef0f3; cursor: pointer; font-size: 12px; }
+.sh-list li.sh-cur { background: var(--soft); }
+.sh-list li.sh-done { color: var(--muted); text-decoration: line-through; }
+.sh-list li.sh-flag { background: var(--warn-bg); }
+.sh-fmts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.sh-steps { margin: 8px 0; padding-left: 20px; max-height: 260px; overflow: auto; }
+.sh-steps li { margin-bottom: 6px; }
+.sh-steps select { max-width: 150px; }
+.sh-tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef0f3; }
+
+/* panel on the Kronos page */
+.sh-panel { position: fixed; right: 16px; bottom: 16px; width: 360px; max-height: calc(100vh - 32px); display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); z-index: 2147483647; }
+.sh-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--accent); color: #fff; border-radius: 12px 12px 0 0; cursor: move; user-select: none; }
+.sh-head b { flex: 1; }
+.sh-head button { background: transparent; color: #fff; border-color: rgba(255,255,255,.5); padding: 2px 8px; }
+.sh-tabs { display: flex; border-bottom: 1px solid var(--line); }
+.sh-tabs button { flex: 1; border: 0; border-radius: 0; padding: 8px; background: #f7f8fa; }
+.sh-tabs button.sh-on { background: #fff; font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+.sh-body { padding: 10px; overflow: auto; }
+.sh-panel.sh-min .sh-tabs, .sh-panel.sh-min .sh-body { display: none; }
+.sh-stop { position: sticky; bottom: 0; margin-top: 8px; width: 100%; }
