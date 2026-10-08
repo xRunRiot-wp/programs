@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule Helper</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="review.css">
+</head>
+<body class="sh-root">
+<header><h1>Schedule Helper</h1><p class="sh-muted">HotSchedules Weekly Roster &rarr; Kronos. Nothing leaves this computer.</p></header>
+<main>
+  <section class="box">
+    <h2><span class="num">1</span> Pick this week's roster file</h2>
+    <p>In HotSchedules export the <b>Weekly Roster</b> (it downloads as <code>Weekly_Roster_&hellip;.csv</code> or <code>.xlsx</code>), then pick it here.</p>
+    <div class="sh-row">
+      <input type="file" id="file" accept=".csv,.xlsx,.xls">
+      <label>Week starting (Monday) <input type="date" id="week"></label>
+    </div>
+    <div id="problems"></div>
+  </section>
+
+  <section class="box" id="step2" hidden>
+    <h2><span class="num">2</span> Check the shifts</h2>
+    <p id="summary"></p>
+    <details>
+      <summary>Names and jobs as Kronos spells them</summary>
+      <p class="sh-small sh-muted">Kronos lists people as "Last, First". Fix anyone who looks wrong (two last names, nicknames). Your fixes are remembered for next week.</p>
+      <div id="names" class="grid2"></div>
+      <h3>Jobs</h3>
+      <div id="jobs" class="grid2"></div>
+    </details>
+    <div id="days"></div>
+  </section>
+
+  <section class="box" id="step3" hidden>
+    <h2><span class="num">3</span> Send it to the Kronos page</h2>
+    <div class="sh-row">
+      <label><input type="radio" name="confirm" value="day" checked> Auto-fill asks me once per day</label>
+      <label><input type="radio" name="confirm" value="shift"> Auto-fill asks me before every shift</label>
+    </div>
+    <div class="sh-row">
+      <label><input type="radio" name="pace" value="normal" checked> Normal typing speed</label>
+      <label><input type="radio" name="pace" value="slow"> Slower</label>
+    </div>
+    <div class="sh-row">
+      <button class="sh-primary" id="use">Use this schedule</button>
+      <a id="openk" class="btn" target="_blank" rel="noopener">Open Kronos</a>
+    </div>
+    <p id="used" class="sh-muted"></p>
+  </section>
+
+  <section class="box">
+    <h2>Copy mode (works here too)</h2>
+    <p class="sh-small sh-muted">The same list is in the panel on the Kronos page. Click a value to copy it, then click the Kronos box and press Ctrl+V.</p>
+    <div id="copy"></div>
+  </section>
+
+  <section class="box sh-small">
+    <h2>Start over</h2>
+    <div class="sh-row">
+      <button id="cleardone">Untick every shift</button>
+      <button id="clearrecipe">Forget "Show me once"</button>
+    </div>
+  </section>
+</main>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="settings.js"></script>
+<script src="roster.js"></script>
+<script src="store.js"></script>
+<script src="copymode.js"></script>
+<script src="review.js"></script>
+</body>
+</html>

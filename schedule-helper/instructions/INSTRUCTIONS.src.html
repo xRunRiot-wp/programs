@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule Helper - how to use it</title>
+<style>
+  :root { --accent: #0b6e69; --fg: #1d2330; --muted: #5b6475; --line: #d0d5dd; --warn-bg: #fff4e5; }
+  body { margin: 0; background: #f4f6f8; color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--accent); color: #fff; padding: 20px 16px; }
+  header h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 0; color: #d6efed; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; break-inside: avoid-page; }
+  h2 { margin: 0 0 8px; font-size: 20px; color: var(--accent); }
+  ol { padding-left: 24px; margin: 8px 0; }
+  li { margin-bottom: 8px; }
+  img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
+  img.narrow { max-width: 340px; }
+  .note { background: var(--warn-bg); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  code { overflow-wrap: anywhere; }
+  code, kbd { background: #eef0f3; border-radius: 4px; padding: 1px 5px; font-size: 14px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  @media print { body { background: #fff; } section { border: none; padding: 0 0 8px; } header { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Schedule Helper</h1>
+  <p>Get your HotSchedules schedule into Kronos without typing it all by hand.</p>
+</header>
+<main>
+
+<section>
+  <h2>Before you start</h2>
+  <ul>
+    <li>It's an add-on for <b>Google Chrome</b> on a computer. It also works in Microsoft Edge. It doesn't work on a phone.</li>
+    <li>It never sees or saves your password, and it never signs in for you. You sign in to Kronos yourself, as usual.</li>
+    <li>The schedule stays on your computer. Nothing is sent anywhere.</li>
+    <li>Nothing is saved in Kronos until you say so.</li>
+  </ul>
+  <div class="note"><b>Please check with your manager first</b> that it's OK to use a helper like this on Kronos and on your work computer. Your company's computer rules still apply. If they'd rather you didn't use auto-fill, <b>Copy mode</b> works on its own: it's just copy and paste, and you do every click.</div>
+</section>
+
+<section>
+  <h2>A. Set it up (one time only)</h2>
+  <ol>
+    <li>Download <code>schedule-helper.zip</code> from the link Joseph sent you.</li>
+    <li>Right-click the zip and choose <b>Extract All</b>. Put the folder somewhere it can stay, for example <code>Documents\ScheduleHelper</code>. Chrome uses this folder every time, so don't delete it.</li>
+    <li>In Chrome, click the address bar, type <code>chrome://extensions</code> and press Enter. (In Edge, type <code>edge://extensions</code>.)</li>
+    <li>Turn on <b>Developer mode</b> using the switch in the top right corner. In Edge the switch is on the left.</li>
+    <li>Click <b>Load unpacked</b> and pick the <b>extension</b> folder inside the folder you extracted.</li>
+    <li>Schedule Helper now shows in the list:
+      <img src="img/extensions.jpg" alt="Chrome's extensions page with Developer mode on, the Load unpacked button, and the Schedule Helper card">
+    </li>
+    <li>Pin it so it's easy to find. Click the puzzle-piece icon at the top right of Chrome, then click the pin next to <b>Schedule Helper</b>. Its button (a grey "S") now stays in the toolbar.</li>
+  </ol>
+  <p class="muted">Chrome sometimes pops up a message about "developer mode extensions". Just close it, the helper keeps working. If you ever move the folder, do steps 3 to 5 again.</p>
+</section>
+
+<section>
+  <h2>B. Every week: load the schedule</h2>
+  <ol>
+    <li>Make and <b>Post</b> the schedule in HotSchedules like you always do.</li>
+    <li>Download the <b>Weekly Roster</b> from HotSchedules. It's the same file you sent Joseph, named something like <code>Weekly_Roster_10052026_10112026</code>. It can be a .csv or an Excel file; both work.</li>
+    <li>Click the <b>Schedule Helper</b> button in Chrome's toolbar. A page opens.</li>
+    <li>Click <b>Choose File</b> and pick the Weekly Roster you just downloaded.</li>
+    <li>Check the list:
+      <ul>
+        <li><b>Week starting</b> should be that week's Monday.</li>
+        <li>Each day lists its shifts. "next day" means the shift ends after midnight. "double" means that person works twice that day.</li>
+        <li>Names are written the Kronos way, "Last, First". If a name is wrong (two last names, a nickname), open <b>Names and jobs as Kronos spells them</b> and fix it there. The helper remembers your fixes for next week.</li>
+        <li>Untick any shift that shouldn't go into Kronos.</li>
+      </ul>
+      <img src="img/review.jpg" alt="The review page showing Monday's shifts with names, start, end and job">
+    </li>
+    <li>Click <b>Use this schedule</b>.</li>
+    <li>Click <b>Open Kronos</b>, sign in like normal and go to the <b>Schedule Planner</b>. The <b>Schedule Helper</b> box appears in the bottom right corner. To move it, drag its green top bar. To make it smaller, click <b>&ndash;</b>.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>C. Copy mode (simplest: you do every click)</h2>
+  <img class="narrow" src="img/copy.jpg" alt="Copy tab showing one shift with Name, Date, Start, End and Job buttons and a Copy next field button">
+  <ol>
+    <li>Open the <b>Copy</b> tab. It shows one shift at a time.</li>
+    <li>In Kronos, open the add-shift form the way you normally do.</li>
+    <li>Click <b>Copy next field</b>, click the matching box in Kronos, and press <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste. Do the same for Name, Date, Start, End and Job. You can also click any single value to copy just that one.</li>
+    <li>If the Name box in Kronos is a search box, paste the name and then click the person in the list that appears.</li>
+    <li>Save the shift in Kronos, then click <b>&#10003; Done, next shift</b>.</li>
+    <li>Your ticks are saved. If you close Chrome, you'll be back where you stopped next time. The list at the bottom shows every shift and lets you jump to any of them.</li>
+  </ol>
+  <p class="muted">If Kronos wants times or dates written differently (for example 17:00 instead of 5:00 PM), change them under <b>Text formats</b> at the bottom of the Copy tab.</p>
+</section>
+
+<section>
+  <h2>D. Auto-fill (the helper types for you, after you OK it)</h2>
+  <p><b>First, show it once.</b> The helper has to watch you add one shift before it knows Kronos' add-shift form.</p>
+  <ol>
+    <li>Open the <b>Show me once</b> tab, choose a shift, and click <b>Start watching</b>.</li>
+    <li>Add that shift in Kronos the normal way, using Kronos' own <b>add shift</b> button. Type the name, date and times into the boxes; don't click on the schedule grid. Then press Save in Kronos.
+      <img src="img/watching.jpg" alt="Kronos with the helper watching while one shift is added">
+    </li>
+    <li>Click <b>I saved it - done</b>. You'll see a list of what you did. Check that every value has the right label (Employee name, Shift date, Start time, End time, Job) and that the Save button is ticked. Then click <b>Save these steps</b>.
+      <img class="narrow" src="img/steps.jpg" alt="List of learned steps, each with a This is: dropdown">
+    </li>
+  </ol>
+  <p><b>Then let it fill the week:</b></p>
+  <ol>
+    <li>Open the <b>Auto-fill</b> tab and click <b>Start</b>.</li>
+    <li>It shows one day at a time. Shifts that already seem to be in Kronos are marked <b>&#9888; already there?</b> and unticked. Untick anything else you don't want, then click <b>Add the ticked shifts</b>.
+      <img class="narrow" src="img/daylist.jpg" alt="A day's list of shifts with tick boxes and Add the ticked shifts / Skip this day / Stop buttons">
+    </li>
+    <li>It enters the shifts one at a time at about the speed a person types. <b>Leave the mouse and keyboard alone while it works.</b> The red <b>Stop</b> button stops it whenever you want.</li>
+    <li>If you picked "asks me before every shift" on the load page, it stops before each Save so you can check the form first.</li>
+    <li>If it can't find something, it stops and asks you. You can do that step yourself and click <b>I did it</b>, click <b>Try again</b>, or click <b>Skip this shift</b>.</li>
+    <li>When it's done, look over the week in Kronos before you finish.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>E. If something looks wrong</h2>
+  <ol>
+    <li><b>The box doesn't show up on Kronos:</b> refresh the page (<kbd>F5</kbd>). Make sure you're on the Schedule Planner, and that Schedule Helper is switched on at <code>chrome://extensions</code>.</li>
+    <li><b>A name or job is wrong:</b> fix it on the load page (step B4), click <b>Use this schedule</b> again, and refresh Kronos.</li>
+    <li><b>Shifts are on the wrong days:</b> check that <b>Week starting</b> is the Monday of that week.</li>
+    <li><b>Auto-fill typed into the wrong box, or Kronos changed its form:</b> click Stop and delete the wrong shift in Kronos yourself. Then, on the load page, click <b>Forget "Show me once"</b> and show it again. You can always use Copy mode instead.</li>
+    <li><b>Late shifts:</b> a shift ending at 12:00 AM or 1:00 AM ends the next day. Check that the first one looks right in Kronos.</li>
+    <li><b>"Already there?"</b> is only a guess from what's on the screen. You decide.</li>
+    <li><b>To start the week over:</b> on the load page, click <b>Untick every shift</b>.</li>
+    <li><b>Still stuck?</b> Take a screenshot and send it to Joseph.</li>
+  </ol>
+</section>
+
+</main>
+</body>
+</html>
