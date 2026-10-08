@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PixelDex</title>
+<link rel="icon" href="app/sprites/025_pikachu-all-base-none.png">
+<link rel="stylesheet" href="app/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>PixelDex</h1>
+  <nav class="tabs">
+    <button data-tab="pokedex" class="tab-btn active">Pokédex</button>
+    <button data-tab="forms" class="tab-btn">Forms</button>
+    <button data-tab="palettes" class="tab-btn">Palettes</button>
+    <button data-tab="biome" class="tab-btn">Browse by biome / structure</button>
+  </nav>
+  <div class="counts" id="counts">— / — caught</div>
+  <button id="resyncBtn" class="small-btn hidden" title="Read your world save again">↻ Sync</button>
+  <button id="settingsBtn" class="icon-btn" title="Settings">⚙</button>
+</header>
+
+<section id="view-pokedex" class="view">
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search by name or #...">
+    <select id="biomeFilter"><option value="">All biomes &amp; structures</option></select>
+    <select id="caughtFilter">
+      <option value="">All</option>
+      <option value="caught">Caught</option>
+      <option value="uncaught">Not caught</option>
+    </select>
+    <select id="lookMode" title="Which picture each Pokémon shows">
+      <option value="picks">Pictures: your picks</option>
+      <option value="default">Pictures: default</option>
+      <option value="shiny">Pictures: shiny</option>
+    </select>
+    <span class="hint">Tip: open a Pokémon and click any form/palette to make it its picture here.</span>
+  </div>
+  <main id="grid" class="grid"></main>
+</section>
+
+<section id="view-forms" class="view hidden">
+  <div class="toolbar">
+    <input id="formSearch" type="search" placeholder="Search by name or #...">
+    <select id="formKind">
+      <option value="">All forms</option>
+      <option value="regional">Regional (Alolan, Galarian, Hisuian, Paldean)</option>
+      <option value="mega">Mega</option>
+      <option value="gmax">Gigantamax</option>
+      <option value="other">Other forms</option>
+    </select>
+    <select id="formCaught">
+      <option value="">All</option>
+      <option value="caught">Caught</option>
+      <option value="uncaught">Not caught</option>
+    </select>
+    <span class="hint" id="formCount"></span>
+  </div>
+  <main id="formGrid" class="grid"></main>
+</section>
+
+<section id="view-palettes" class="view hidden">
+  <div class="toolbar">
+    <input id="palSearch" type="search" placeholder="Search by name or #...">
+    <select id="palName"></select>
+    <select id="palSort">
+      <option value="dex">Sort: Pokédex number</option>
+      <option value="palette">Sort: palette name</option>
+      <option value="name">Sort: Pokémon name</option>
+      <option value="uncaught">Sort: not caught first</option>
+    </select>
+    <select id="palCaught">
+      <option value="">All</option>
+      <option value="caught">Caught</option>
+      <option value="uncaught">Not caught</option>
+    </select>
+    <span class="hint" id="palCount"></span>
+  </div>
+  <main id="palGrid" class="grid"></main>
+</section>
+
+<section id="view-biome" class="view hidden">
+  <div class="toolbar">
+    <select id="biomeSelect"><option value="">Choose a biome or structure…</option></select>
+    <input id="biomeSearch" type="search" placeholder="Search by name or #...">
+    <select id="timeFilter">
+      <option value="">Any time</option>
+      <option>Day</option><option>Night</option><option>Dawn</option>
+      <option>Morning</option><option>Afternoon</option><option>Dusk</option>
+    </select>
+    <select id="methodFilter">
+      <option value="">All methods</option>
+      <option value="wild">Wild encounters only</option>
+      <option value="raid">Raids &amp; boss encounters only</option>
+    </select>
+    <label class="checkbox-label"><input type="checkbox" id="hideCaught"> Hide already caught</label>
+  </div>
+  <div id="biomeTable" class="biome-table"></div>
+</section>
+
+<div id="detailOverlay" class="overlay hidden">
+  <div class="detail-card">
+    <button id="closeDetail" class="icon-btn close" title="Close">×</button>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<div id="settingsOverlay" class="overlay hidden">
+  <div class="detail-card">
+    <button id="closeSettings" class="icon-btn close" title="Close">×</button>
+    <h2>Settings</h2>
+    <p>Point PixelDex at your Minecraft world's save folder to track what you've caught automatically.</p>
+    <p class="hint">Pick the folder named after your world (it has a "playerdata" folder inside it), e.g.
+      <code>…\Instances\&lt;modpack&gt;\saves\&lt;world name&gt;</code>. PixelDex only reads it — nothing is changed.</p>
+    <button id="pickWorldBtn">Choose world save folder…</button>
+    <input type="file" id="worldInput" webkitdirectory class="hidden">
+    <div id="settingsStatus" class="hint"></div>
+    <div id="playerPicker"></div>
+    <hr>
+    <button id="clearManualBtn" class="small-btn">Clear manual "caught" marks</button>
+    <button id="disconnectBtn" class="small-btn">Disconnect world</button>
+    <p class="hint" id="aboutLine"></p>
+  </div>
+</div>
+
+<script src="app/data.js"></script>
+<script src="app/nbt.js"></script>
+<script src="app/app.js"></script>
+</body>
+</html>

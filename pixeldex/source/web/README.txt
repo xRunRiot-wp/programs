@@ -1,12 +1,3 @@
-# PixelDex
-
-A Pokédex companion for Pixelmon Reforged (Minecraft 1.21.1; data from Pixelmon 9.4.1).
-
-**Download:** the newest `pixeldex-v…` zip on the Releases page. Unzip it and double-click `PixelDex.html` — it opens in your browser. Portable: no .exe, nothing to install.
-
-**Rebuild the data** (after a Pixelmon update): `python source/build.py --jar <path to Pixelmon jar> --out <folder>`.
-
-```
 PixelDex v2 - a Pokedex companion for Pixelmon Reforged (Minecraft 1.21.1)
 ==========================================================================
 
@@ -51,4 +42,3 @@ from Pixelmon's own spawn data - a relative "how much more likely" guide, not an
 in-game probability. "Any time" rows show the most conservative share. Raid Den numbers
 assume every eligible Pokemon is equally likely. Structure spawns have no % (they're
 extra spawns on top of the biome's normal ones).
-```
