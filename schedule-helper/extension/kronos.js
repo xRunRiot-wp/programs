@@ -90,13 +90,44 @@
     const t = ownText(el); if (t && t.length <= 60) d.text = t; // a long text is a container, not a name
     const l = labelOf(el) || (el.matches(FORM) && !d["aria-label"] && !d.placeholder ? nearLabel(el) : ""); if (l) d.label = l;
     d.path = cssPath(el);
+    // extra clues so replay has fallbacks (Kronos changes ids, case and layout)
+    try {
+      if (el.matches(BOXES)) {
+        const nl = nearLabel(el); if (nl) d.near = nl;
+        if (el.type) d.itype = el.type;
+        if (isTimey(el)) d.tidx = timeBoxes(el.ownerDocument).indexOf(el);
+      }
+      const c = container(el);
+      if (c) {
+        d.pcls = String(c.className || "").trim().split(/\s+/)[0] || c.tagName.toLowerCase();
+        const same = el.matches(BOXES) ? [...c.querySelectorAll(BOXES)].filter(visible) : [...c.querySelectorAll(el.tagName)].filter(visible);
+        d.pidx = same.indexOf(el);
+        const cr = c.getBoundingClientRect(), r = el.getBoundingClientRect();
+        if (cr.width && cr.height) d.rel = [+((r.left + r.width / 2 - cr.left) / cr.width).toFixed(3), +((r.top + r.height / 2 - cr.top) / cr.height).toFixed(3)];
+      }
+    } catch (e) { /* clues are optional */ }
     return d;
+  }
+  // the open panel/dialog something sits in (or null)
+  const PANELISH = "[role=dialog],[aria-modal=true],aside,[class*=panel],[class*=Panel],[class*=slider],[class*=drawer],[class*=flyout],[class*=modal]";
+  function container(el) { const c = el.closest(PANELISH); return c && c !== document.body ? c : null; }
+  const fuzzy = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  function isTimey(e) {
+    return e.type === "time" || /time|hh|:mm/i.test(`${e.getAttribute("placeholder") || ""} ${e.getAttribute("aria-label") || ""} ${e.name || ""} ${e.id || ""} ${typeof e.className === "string" ? e.className : ""}`) ||
+      /\d{1,2}:\d\d/.test(e.value || "") || /\btime\b/i.test(nearLabel(e));
+  }
+  function timeBoxes(doc = document) { return deepAll(BOXES, doc).filter((e) => visible(e) && isTimey(e)); }
+  // querySelectorAll that also looks inside open shadow roots
+  function deepAll(sel, root = document) {
+    const out = [...root.querySelectorAll(sel)];
+    for (const h of root.querySelectorAll("*")) if (h.shadowRoot) out.push(...deepAll(sel, h.shadowRoot));
+    return out;
   }
   function score(el, d, wantText) {
     let s = el.tagName.toLowerCase() === d.tag ? 1 : -3;
     if (d.id && el.id === d.id) s += 10;
     for (const a of ATTRS) if (d[a] && el.getAttribute(a) === d[a]) s += a === "type" || a === "role" ? 1 : 6;
-    if (d.label && (labelOf(el) || (el.matches(FORM) ? nearLabel(el) : "")) === d.label) s += 6;
+    if (d.label && fuzzy(labelOf(el) || (el.matches(FORM) ? nearLabel(el) : "")) === fuzzy(d.label)) s += 6;
     const t = ownText(el);
     if (wantText != null) {
       if (norm(t) === norm(wantText)) s += 8;
@@ -106,12 +137,60 @@
     } else if (d.text) {
       s += t === d.text ? 6 : -4;
     }
-    try { if (d.path && el.matches(d.path.split(" > ").pop()) && document.querySelector(d.path) === el) s += 3; } catch (e) { /* bad selector */ }
+    try { if (d.path && el.matches(d.path.split(" > ").pop()) && el.getRootNode().querySelector(d.path) === el) s += 3; } catch (e) { /* bad selector */ }
     return s;
   }
-  function find(d, wantText) {
-    let pool = [...document.querySelectorAll(d.tag)];
-    if (wantText != null) pool = pool.concat([...document.querySelectorAll("[role=option],[role=menuitem],[role=gridcell],li,button,a,td,span,div")]);
+  function find(d, wantText, loose) {
+    const exact = findExact(d, wantText);
+    return exact || (loose ? findLoose(d, wantText) : null);
+  }
+  // the many-ways search: words, aria, placeholder, title, nearby text, box type, place in the panel
+  function findLoose(d, wantText) {
+    const ok = (e) => visible(e) && notPanel(e);
+    if (wantText != null) {
+      const w = fuzzy(wantText);
+      const pool = deepAll("[role=option],[role=menuitem],[role=gridcell],li,button,a,td,span,div,label").filter(ok);
+      const hits = pool.filter((e) => { const t = fuzzy(ownText(e)); return t && (t === w || t.endsWith(w) && /[/>]/.test(ownText(e))); });
+      return hits.sort((a, b) => a.getBoundingClientRect().width * a.getBoundingClientRect().height - b.getBoundingClientRect().width * b.getBoundingClientRect().height)[0] || null;
+    }
+    const isBox = /^(input|select|textarea)$/.test(d.tag) || d.near || d.itype;
+    const pool = isBox ? deepAll(BOXES).filter(ok) : deepAll(`${d.tag},button,a,[role=button],[role=menuitem],[role=option],[role=tab],span,div,li,label`).filter(ok);
+    const words = [d.label, d.near, d["aria-label"], d.placeholder, d.title].filter(Boolean).map(fuzzy);
+    const openC = [...new Set(pool.map(container).filter(Boolean))];
+    const tb = isBox && d.tidx != null && d.tidx >= 0 ? timeBoxes() : null;
+    let best = null, bestS = 7;
+    for (const e of pool) {
+      let sc = 0;
+      if (d.id && e.id === d.id) sc += 10;
+      for (const a of ["name", "formcontrolname", "data-automation-id", "data-testid", "automation-id"]) if (d[a] && e.getAttribute(a) === d[a]) sc += 8;
+      if (isBox) {
+        const mine = [fieldLabel(e), nearLabel(e), e.getAttribute("aria-label"), e.getAttribute("placeholder"), e.getAttribute("title")].filter(Boolean).map(fuzzy);
+        if (words.some((w) => mine.includes(w))) sc += 7;
+        else if (words.some((w) => w.length > 3 && mine.some((m) => m.length > 3 && (m.includes(w) || w.includes(m))))) sc += 4;
+        if (d.itype && e.type === d.itype && d.itype !== "text") sc += 2;
+        if (tb && tb.indexOf(e) === d.tidx) sc += 4;
+      } else {
+        const t = fuzzy(ownText(e));
+        if (d.text && t && t === fuzzy(d.text)) sc += 8;
+        else if (d.text && t && fuzzy(d.text).length > 3 && t.includes(fuzzy(d.text)) && t.length < fuzzy(d.text).length + 6) sc += 4;
+        if (words.some((w) => [e.getAttribute("aria-label"), e.getAttribute("title")].filter(Boolean).map(fuzzy).includes(w))) sc += 6;
+        if (e.tagName.toLowerCase() === d.tag) sc += 1;
+      }
+      // same place inside the open panel
+      const c = container(e);
+      if (c && d.pcls && (String(c.className || "").includes(d.pcls) || c.tagName.toLowerCase() === d.pcls)) {
+        sc += 1;
+        if (d.pidx != null) { const same = isBox ? [...c.querySelectorAll(BOXES)].filter(visible) : [...c.querySelectorAll(e.tagName)].filter(visible); if (same.indexOf(e) === d.pidx) sc += 3; }
+      } else if (c && openC.length === 1 && d.pidx != null && isBox) {
+        if ([...c.querySelectorAll(BOXES)].filter(visible).indexOf(e) === d.pidx) sc += 3;
+      }
+      if (sc > bestS || (sc === bestS && best && best.contains(e))) { best = e; bestS = sc; }
+    }
+    return best;
+  }
+  function findExact(d, wantText) {
+    let pool = deepAll(d.tag);
+    if (wantText != null) pool = pool.concat(deepAll("[role=option],[role=menuitem],[role=gridcell],li,button,a,td,span,div"));
     let best = null, bestS = wantText != null ? 8 : 6;
     for (const el of new Set(pool)) {
       if (panelHost && panelHost.contains(el)) continue;
@@ -123,13 +202,48 @@
     }
     return best;
   }
-  async function waitFind(d, wantText, ms) {
+  // When the recorded box can't be found exactly (Kronos changes ids, case, layout):
+  // any visible box whose own words match, then for Start/End time the 1st/2nd time-like box.
+  const BOXES = "input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea,[contenteditable=true],[role=textbox],[role=combobox],[role=spinbutton]";
+  function findBox(d) {
+    if (!/^(input|select|textarea)$/.test(d.tag)) return null;
+    const want = norm(d.label || d["aria-label"] || d.placeholder || d.name || "");
+    if (!want) return null;
+    const boxes = deepAll(BOXES).filter((e) => visible(e) && notPanel(e));
+    const words = (e) => norm(fieldLabel(e) || nearLabel(e));
+    const hit = boxes.find((e) => words(e) === want) || boxes.find((e) => words(e).includes(want) || (words(e) && want.includes(words(e)) && words(e).length > 3));
+    if (hit) return hit;
+    const which = /start|from|begin|in\b/.test(want) ? 0 : /end|to\b|until|out\b/.test(want) ? 1 : -1;
+    if (which < 0 || !/time/.test(want)) return null;
+    const timey = boxes.filter((e) => e.type === "time" || /time|hh|:mm/i.test(`${e.getAttribute("placeholder") || ""} ${e.getAttribute("aria-label") || ""} ${e.name || ""} ${e.id || ""} ${e.className || ""}`) || TIME_RE.test(e.value || ""));
+    return timey[which] || null;
+  }
+  async function waitFind(d, wantText, ms, looseNow) {
     const until = Date.now() + ms;
     for (;;) {
-      const el = find(d, wantText);
+      const late = looseNow || Date.now() > until - ms + 2500; // Kronos is slow: give the exact match a moment first
+      const el = find(d, wantText, late) || (wantText == null && late ? findBox(d) : null);
       if (el || Date.now() > until) return el;
       await sleep(250);
     }
+  }
+  // "Save debug file" on a stuck card: what's on the screen right now (open panels, every box
+  // with its labels), no page text, no typed values except times/dates, never passwords.
+  function snapshot() {
+    const box = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round); };
+    const attrs = (e) => { const a = {}; for (const at of e.attributes) if (/^(id|class|role|type|name|placeholder|title|for|tabindex)$/.test(at.name) || /^(aria-|data-)/.test(at.name)) a[at.name] = at.value.slice(0, 100); return a; };
+    const panels = [...document.querySelectorAll("[role=dialog],[aria-modal=true],aside,[class*=panel],[class*=slider],[class*=drawer],[class*=flyout]")]
+      .filter((e) => visible(e) && notPanel(e) && e.querySelector(BOXES)).slice(0, 6)
+      .map((e) => ({ tag: e.tagName.toLowerCase(), attrs: attrs(e), box: box(e), heading: ((e.querySelector("h1,h2,h3,h4,[role=heading],header") || {}).textContent || "").replace(/\s+/g, " ").trim().slice(0, 40) }));
+    const boxes = [...document.querySelectorAll(BOXES)].filter((e) => visible(e) && notPanel(e)).slice(0, 60).map((e) => {
+      const v = e.type === "password" ? "" : String(e.value || "");
+      return { tag: e.tagName.toLowerCase(), attrs: attrs(e), box: box(e), label: (labelOf(e) || "").slice(0, 40), near: nearLabel(e).slice(0, 40),
+        value: TIME_RE.test(v) || /^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(v.trim()) ? v.slice(0, 20) : v ? `(${v.length} letters)` : "",
+        parents: (() => { const out = []; for (let p = e.parentElement, n = 0; p && n < 4; p = p.parentElement, n++) out.push(`${p.tagName.toLowerCase()}${p.className && typeof p.className === "string" ? "." + p.className.trim().split(/\s+/).slice(0, 2).join(".") : ""}`); return out; })() };
+    });
+    const buttons = [...document.querySelectorAll("button,[role=button],a")].filter((e) => visible(e) && notPanel(e) && e.closest("[role=dialog],aside,[class*=panel],[class*=slider],[class*=drawer]"))
+      .slice(0, 30).map((e) => ({ text: (e.innerText || "").replace(/\s+/g, " ").trim().slice(0, 30), attrs: attrs(e), box: box(e) }));
+    return { frame: location.origin + location.pathname, size: [innerWidth, innerHeight], panels_open: panels, boxes, panel_buttons: buttons };
   }
 
 
@@ -433,6 +547,15 @@
       if (i >= 0 && f[i + 1]) f[i + 1].focus();
     }
   }
+  function clueText(d, wantText) {
+    const bits = [];
+    if (wantText) bits.push(`text "${wantText}"`);
+    else if (d.text) bits.push(`text "${d.text}"`);
+    for (const [k, w] of [["label", "label"], ["near", "words next to it"], ["aria-label", "screen-reader name"], ["placeholder", "grey hint"]]) if (d[k] && !bits.some((b) => b.includes(d[k]))) bits.push(`${w} "${d[k]}"`);
+    if (d.itype && d.itype !== "text") bits.push(`a ${d.itype} box`);
+    if (d.pidx != null && d.pidx >= 0) bits.push(`item ${d.pidx + 1} in the open panel`);
+    return `a ${/^(input|select|textarea)$/.test(d.tag) ? "box" : d.tag === "button" ? "button" : "thing"} with ${bits.join(", ") || "no name"}`;
+  }
   function describeForPeople(d, wantText) {
     return `"${wantText || d.label || d["aria-label"] || d.placeholder || d.text || d.name || d.title || d.tag}"`;
   }
@@ -445,11 +568,11 @@
       return { ok: true };
     }
     if (step.action === "grid") return clickGrid(step, m.grid);
-    const el = await waitFind(step.desc, wantText, timeout || 12000);
-    if (!el) return { ok: false, why: `I couldn't find ${describeForPeople(step.desc, wantText)} on the screen.` };
+    const el = await waitFind(step.desc, wantText, timeout || 12000, m.loose);
+    if (!el) return { ok: false, why: `I couldn't find ${describeForPeople(step.desc, wantText)} on the screen.`, looking: clueText(step.desc, wantText) };
     if (step.action === "click") clickEl(el);
     else if (step.action === "type") await typeInto(el, value, pace);
-    else if (step.action === "select") { if (!selectOption(el, value)) return { ok: false, why: `The list ${describeForPeople(step.desc)} has no "${value}".` }; }
+    else if (step.action === "select") { if (!selectOption(el, value)) return { ok: false, fatal: true, why: `The list ${describeForPeople(step.desc)} has no "${value}".` }; }
     return { ok: true };
   }
   async function stillThere(m) {
@@ -492,6 +615,17 @@
   // ---------------- watching ("Show me once") in every frame ----------------
   let recording = false, lastType = null, seqN = 0;
   const fromPanel = (e) => panelHost && e.composedPath().includes(panelHost);
+  const realTarget = (e) => { const p = e.composedPath && e.composedPath()[0]; return p && p.nodeType === 1 ? p : e.target; }; // inside shadow roots too
+  // "Point to it": the next click on the page is the thing the helper couldn't find
+  let pointing = false;
+  document.addEventListener("click", (e) => {
+    if (!pointing || fromPanel(e)) return;
+    pointing = false;
+    const el = clickedThing(realTarget(e));
+    const a = document.activeElement;
+    const tgt = a && a !== el && a.matches && a.matches(FORM) && (el.contains(a) || a.contains(el) || el.tagName === "LABEL") ? a : el;
+    toTop({ type: "point-pick", desc: describe(tgt), text: tgt.matches(FORM) ? "" : ownText(tgt).slice(0, 60) });
+  }, true);
   const toTop = (msg) => post(window.top, { ...msg, frameKey: FRAME_KEY });
   const CLICKABLE = "button,a,[role=button],[role=option],[role=menuitem],[role=tab],[role=link],[role=checkbox],[role=radio],[role=gridcell],li,label,input,select,textarea,td,th";
   // the thing that was really clicked: a button/option/box, but never a big container
@@ -507,10 +641,12 @@
   let down = null, lastGrid = null;
   document.addEventListener("mousedown", (e) => {
     if (!recording || fromPanel(e)) return;
-    down = { t: e.target, at: Date.now(), x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, e.target) };
+    const t0 = realTarget(e);
+    down = { t: t0, at: Date.now(), x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, t0) };
   }, true);
   function gridFromEvent(e) {
-    const d = down && down.t === e.target && Date.now() - down.at < 2000 ? down : { t: e.target, x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, e.target) };
+    const t0 = realTarget(e);
+    const d = down && down.t === t0 && Date.now() - down.at < 2000 ? down : { t: t0, x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, t0) };
     return d;
   }
   function recordGrid(e, how) {
@@ -530,7 +666,8 @@
   document.addEventListener("click", (e) => {
     if (!recording || fromPanel(e)) return;
     if (recordGrid(e, "click")) return;
-    const el = clickedThing(e.target);
+    if (pointing) return;
+    const el = clickedThing(realTarget(e));
     if (el === lastType?.el) return; // clicking into the box being typed in
     const step = { action: "click", desc: describe(el), text: el.matches(FORM) ? "" : ownText(el).slice(0, 60) };
     if (!step.desc.text && !step.desc.label && !step.desc["aria-label"] && !step.desc.title) step.debug = debugInfo(e.target, e.clientX, e.clientY);
@@ -543,14 +680,18 @@
       step.desc = describe(a); step.text = ""; delete step.debug;
       return true;
     };
-    if (intoBox() || el.matches(FORM)) toTop({ type: "rec-step", step });
-    else setTimeout(() => { intoBox(); toTop({ type: "rec-step", step }); }, 0);
+    // sent right away (keeps the order, and Apply may close the panel - and its frame - at once);
+    // if the cursor lands in a box a moment later, that step is corrected
+    step.seq = `${FRAME_KEY}#c${++seqN}`;
+    const now = intoBox();
+    toTop({ type: "rec-step", step });
+    if (!now && !el.matches(FORM)) setTimeout(() => { if (intoBox()) toTop({ type: "rec-update", seq: step.seq, desc: step.desc, text: "" }); }, 0);
   }, true);
   document.addEventListener("dblclick", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "dblclick"); }, true);
   document.addEventListener("contextmenu", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "context"); }, true);
   document.addEventListener("input", (e) => {
     if (!recording || fromPanel(e)) return;
-    const el = e.target;
+    const el = realTarget(e);
     if (!el.matches || !el.matches("input,textarea") || /^(checkbox|radio|button|submit)$/.test(el.type)) return;
     if (lastType && lastType.el === el) toTop({ type: "rec-update", seq: lastType.seq, value: el.value });
     else {
@@ -560,7 +701,7 @@
   }, true);
   document.addEventListener("change", (e) => {
     if (!recording || fromPanel(e)) return;
-    const el = e.target;
+    const el = realTarget(e);
     if (el.tagName !== "SELECT") return;
     toTop({ type: "rec-step", step: { action: "select", desc: describe(el), value: el.options[el.selectedIndex]?.text || el.value } });
     lastType = null;
@@ -574,17 +715,27 @@
   // ---------------- messages ----------------
   const pending = {}, acked = new Set(), handled = new Set();
   let teaching = false, recSteps = [], example = null;
-  let onRecStep = null, checkReplies = null;
+  let onRecStep = null, checkReplies = null, snapReplies = null, onPointPick = null;
   window.addEventListener("message", async (e) => {
-    const m = e.data;
+    let m = e.data;
     if (!m || m.__sh !== 1) return;
     if (m.type === "rec-start") { recording = true; lastType = null; }
+    if (m.type === "point-start") pointing = true;
+    if (m.type === "point-stop") pointing = false;
+    if (m.type === "point-pick" && IS_TOP && onPointPick) onPointPick(m);
     if (m.type === "rec-stop") { recording = false; lastType = null; }
+    // a frame whose address changed since Show me once (new iframe, about:blank) can still answer
+    // if it has the thing on screen right now
+    if (m.type === "exec" && m.anyFrame && m.frameKey !== FRAME_KEY && !handled.has(m.reqId)) {
+      const st = m.step;
+      const can = st.action === "grid" ? dayBands().length > 0 : st.action === "key" ? false : !!find(st.desc, m.wantText, true);
+      if (can) m = { ...m, frameKey: FRAME_KEY };
+    }
     if ((m.type === "exec" || m.type === "there") && m.frameKey === FRAME_KEY) {
       // the top page repeats a request until some frame takes it (frames can still be loading)
       if (handled.has(m.reqId)) return;
       handled.add(m.reqId);
-      post(window.top, { type: "ack", reqId: m.reqId });
+      post(window.top, { type: "ack", reqId: m.reqId, frameKey: FRAME_KEY });
     }
     if (m.type === "exec" && m.frameKey === FRAME_KEY) {
       const res = await runStep(m).catch((err) => ({ ok: false, why: String(err) }));
@@ -592,12 +743,14 @@
     }
     if (m.type === "there" && m.frameKey === FRAME_KEY) post(window.top, { type: "result", reqId: m.reqId, ...(await stillThere(m)) });
     if (m.type === "check") post(window.top, { type: "check-result", reqId: m.reqId, flagged: checkExisting(m.shifts) });
+    if (m.type === "snap") { let snap; try { snap = snapshot(); } catch (err) { snap = { frame: location.pathname, error: String(err) }; } post(window.top, { type: "snap-result", reqId: m.reqId, snap }); }
     if (!IS_TOP) return;
     // a frame that just opened (e.g. the add-shift form) asks whether we're watching
     if (m.type === "hello" && (teaching === "watching" || teaching === "job") && e.source) post(e.source, { type: "rec-start" });
     if ((m.type === "rec-step" || m.type === "rec-update") && onRecStep) onRecStep(m);
     if (m.type === "ack") acked.add(m.reqId);
     if (m.type === "result" && pending[m.reqId]) { pending[m.reqId](m); delete pending[m.reqId]; }
+    if (m.type === "snap-result" && snapReplies && snapReplies.reqId === m.reqId) snapReplies.list.push(m.snap);
     if (m.type === "check-result" && checkReplies && checkReplies.reqId === m.reqId) checkReplies.flagged.push(...m.flagged);
   });
 
@@ -616,7 +769,8 @@
           delete pending[reqId];
           return res({ ok: false, why: "I couldn't find that part of the Kronos screen (the form may not be open)." });
         }
-        broadcast({ ...msg, reqId });
+        // after 3 s with no answer from the recorded frame, let any frame that has it answer
+        broadcast({ ...msg, reqId, anyFrame: msg.type === "exec" && (msg.anyFrameNow || Date.now() - started > 3000) });
         setTimeout(send, 700);
       })();
       setTimeout(() => { if (pending[reqId]) { delete pending[reqId]; res({ ok: false, why: "That part of the page didn't answer (maybe it was closed)." }); } }, ms);
@@ -812,10 +966,15 @@
   onRecStep = (m) => {
     if (teaching === "job") return onJobRec && onJobRec(m);
     if (teaching !== "watching") return;
-    if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) { if (m.how) s.how = m.how; else s.value = m.value; } }
+    if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) fixStep(s, m); }
     else recSteps.push({ ...m.step, frameKey: m.frameKey });
     renderTeach();
   };
+  function fixStep(s, m) {
+    if (m.how) s.how = m.how;
+    else if (m.desc) { s.desc = m.desc; s.text = m.text; delete s.debug; }
+    else s.value = m.value;
+  }
   function autoMap() {
     // drop empty typing; label each value; guess the Save button
     recSteps = recSteps.filter((s) => s.action !== "type" || s.value !== "");
@@ -930,15 +1089,69 @@
     const wantText = st.action === "click" && st.map ? value : null;
     for (;;) {
       const grid = st.action === "grid" ? { name: s.kronosName, md: mdOf(s) } : null;
-      const res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key, how: st.how, grid: st.grid }, value, wantText, grid, pace }, st.action === "grid" ? 45000 : 20000);
+      // Kronos is slow and redraws its panel (even its frame): ask in short rounds for up to 15 s,
+      // so whichever frame has the thing once it settles can answer
+      const t0 = Date.now(), limit = st.action === "grid" || st.action === "key" ? 0 : 15000;
+      let res;
+      do {
+        const since = Date.now() - t0;
+        res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key, how: st.how, grid: st.grid }, value, wantText, grid, pace,
+          timeout: limit ? 1500 : undefined, loose: since > 2500, anyFrameNow: since > 3000 }, st.action === "grid" ? 45000 : limit ? 6000 : 20000);
+        if (res.ok || res.fatal) break;
+        if (limit) await sleep(300);
+      } while (Date.now() - t0 < limit);
       if (res.ok) return "ok";
-      const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${isJob ? "Changing the job: " : ""}${esc(res.why)}</div>
-        <p>${isJob ? `Change the job to <b>${esc(R.formatValue(s, { field: "job", fmt: "Kronos job" }))}</b> yourself and press <b>I did it</b>, or try again.` : "You can do this step by hand and press <b>I did it</b>, or try again."}</p>`,
-        [["retry", "Try again", "sh-primary"], ["manual", "I did it"], ["skip", "Skip this shift"]]);
+      let a, saved = false;
+      for (;;) {
+        a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${isJob ? "Changing the job: " : ""}${esc(res.why)}${res.looking ? `<br><span class="sh-small">Looking for ${esc(res.looking)}.</span>` : ""}</div>
+          ${st.action !== "key" ? `<p class="sh-small"><b>Point to it:</b> press the button, then click the right ${st.action === "type" || st.action === "select" ? "box" : "thing"} on the Kronos screen. I'll remember it for every shift after this.</p>` : ""}
+          <p>${isJob ? `Change the job to <b>${esc(R.formatValue(s, { field: "job", fmt: "Kronos job" }))}</b> yourself and press <b>I did it</b>, or try again.` : "You can do this step by hand and press <b>I did it</b>, or try again."}</p>
+          <p class="sh-small">${saved ? "&#10003; Saved <b>schedule-helper-debug.txt</b> in Downloads &ndash; send it to Joseph." : "Stuck? <b>Save debug file</b> and send it to Joseph (it only describes the boxes on the screen)."}</p>`,
+          [["retry", "Try again", "sh-primary"], ...(st.action !== "key" ? [["point", "Point to it", "sh-primary"]] : []), ["manual", "I did it"], ["skip", "Skip this shift"], ["debug", "Save debug file"]]);
+        if (a === "debug") { await saveStuck(st, res.why); saved = true; continue; }
+        if (a === "point") {
+          const got = await pointTo(st, s, head);
+          if (got === "stop") return "stop";
+          if (got === "clicked") return "ok"; // Zack's click did the step itself
+          if (got === "learned") break;      // try the step again with what he pointed at
+          continue;
+        }
+        break;
+      }
+      if (a === "point") continue;
       if (a === "stop") return "stop";
       if (a === "skip") return "skipped";
       if (a === "manual") return "ok";
     }
+  }
+
+  // Zack clicks the thing once; the step learns it (old clues kept as a spare) and is saved.
+  async function pointTo(st, s, head) {
+    const what = st.action === "type" || st.action === "select" ? "box" : "thing";
+    const pick = await new Promise((res) => {
+      $("#auto").innerHTML = `${head}${shiftLine(s)}<p><b>Click the ${what} on the Kronos screen now.</b></p><p class="sh-small">Looking for ${esc(clueText(st.desc, st.action === "click" && st.map ? R.formatValue(s, st.map) : null))}.</p><button data-ans="cancel">Cancel</button>`;
+      onPointPick = (m) => res(m);
+      $("#auto").onclick = (e) => { const b = e.target.closest("[data-ans]"); if (b) res(null); };
+      broadcast({ type: "point-start" });
+    });
+    onPointPick = null; $("#auto").onclick = null;
+    broadcast({ type: "point-stop" });
+    if (!pick) return "cancel";
+    if (st.action === "grid") return "clicked"; // the grid step stays "this person's spot on this day"
+    st.alt = st.alt || st.desc;
+    st.desc = { ...pick.desc };
+    st.frameKey = pick.frameKey;
+    if (st.action === "click" && !st.map) st.text = pick.text;
+    await S.set("sh_recipe", recipe);
+    return st.action === "click" || st.action === "grid" ? "clicked" : "learned";
+  }
+  async function saveStuck(st, why) {
+    const reqId = `s${++reqN}`;
+    snapReplies = { reqId, list: [] };
+    broadcast({ type: "snap", reqId });
+    await sleep(1200);
+    const frames = snapReplies.list; snapReplies = null;
+    saveDebug({ action: st.action, how: st.how, grid: st.grid, desc: st.desc, debug: { stuck_because: why, looking_in_frame: st.frameKey, frames } });
   }
 
   // A job-change shift: Kronos filled in the person's usual job; change it for this shift only.
@@ -981,7 +1194,7 @@
           <div class="sh-row"><button class="sh-primary" id="jobdone" data-ans="done">I changed it &ndash; done</button><button data-ans="cancel">Cancel</button></div>`;
       };
       onJobRec = (m) => {
-        if (m.type === "rec-update") { const x = rec.find((y) => y.seq === m.seq); if (x) x.value = m.value; }
+        if (m.type === "rec-update") { const x = rec.find((y) => y.seq === m.seq); if (x) fixStep(x, m); }
         else rec.push({ ...m.step, frameKey: m.frameKey });
         draw();
       };

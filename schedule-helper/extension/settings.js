@@ -25,6 +25,12 @@ globalThis.SH_DEFAULTS = {
     Cocktail: "Server",
   },
 
+  // Jobs that are always a TRANSFER in Kronos (changed on that one shift), never someone's
+  // main job, and the main job of someone who only works those (Zack: Bar shifts are the
+  // job change, Server is the main job).
+  transferJobs: ["Bar"],
+  transferHome: "Server",
+
   // When to ask before saving: "day" = approve each day's list once,
   // "shift" = approve every single shift.
   confirm: "day",
