@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule Helper - quick start</title>
+<style>
+  :root { --accent: #0b6e69; --fg: #1d2330; --muted: #5b6475; --line: #d0d5dd; --warn-bg: #fff4e5; }
+  body { margin: 0; background: #f4f6f8; color: var(--fg); font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--accent); color: #fff; padding: 14px 16px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 2px 0 0; color: #d6efed; font-size: 15px; }
+  main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
+  h2 { margin: 14px 0 4px; font-size: 18px; color: var(--accent); }
+  ol { padding-left: 22px; margin: 4px 0; }
+  li { margin-bottom: 6px; }
+  .note { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin: 10px 0; font-size: 15px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  @page { size: letter; margin: 12mm; }
+  @media print { body { background: #fff; font-size: 13.5px; } h2 { font-size: 15px; margin-top: 10px; } header { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Schedule Helper &ndash; quick start</h1>
+  <p>Keep this open on your phone while you work on the computer.</p>
+</header>
+<main>
+
+<h2>1. Load the week</h2>
+<ol>
+  <li>Post the schedule in HotSchedules, then download the <b>Weekly Roster</b>.</li>
+  <li>In Chrome, click the <b>S</b> (Schedule Helper) button &rarr; <b>Choose File</b> &rarr; pick the roster.</li>
+  <li>Check <b>Week starting</b> is the Monday, check names, untick anything that shouldn't go in.</li>
+  <li><b>Use this schedule</b> &rarr; <b>Open Kronos</b> &rarr; sign in &rarr; <b>Schedule Planner</b>.</li>
+</ol>
+
+<h2>2. Show me once (only the first time, or after an update)</h2>
+<ol>
+  <li>Helper box &rarr; <b>Show me once</b> &rarr; pick a shift without &#9888; &rarr; <b>Start watching</b>.</li>
+  <li>On the grid, click the <b>empty spot</b> in that person's row, under that day. Box in the way? Press its <b>&ndash;</b> to shrink it.</li>
+  <li>In the side panel: leave <b>Regular</b>, replace <b>Start Time</b> and <b>End Time</b> (Kronos puts in 1 hour), press <b>Apply</b>, then <b>Save</b> in the top bar.</li>
+  <li>Helper: <b>I saved it - done</b>. Step 1 should say "the empty spot on the grid" with a &#10003;. The Apply click should be ticked <b>Save / Apply button</b>, with the top-bar Save after it &rarr; <b>Save these steps</b>.</li>
+</ol>
+
+<h2>3. Fill the week</h2>
+<ol>
+  <li><b>Auto-fill</b> &rarr; <b>Start</b>. For each day: check the list &rarr; <b>Add the ticked shifts</b>.</li>
+  <li>Hands off the mouse and keyboard while it works. Red <b>Stop</b> stops it any time.</li>
+  <li>&#9888; job-change shifts (server on Bar): the first time, it asks you to show it how you change the job (usually <b>Transfer Employee</b>). Do it, <b>don't press Save</b>, then <b>I changed it &ndash; done</b>.</li>
+  <li>When it's done, look over the week in Kronos.</li>
+</ol>
+
+<h2>If it gets stuck</h2>
+<ol>
+  <li><b>Can't find the person or day:</b> scroll the grid so their row shows &rarr; <b>Try again</b>. Or click the spot yourself &rarr; <b>I did it</b>. Or <b>Skip this shift</b>.</li>
+  <li><b>Warning "no name I can find again" / wrong person or day</b> in Show me once: press <b>debug export</b> next to that step and send the file <b>schedule-helper-debug.txt</b> (in Downloads) to Joseph.</li>
+  <li><b>Typed into the wrong box:</b> Stop, delete that shift in Kronos, load page &rarr; <b>Forget "Show me once"</b>, show it again.</li>
+  <li>Prefer to do every click yourself? The <b>Copy</b> tab copies each value for you to paste.</li>
+</ol>
+
+<div class="note">Check with your manager that using the helper is OK. It never sees your password and nothing is saved in Kronos without you.</div>
+<p class="muted">Full guide with pictures: INSTRUCTIONS.pdf in the same folder.</p>
+
+</main>
+</body>
+</html>
