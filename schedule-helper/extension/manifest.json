@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Schedule Helper (HotSchedules to Kronos)",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Reads the HotSchedules Weekly Roster and helps you enter the shifts in Kronos/UKG: copy-and-paste mode or auto-fill at a normal pace, with your approval.",
   "permissions": ["storage", "clipboardWrite"],
   "action": { "default_title": "Schedule Helper - load this week's roster" },
@@ -10,6 +10,8 @@
     "matches": ["https://*.mykronos.com/*"],
     "js": ["settings.js", "roster.js", "store.js", "copymode.js", "kronos.js"],
     "all_frames": true,
+    "match_about_blank": true,
+    "match_origin_as_fallback": true,
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [{ "resources": ["ui.css"], "matches": ["https://*.mykronos.com/*"] }]

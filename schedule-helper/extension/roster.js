@@ -221,13 +221,19 @@
       const j = (p[s.kronosJob] = p[s.kronosJob] || { n: 0, h: 0 });
       j.n++; j.h += hours(s);
     });
+    // Zack (10-09): in Kronos the Bar shifts are the transfer, never the person's main job.
+    // So the usual job is the most-worked job that ISN'T a transfer job; someone who only
+    // works Bar is a Server in Kronos (settings: transferJobs / transferHome).
+    const D = globalThis.SH_DEFAULTS || {};
+    const transfer = new Set((D.transferJobs || ["Bar"]).map(norm)), home = D.transferHome || "Server";
     const out = {};
     for (const [emp, jobs] of Object.entries(per)) {
       const ranked = Object.entries(jobs).sort((a, b) => b[1].n - a[1].n || b[1].h - a[1].h || a[0].localeCompare(b[0]));
-      const tie = ranked.length > 1 && ranked[0][1].n === ranked[1][1].n;
+      const main = ranked.filter(([j]) => !transfer.has(norm(j)));
+      const tie = main.length > 1 && main[0][1].n === main[1][1].n;
       out[emp] = overrides[emp]
         ? { job: overrides[emp], how: "set" }
-        : { job: ranked[0][0], how: tie ? "tie" : "auto" };
+        : main.length ? { job: main[0][0], how: tie ? "tie" : "auto" } : { job: home, how: "auto" };
       out[emp].jobs = ranked.map(([j]) => j);
     }
     return out;
