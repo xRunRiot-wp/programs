@@ -359,3 +359,9 @@ hr { border: none; border-top: 1px solid var(--border); margin: 16px 0 8px; }
 .biome-list { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 4px; font-weight: 400; color: var(--text); }
 .biome-list b { color: #7ed957; font-weight: 600; }
 .spawn-tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; border: 1px solid var(--accent); color: var(--accent); }
+
+.version-footer {
+  position: fixed; right: 10px; bottom: 6px; z-index: 5;
+  font-size: 11px; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 2px 8px; pointer-events: none; opacity: .85;
+}
