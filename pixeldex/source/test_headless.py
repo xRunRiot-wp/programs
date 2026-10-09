@@ -154,6 +154,41 @@ try:
     ev("showTab('palettes')")
     print("palettes note:", ev("document.getElementById('palCount').textContent"))
     ev("showTab('pokedex')")
+    # v2.2: "Where to find" is a wiki-style table; Y limits go in the Conditions column
+    for dex, want in ((385, "Min Y 100"), (524, "Max Y 70"), (369, "Max Y 35"), (374, "Min Y 90"), (443, "Max Y 80"), (621, "Min Y 100")):
+        ev(f"openDetail({dex})")
+        heads = ev("[...document.querySelectorAll('.spawn-table')[0].querySelectorAll('th')].map(h=>h.textContent)")
+        conds = ev("[...document.querySelectorAll('.spawn-table td.c-conditions')].map(td=>td.textContent)")
+        print(dex, "table columns:", heads, "| has", want, ":", any(want in c for c in conds))
+        assert any(want in c for c in conds), (dex, conds)
+    ev("openDetail(385)")
+    print("Jirachi summary:", ev("(document.querySelector('.y-summary')||{}).textContent"))
+    print("Jirachi first row:", ev("[...document.querySelector('.spawn-table tbody tr').children].map(td=>td.innerText.split(String.fromCharCode(10))[0]).join(' | ')"))
+    ev("document.querySelector('.spawn-table details').open=true")
+    time.sleep(0.4)
+    shot("10_jirachi_table")
+    ev("openDetail(443)")
+    time.sleep(0.4)
+    shot("11_gible_table")
+    print("Gible summary (none expected, mixed limits):", ev("(document.querySelector('.y-summary')||{textContent:null}).textContent"))
+    print("old row style left on Pokemon pages:", ev("document.querySelectorAll('#detailContent .spawn-row .pct').length"))
+    missing_tb = ev("species.filter(sp => sp.f.some(f => f.sp.length) && !sp.f.some(f => f.tb.length)).map(sp => sp.n)")
+    print("species with spawn % but no table rows:", missing_tb)
+    assert not missing_tb
+    widest = ev("""(() => { let w = 0, who = ''; for (const sp of species) { openDetail(sp.d);
+      const c = document.querySelector('#detailOverlay .detail-card'); for (const x of document.querySelectorAll('.spawn-table-wrap'))
+      if (x.scrollWidth - x.clientWidth > w) { w = x.scrollWidth - x.clientWidth; who = sp.n; } } closeDetail(); return [w, who]; })()""")
+    print("most sideways scrolling needed by a table (px, at 1400 wide):", widest)
+    cmd("Emulation.setDeviceMetricsOverride", width=900, height=600, deviceScaleFactor=1, mobile=False)   # the window's smallest size
+    widest = ev("""(() => { let w = 0, who = ''; for (const sp of species) { openDetail(sp.d);
+      for (const x of document.querySelectorAll('.spawn-table-wrap'))
+      if (x.scrollWidth - x.clientWidth > w) { w = x.scrollWidth - x.clientWidth; who = sp.n; } } return [w, who]; })()""")
+    print("most sideways scrolling needed by a table (px, at 900 wide):", widest)
+    ev(f"openDetail(374)")
+    time.sleep(0.4)
+    shot("12_beldum_900wide")
+    closeit = ev("closeDetail()")
+    cmd("Emulation.clearDeviceMetricsOverride")
     print("JS errors:", errors)
 finally:
     proc.terminate()

@@ -313,15 +313,39 @@ function openDetail(dex) {
   $('detailContent').innerHTML = renderDetail(sp);
   $('detailOverlay').classList.remove('hidden');
 }
-function spawnRow(r, f, sp, structure) {
-  const formTag = f.n !== sp.df ? ` (${esc(f.dn)})` : '';
-  if (structure) {
-    return `<div class="spawn-row"><span class="pct meta">structure</span> <span class="cat">${esc(S[r[0]])}</span>${formTag}<br>
-      <span class="meta">${esc(D.catLabels[S[r[1]]] || S[r[1]])} · ${esc(S[r[2]])} · ${esc(S[r[3]]) || 'No special requirements'}</span></div>`;
-  }
-  const pct = r[3] != null ? `<span class="pct">${r[3]}%</span>` : '<span class="pct meta">no % available</span>';
-  return `<div class="spawn-row">${pct} <span class="cat">${esc(S[r[1]])}</span>${formTag}<br>
-    <span class="meta">${esc(D.catLabels[S[r[0]]] || S[r[0]])} · ${esc(S[r[2]])} · ${esc(S[r[4]]) || 'No special requirements'}</span></div>`;
+// ---------- "Where to find" table (wiki style: one row per Pixelmon spawn entry) ----------
+// tb row: [category, biome groups, "biome|%;...", time, location, weather, conditions, % low, % high, tag, level, held item]
+const yOf = cond => (cond.match(/(Min Y -?\d+( · Max Y -?\d+)?|Max Y -?\d+)/) || [''])[0];
+const chanceText = r => r[7] == null ? '<span class="meta" title="Pixelmon gives no % for this one">—</span>'
+  : (r[7] === r[8] ? `${r[8]}%` : `${r[7]}–${r[8]}%`);
+function biomeCell(r) {
+  const groups = S[r[1]] || '—', detail = S[r[2]];
+  if (!detail) return esc(groups);
+  const list = detail.split(';').map(x => { const [b, p] = x.split('|'); return `<span class="bl-item">${esc(b)} <b>${p}%</b></span>`; }).join('');
+  const n = detail.split(';').length;
+  const count = /^\d+ biomes$/.test(groups) ? '' : ` <span class="meta">(${n} biome${n > 1 ? 's' : ''})</span>`;
+  return `<details class="biomes"><summary>${esc(groups)}${count}</summary><div class="biome-list">${list}</div></details>`;
+}
+function spawnTable(rows, sp) {
+  if (!rows.length) return '';
+  const has = i => rows.some(([r]) => S[r[i]]);
+  const multiForm = new Set(rows.map(([, f]) => f.n)).size > 1 || rows.some(([, f]) => f.n !== sp.df);
+  const cols = [
+    multiForm && ['Form', ([, f]) => esc(f.dn)],
+    ['Biomes', ([r]) => biomeCell(r)],
+    ['Time', ([r]) => esc(S[r[3]])],
+    ['Location', ([r]) => esc(S[r[4]] || D.catLabels[S[r[0]]] || S[r[0]])],
+    has(5) && ['Weather', ([r]) => esc(S[r[5]]) || '—'],
+    ['Conditions', ([r]) => esc(S[r[6]]) || '—'],
+    has(10) && ['Level', ([r]) => esc(S[r[10]].replace('Lv ', '')) || '—'],
+    has(11) && ['Held item', ([r]) => esc(S[r[11]]) || '—'],
+    has(9) && ['Tag', ([r]) => S[r[9]] ? `<span class="spawn-tag">${esc(S[r[9]])}</span>` : ''],
+    ['Chance', ([r]) => chanceText(r)],
+  ].filter(Boolean);
+  return `<div class="spawn-table-wrap"><table class="spawn-table">
+    <thead><tr>${cols.map(c => `<th class="c-${c[0].toLowerCase().replace(' ', '-')}">${c[0]}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(row => `<tr>${cols.map(c => `<td class="c-${c[0].toLowerCase().replace(' ', '-')}">${c[1](row)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
 }
 function renderFamily(sp) {
   const stages = family(sp.k);
@@ -342,14 +366,15 @@ function renderDetail(sp) {
   const look = lookFor(sp);
   const base = sp.defForm;
   const c = caughtSpecies(sp.d);
-  const wild = [], raid = [], struct = [];
-  for (const f of sp.f) {
-    f.wild.forEach(r => wild.push([r, f]));
-    f.raid.forEach(r => raid.push([r, f]));
-    f.st.forEach(r => struct.push([r, f]));
-  }
-  wild.sort((a, b) => (b[0][3] ?? -1) - (a[0][3] ?? -1));
-  raid.sort((a, b) => (b[0][3] ?? -1) - (a[0][3] ?? -1));
+  const wild = [], raid = [];
+  for (const f of sp.f) for (const r of f.tb) (RAID_CATS.has(S[r[0]]) ? raid : wild).push([r, f]);
+  const byChance = (a, b) => (b[0][8] ?? -1) - (a[0][8] ?? -1) || (b[0][7] ?? -1) - (a[0][7] ?? -1);
+  wild.sort(byChance);
+  raid.sort(byChance);
+  // one line on top when every wild spawn has the same height limit
+  const ys = wild.map(([r]) => yOf(S[r[6]]));
+  const ySummary = wild.length && ys[0] && ys.every(y => y === ys[0])
+    ? `<div class="y-summary">All of its spawns: <b>${esc(ys[0])}</b></div>` : '';
   // whole chain both ways: every earlier stage back to the base, every later stage incl. branches
   const chipList = list => list.map(p =>
     `<span class="prior-evo-chip clickable ${caughtSpecies(p.d) ? '' : 'not-caught'}" data-dex="${p.d}" title="${caughtSpecies(p.d) ? 'Caught' : 'Not caught'}">${img(lookFor(p).sprite, 'prior-evo-icon')}<span class="prior-evo-name">${esc(p.n)}</span></span>`).join('');
@@ -401,9 +426,9 @@ function renderDetail(sp) {
     <div class="section-title">Evolution family</div>
     ${renderFamily(sp)}
     <div class="section-title">Where to find</div>
-    ${wild.map(([r, f]) => spawnRow(r, f, sp)).join('') || `<div class="spawn-row meta">No known wild spawn${struct.length ? ' outside structures' : ''} — see evolution/breeding info below.</div>`}
-    ${struct.length ? `<div class="section-title">Structure spawns</div>${struct.map(([r, f]) => spawnRow(r, f, sp, true)).join('')}` : ''}
-    ${raid.length ? `<div class="section-title">Raids &amp; boss encounters</div>${raid.map(([r, f]) => spawnRow(r, f, sp)).join('')}` : ''}
+    ${ySummary}
+    ${spawnTable(wild, sp) || '<div class="spawn-row meta">No known wild spawn — see evolution/breeding info below.</div>'}
+    ${raid.length ? `<div class="section-title">Raids &amp; boss encounters</div>${spawnTable(raid, sp)}` : ''}
     <div class="section-title">Evolution &amp; breeding</div>
     ${evoInto.join('') || '<div class="spawn-row meta">No evolution data.</div>'}
     <div class="section-title">Forms &amp; palettes <span class="meta">— click one to use it as this Pokémon's picture in the Pokédex</span></div>
