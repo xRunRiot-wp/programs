@@ -489,10 +489,47 @@
       const el = document.elementsFromPoint(x, y).find((e) => !(panelHost && (panelHost === e || panelHost.contains(e))));
       const g2 = el && gridAt(x, y, el);
       if (!g2 || !(norm(g2.name) === norm(g.name) || sameName(g.name, g2.name) || sameName(g2.name, g.name)) || g2.md !== g.md) continue;
-      await mouseAt(el, x, y, step.how);
-      return { ok: true };
+      // v3.4 (Zack 10-09: "I either have to double click the person, the day, or right click to get that option"):
+      // a plain click doesn't open Add Shift in his Kronos -> try what he did, then double-click, then
+      // right-click > Add Shift, then a plain click, until the panel shows up
+      const before = panelSig();
+      const hows = [...new Set([step.how && step.how !== "click" ? step.how : "dblclick", "dblclick", "context", "click"])];
+      for (const how of hows) {
+        await mouseAt(el, x, y, how);
+        if (how === "context") {
+          const item = await waitAddShiftItem(2000);
+          if (!item) { pressKey(document.activeElement || document.body, "Escape"); await sleep(300); continue; }
+          clickEl(item);
+        }
+        if (await panelOpened(before, 3000)) return { ok: true };
+      }
+      return { ok: false, why: `I clicked ${g.name}'s spot on ${g.md}, but Kronos didn't open Add Shift. Open it yourself (double-click the spot, or right-click > Add Shift) and press I did it.` };
     }
     return { ok: false, why: `I couldn't find a free spot for ${g.name} on ${g.md} on the grid. Click it yourself and press I did it.` };
+  }
+
+  // What the Add Shift panel looks like when it opens: more time/text boxes, a dialog, or its title
+  function panelSig() {
+    const t = textLeaves().filter(([, x]) => /^(add|edit|new)\s+shift\b/i.test(x)).length;
+    return { boxes: timeBoxes().length, inputs: deepAll("input:not([type=hidden]),select,textarea").filter(visible).length,
+      dialogs: [...document.querySelectorAll("[role=dialog],[aria-modal=true]")].filter(visible).length, title: t, frames: document.querySelectorAll("iframe").length };
+  }
+  async function panelOpened(before, ms) {
+    for (const t0 = Date.now(); Date.now() - t0 < ms;) {
+      await sleep(250);
+      const n = panelSig();
+      if (n.boxes > before.boxes || n.inputs > before.inputs + 1 || n.dialogs > before.dialogs || n.title > before.title || n.frames > before.frames) return true;
+    }
+    return false;
+  }
+  // the "Add Shift" entry of the right-click menu
+  async function waitAddShiftItem(ms) {
+    for (const t0 = Date.now(); Date.now() - t0 < ms;) {
+      await sleep(200);
+      const hit = textLeaves().find(([e, x]) => /^\+?\s*add\s+shift\b/i.test(x) && notPanel(e));
+      if (hit) return hit[0].closest("[role=menuitem],li,button,a,[tabindex]") || hit[0];
+    }
+    return null;
   }
 
   // ---------------- doing a step (same thing Zack would do) ----------------
@@ -848,13 +885,12 @@
     for (const st of r.steps) {
       const dbg = st.action === "click" && st.debug;
       const chain = dbg && dbg.clicked_and_parents;
-      if (!chain || !chain.some((c) => /krn_(shadow|matrix)/.test((c.attrs && c.attrs.class) || ""))) continue;
+      if (!chain || !chain.some((c) => /\bkrn_(shadow|matrix)\b/.test((c.attrs && c.attrs.class) || ""))) continue;
       const band = (dbg.day_headers || []).find((b) => dbg.at && dbg.at[0] >= b.left && dbg.at[0] < b.left + b.width);
       st.action = "grid"; st.how = "click";
       st.grid = { name: "", md: band ? band.day : "", rel: band ? (dbg.at[0] - band.left) / band.width : 0.5, dy: 0 };
     }
-    r.broken = r.steps.some((x) => (x.action === "type" || x.action === "select") && x.desc && !/^(input|select|textarea)$/.test(x.desc.tag)) ||
-      (!r.steps.some((x) => x.action === "grid") && /kronos/i.test(location.hostname) && !!document.querySelector(".krn_matrix"));
+    r.broken = r.steps.some((x) => (x.action === "type" || x.action === "select") && x.desc && !/^(input|select|textarea)$/.test(x.desc.tag));
     return r;
   }
   async function loadAll() {
@@ -1273,8 +1309,19 @@
   }
 
   // One shift: do every learned step with this shift's values. Returns "saved" | "skipped" | "stop".
+  // v3.4: the recording from its first box on, after one "open Add Shift for this person on this day" step
+  // that the helper does itself (Zack's recordings didn't always catch how he opened the panel: a
+  // double-click, or right-click > Add Shift)
+  const isBoxStep = (x) => x.action === "type" || x.action === "select" || (x.action === "click" && x.desc && /^(input|select|textarea)$/.test(x.desc.tag));
+  function runSteps() {
+    const all = recipe.steps, first = all.findIndex(isBoxStep);
+    if (first < 0) return all;
+    const g = all.slice(0, first).find((x) => x.action === "grid");
+    const open = g ? { ...g } : { action: "grid", how: "dblclick", grid: { name: "", md: "", rel: 0.5, dy: 0 }, frameKey: all[first].frameKey };
+    return [open, ...all.slice(first)];
+  }
   async function enterShift(s, pace, confirm, head, opts = {}) {
-    const steps = recipe.steps;
+    const steps = runSteps();
     const saveAt = steps.findIndex((x) => x.isSave);
     const jobInMain = steps.some((x) => x.map && x.map.field === "job");
     for (let i = 0; i < steps.length; i++) {
