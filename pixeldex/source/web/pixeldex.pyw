@@ -11,8 +11,12 @@ from pathlib import Path
 
 import webview
 
+VERSION = "dev"   # build.py writes the real version here (shown in the title bar)
 HERE = Path(__file__).resolve().parent
-SETTINGS = HERE / "userdata" / "settings.json"
+# Settings live outside the folder, so deleting the old folder and unzipping a new version keeps them.
+SETTINGS_DIR = Path(os.environ.get("PIXELDEX_SETTINGS_DIR") or Path(os.environ.get("APPDATA", Path.home())) / "PixelDex" / "v2")
+SETTINGS = SETTINGS_DIR / "settings.json"
+LOCAL_SETTINGS = HERE / "userdata" / "settings.json"   # where v2.1/v2.2 kept them
 _settings_lock = threading.Lock()   # the window calls in from several threads at once
 
 
@@ -41,13 +45,22 @@ class Api:
         try:
             return json.loads(SETTINGS.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {}
+            pass
+        old = _find_old_settings()   # first run of this version: bring over v2.1/v2.2 settings if we can find them
+        if old:
+            try:
+                SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+                SETTINGS.write_text(old.read_text(encoding="utf-8"), encoding="utf-8")
+                return json.loads(SETTINGS.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+        return {}
 
     def save_setting(self, key, value_json):
         with _settings_lock:
             data = self.load_settings()
             data[key] = value_json
-            SETTINGS.parent.mkdir(exist_ok=True)
+            SETTINGS.parent.mkdir(parents=True, exist_ok=True)
             tmp = SETTINGS.with_suffix(".tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(tmp, SETTINGS)
@@ -62,8 +75,25 @@ class Api:
             return None
 
 
+def _find_old_settings():
+    """An older PixelDex folder's userdata/settings.json: this folder, its neighbours, Desktop/Downloads/Documents."""
+    if os.environ.get("PIXELDEX_SETTINGS_DIR"):   # tests: only this folder
+        return LOCAL_SETTINGS if LOCAL_SETTINGS.is_file() else None
+    if LOCAL_SETTINGS.is_file():
+        return LOCAL_SETTINGS
+    found = []
+    places = {HERE.parent} | {Path.home() / d for d in ("Desktop", "Downloads", "Documents", "OneDrive/Desktop", "OneDrive/Documents")}
+    for base in places:
+        try:
+            for pattern in ("*/userdata/settings.json", "*/*/userdata/settings.json"):
+                found += [f for f in base.glob(pattern) if (f.parent.parent / "pixeldex.pyw").is_file()]
+        except OSError:
+            pass
+    return max(found, key=lambda f: f.stat().st_mtime) if found else None
+
+
 api = Api()
-window = webview.create_window("PixelDex", str(HERE / "app" / "index.html"), js_api=api,
+window = webview.create_window(f"PixelDex v{VERSION}", str(HERE / "app" / "index.html"), js_api=api,
                                width=1200, height=800, min_size=(900, 600),
                                hidden=bool(os.environ.get("PIXELDEX_TEST_HIDDEN")))   # only for automated tests
 # private_mode off + storage in this folder = your "caught" marks and picture picks are kept between runs

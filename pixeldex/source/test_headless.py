@@ -17,6 +17,27 @@ CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 PORT = 9555
 
 prof = Path("H:/HomeDashboard/work/pixeldex2/chrome-prof")
+
+
+def nbt_pokedex(statuses):
+    """Tiny writer for a Pixelmon-style .pokedex (uncompressed big-endian NBT), for made-up test saves."""
+    import struct
+    s = lambda x: struct.pack(">H", len(x.encode())) + x.encode()
+    def comp(d):
+        out = b""
+        for k, v in d.items():
+            if isinstance(v, dict):
+                out += b"\x0a" + s(k) + comp(v)
+            elif isinstance(v, list):
+                out += b"\x09" + s(k) + b"\x0a" + struct.pack(">i", len(v)) + b"".join(comp(x) for x in v)
+            elif isinstance(v, str):
+                out += b"\x08" + s(k) + s(v)
+            else:
+                out += b"\x03" + s(k) + struct.pack(">i", v)
+        return out + b"\x00"
+    st = [{"ndex": n, "Variant": form, "palette": pal, "Gender": 0,
+           "status_data": {"caught": 1, "seen": 1, "status": "CAUGHT"}} for n, form, pal in statuses]
+    return b"\x0a" + s("") + comp({"pokedexes": [{"statuses": st}]})
 proc = subprocess.Popen([CHROME, "--headless=new", f"--remote-debugging-port={PORT}", f"--user-data-dir={prof}",
                          "--window-size=1400,900", "--no-first-run", "--disable-gpu", "about:blank"],
                         creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS)
@@ -189,6 +210,32 @@ try:
     shot("12_beldum_900wide")
     closeit = ev("closeDetail()")
     cmd("Emulation.clearDeviceMetricsOverride")
+    # v2.3: a shiny caught in the save becomes the Pokedex picture, unless the player picked one
+    fake = base64.b64encode(nbt_pokedex([(393, "base", "none"), (393, "base", "shiny"), (37, "alolan", "shiny"), (25, "base", "none")])).decode()
+    ev("picks = {}; store.set('picks', picks); $('lookMode').value = 'picks'")
+    ev(f"(async()=>{{const b=Uint8Array.from(atob('{fake}'),c=>c.charCodeAt(0)); await applyPlayers('shiny test',[{{uuid:'y',file:new File([b],'y.pokedex'),modified:2}}]);}})()")
+    src = lambda dex: ev(f"document.querySelector('#grid .card[data-dex=\"{dex}\"] img').getAttribute('src').split('/').pop()")
+    piplup, vulpix, pika = src(393), src(37), src(25)
+    print("auto shiny: Piplup card", piplup, "| Vulpix (caught Alolan shiny)", vulpix, "| Pikachu (no shiny)", pika)
+    assert "shiny" in piplup and "shiny" in vulpix and "alolan" in vulpix and "shiny" not in pika
+    ev("openDetail(393)")
+    hdr = ev("document.querySelector('.detail-header img').getAttribute('src').split('/').pop()")
+    print("Piplup page picture:", hdr)
+    assert "shiny" in hdr
+    ev("document.querySelector('[data-pick=\"base|none|0\"]').click()")   # the player's own pick wins
+    ev("closeDetail()")
+    print("after picking the normal one:", src(393))
+    assert "shiny" not in src(393)
+    ev("delete picks[393]; store.set('picks', picks); refreshAll()")
+    print("pick removed -> back to shiny:", src(393))
+    assert "shiny" in src(393)
+    ev("$('lookMode').value='default'; refreshAll()")
+    print("'Pictures: default' still shows the normal one:", src(393))
+    assert "shiny" not in src(393)
+    ev("$('lookMode').value='picks'; store.set('look','picks'); refreshAll()")
+    print("footer:", ev("document.getElementById('versionFooter').textContent"), "| title:", ev("document.title"))
+    shot("13_auto_shiny")
     print("JS errors:", errors)
+    assert not errors
 finally:
     proc.terminate()

@@ -101,15 +101,16 @@ function descendants(key) {             // next stage first, then the stages aft
 }
 
 // ---------- caught status ----------
-let saveSets = { sp: new Set(), form: new Set(), pal: new Set(), seen: new Set() };
+let saveSets = { sp: new Set(), form: new Set(), pal: new Set(), seen: new Set(), shiny: new Map() };
 function rebuildSaveSets() {
-  saveSets = { sp: new Set(), form: new Set(), pal: new Set(), seen: new Set() };
+  saveSets = { sp: new Set(), form: new Set(), pal: new Set(), seen: new Set(), shiny: new Map() };
   for (const [n, form, pal, caught, seen] of (saveCache && saveCache.rows) || []) {
     if (seen || caught) saveSets.seen.add(n);
     if (!caught) continue;
     saveSets.sp.add(String(n));
     saveSets.form.add(`${n}|${form}`);
     saveSets.pal.add(`${n}|${form}|${pal}`);
+    if (isShinyPal(pal)) (saveSets.shiny.get(n) || saveSets.shiny.set(n, []).get(n)).push([form, pal]);
   }
 }
 const manualPrefix = p => { for (const k of manual) if (k === p || k.startsWith(p + '|')) return true; return false; };
@@ -130,6 +131,16 @@ function lookFor(sp) {
     const f = sp.f.find(x => x.n === fn);
     const p = f && f.p.find(x => S[x[0]] === pal && String(x[1]) === g && x[2]);
     if (p) return { sprite: p[2], form: f, pal };
+  }
+  if (mode === 'picks') {
+    const caught = saveSets.shiny.get(sp.d) || saveSets.shiny.get(String(sp.d)) || [];
+    // prefer the normal form's plain shiny, then any caught shiny of any form
+    const order = [...caught].sort((a, b) => (b[0] === sp.df) - (a[0] === sp.df) || (b[1] === 'shiny') - (a[1] === 'shiny'));
+    for (const [fn, pal] of order) {
+      const f = sp.f.find(x => x.n === fn);
+      const p = f && f.p.find(x => S[x[0]] === pal && x[2]);
+      if (p) return { sprite: p[2], form: f, pal, autoShiny: true };
+    }
   }
   const f = sp.defForm;
   if (mode === 'shiny') {
@@ -641,6 +652,7 @@ $('settingsBtn').addEventListener('click', () => $('settingsOverlay').classList.
 $('closeSettings').addEventListener('click', () => $('settingsOverlay').classList.add('hidden'));
 $('settingsOverlay').addEventListener('click', e => { if (e.target === $('settingsOverlay')) $('settingsOverlay').classList.add('hidden'); });
 $('aboutLine').textContent = `PixelDex v${D.version} · Pokémon data from Pixelmon ${D.pixelmon}`;
+$('versionFooter').textContent = `PixelDex v${D.version}`;
 
 // ---------- start ----------
 $('lookMode').value = store.get('look', 'picks');

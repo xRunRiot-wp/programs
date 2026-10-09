@@ -156,7 +156,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--jar", default=str(DEFAULT_JAR))
     ap.add_argument("--out", default=str(Path("H:/HomeDashboard/work/pixeldex2/out")))
-    ap.add_argument("--version", default="2.2")
+    ap.add_argument("--version", default="2.3")
     ap.add_argument("--runtime", default="H:/HomeDashboard/work/pixeldex2/runtime",
                     help="portable Python (embeddable 3.12 + pywebview) copied in as runtime/")
     a = ap.parse_args()
@@ -499,11 +499,13 @@ def main():
     for f in ("app.js", "style.css", "nbt.js"):
         shutil.copy(HERE / "web" / f, out / "app" / f)
     # the page lives in app/ and is opened in its own window by pixeldex.pyw (started from PixelDex.vbs)
-    html = (HERE / "web" / "PixelDex.html").read_text(encoding="utf-8").replace('"app/', '"')
+    html = (HERE / "web" / "PixelDex.html").read_text(encoding="utf-8").replace('"app/', '"') \
+        .replace("<title>PixelDex</title>", f"<title>PixelDex v{a.version}</title>")
     (out / "app" / "index.html").write_text(html, encoding="utf-8")
-    shutil.copy(HERE / "web" / "pixeldex.pyw", out / "pixeldex.pyw")
+    (out / "pixeldex.pyw").write_text((HERE / "web" / "pixeldex.pyw").read_text(encoding="utf-8")
+                                      .replace('VERSION = "dev"', f'VERSION = "{a.version}"'), encoding="utf-8")
     for f in ("PixelDex.vbs", "Start PixelDex (backup).bat", "README.txt"):   # Windows line endings for these
-        text = (HERE / "web" / f).read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
+        text = (HERE / "web" / f).read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10)).replace("{VERSION}", a.version)
         (out / f).write_bytes(text.replace(chr(10), chr(13) + chr(10)).encode("utf-8"))
     if Path(a.runtime).is_dir():
         shutil.copytree(a.runtime, out / "runtime", ignore=shutil.ignore_patterns("__pycache__", "bin"))

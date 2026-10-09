@@ -1,23 +1,31 @@
-PixelDex v2.1 - a Pokedex companion for Pixelmon Reforged (Minecraft 1.21.1)
+PixelDex v{VERSION} - a Pokedex companion for Pixelmon Reforged (Minecraft 1.21.1)
 ============================================================================
+The window's title bar says which version you are running ("PixelDex v{VERSION}").
+Updating: delete the old PixelDex folder and unzip the new one. Your caught marks,
+picture picks and world folder are kept in %APPDATA%\PixelDex\v2, so the new folder
+picks them up by itself.
+
 
 HOW TO START IT (portable - nothing to install, no .exe)
 1. Unzip the whole folder anywhere (Desktop, USB stick, ...).
 2. Double-click  PixelDex.vbs  - PixelDex opens in its own window, like before.
    (If your PC blocks .vbs files, double-click "Start PixelDex (backup).bat" instead.)
 Everything it needs is inside the folder (its own copy of Python in "runtime").
-To remove it, delete the folder. Your caught marks are kept in the "userdata" folder.
+To remove it, delete the folder (your settings stay in %APPDATA%\PixelDex\v2).
 Uses Microsoft Edge WebView2, which comes with Windows 10/11.
 
 TABS
 - Pokedex: every Pokemon, grouped by region. Click one for:
     * what it evolves FROM (all the way back) and INTO (every later stage),
       plus the whole evolution family, each marked "Caught" / "Not caught"
-    * where to find it (wild spawns sorted by how common they are, structure
-      spawns, and raids as separate sections)
+    * where to find it: a table with Biomes, Time, Location, Weather, Conditions
+      (height limits like "Min Y 100", light level, structures...), Level, Held
+      item and Chance - click a biome group to see every biome with its %. Raids
+      have their own table.
     * every form and palette it has - click any of them to make that the picture
       shown for it in the Pokedex (the "Pictures" drop-down switches between your
-      picks, the defaults, and all-shiny)
+      picks, the defaults, and all-shiny). If your save shows you caught one as a
+      shiny, the shiny picture is used automatically - unless you picked one.
   A small blue "S" on a card = it only spawns inside structures.
 - Forms: a Pokedex of every alternate form (regional, Mega, Gigantamax, other),
   with caught status per form. Pokemon with a huge set of forms (Unown) are left out
