@@ -190,6 +190,8 @@
         }
       }
     }
+    // A job picked from a menu that shows the whole path ("Restaurant/Bar")
+    if (opts.click && /[/>]/.test(v) && shift.kronosJob && v.split(/\s*[/>]\s*/).pop().toLowerCase() === String(shift.kronosJob).toLowerCase()) return { field: "job", fmt: "Kronos job" };
     // A partial name typed into a search box ("Aver") -> type the whole last/first name.
     if (!opts.click && v.length >= 2) {
       for (const fmt of ["Last", "First", "Last, First", "First Last"]) {

@@ -1,14 +1,19 @@
 // End-to-end test in a hidden, separate Chrome (own temp profile, debugging over a pipe,
 // never port 9333 / never Joseph's Chrome). Loads the extension, reads the roster on the
 // review screen, then on a MOCK Kronos page: copy mode, "Show me once", auto-fill Monday,
-// and the "already there?" check.
-//   node tests/e2e.js <roster.csv> <workdir>
+// and the "already there?" check. Then the grid part (e2e_grid.js): the mock UKG Schedule Planner
+// where a shift is added by clicking an empty grid spot (Show me once + replay, several people/days).
+//   node tests/e2e.js <roster.csv> <workdir> [all|legacy|grid]
+//   GRID_VARIANTS=click,dblclick,menu,table,aria,jobpath,applysaves  (default: click; "all" = every one)
 const { spawn } = require("child_process");
 const fs = require("fs"), path = require("path"), http = require("http");
 const assert = require("assert");
 
 const CSV = path.resolve(process.argv[2]);
 const WORK = path.resolve(process.argv[3]);
+const MODE = process.argv[4] || "all";
+const gridTests = require("./e2e_grid.js");
+const GRID = (process.env.GRID_VARIANTS || "click") === "all" ? Object.keys(gridTests.VARIANTS) : (process.env.GRID_VARIANTS || "click").split(",");
 const HERE = __dirname;
 const EXT_SRC = path.join(HERE, "..", "extension");
 const EXT = path.join(WORK, "ext-test");
@@ -81,11 +86,23 @@ async function page(url) {
     const t = Date.now() + ms;
     for (;;) { const v = await ev(js).catch(() => null); if (v) return v; if (Date.now() > t) throw new Error("timed out waiting for " + what); await sleep(200); }
   };
-  const mouse = async (x, y) => {
-    for (const type of ["mousePressed", "mouseReleased"]) await cmd("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 }, sessionId);
+  const mouse = async (x, y, o = {}) => {
+    const button = o.button || "left";
+    await cmd("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, sessionId);
+    for (let n = 1; n <= (o.double ? 2 : 1); n++)
+      for (const type of ["mousePressed", "mouseReleased"]) await cmd("Input.dispatchMouseEvent", { type, x, y, button, clickCount: n, buttons: type === "mousePressed" ? (button === "right" ? 2 : 1) : 0 }, sessionId);
+  };
+  const drag = async (x1, y1, x2, y2) => {
+    await cmd("Input.dispatchMouseEvent", { type: "mousePressed", x: x1, y: y1, button: "left", clickCount: 1, buttons: 1 }, sessionId);
+    for (let i = 1; i <= 8; i++) await cmd("Input.dispatchMouseEvent", { type: "mouseMoved", x: x1 + (x2 - x1) * i / 8, y: y1 + (y2 - y1) * i / 8, button: "left", buttons: 1 }, sessionId);
+    await cmd("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1, buttons: 0 }, sessionId);
+  };
+  const selectAll = async () => { // Ctrl+A, like Zack clearing a box before typing
+    await cmd("Input.dispatchKeyEvent", { type: "keyDown", modifiers: 2, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, commands: ["selectAll"] }, sessionId);
+    await cmd("Input.dispatchKeyEvent", { type: "keyUp", modifiers: 2, key: "a", code: "KeyA", windowsVirtualKeyCode: 65 }, sessionId);
   };
   const type = async (text) => cmd("Input.insertText", { text }, sessionId);
-  return { sessionId, ev, shot, until, mouse, type, targetId };
+  return { sessionId, ev, shot, until, mouse, drag, selectAll, type, targetId };
 }
 
 (async () => {
@@ -114,9 +131,10 @@ async function page(url) {
     await rv.ev(`new Promise(r => chrome.storage.local.get('sh_data', v => { v.sh_data.settings.pace = {keyMin:5,keyMax:10,stepMin:50,stepMax:80,shiftMin:100,shiftMax:150}; chrome.storage.local.set(v, r); }))`);
     console.log("stored shifts:", await rv.ev("new Promise(r => chrome.storage.local.get('sh_data', v => r(v.sh_data.shifts.length)))"));
 
-    // ---------- mock Kronos ----------
-    const k = await page("http://test.mykronos.com/schedule.html");
     const P = "document.getElementById('schedule-helper-panel').shadowRoot";
+    if (MODE !== "grid") {
+    // ---------- mock Kronos (old layout: an "Add shift" button + a form in a frame) ----------
+    const k = await page("http://test.mykronos.com/schedule.html");
     await k.until(`!!document.getElementById('schedule-helper-panel') && ${P}.querySelector('.sh-card')`, 20000, "panel");
     await k.ev(`window.DIRECTORY = ${JSON.stringify(DIRECTORY)}; window.PRIMARY = ${JSON.stringify(PRIMARY)}`);
     // copy mode
@@ -271,6 +289,11 @@ async function page(url) {
       await k.ev(`${P}.querySelector('[data-tab=copy]').click()`);
       await sleep(500);
       await k.shot("8_copy_after");
+    }
+    }
+    if (MODE !== "legacy") {
+      const summary = await gridTests({ page, cmd, sleep, rv, roster, R, DIRECTORY, PRIMARY, P }, GRID);
+      console.log("\ngrid results:\n  " + summary.join("\n  "));
     }
     console.log("page errors:", events.length ? events : "none");
     console.log("E2E PASS");

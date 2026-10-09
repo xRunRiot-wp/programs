@@ -1,0 +1,302 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mock Schedule Planner</title>
+<!--
+  A stand-in for UKG Dimensions' "Schedule Planner" (see research/ukg_planner_notes.md).
+  Like the real one (Zack's screenshots): Gantt view, names "Last, First" on the left, day headers
+  "Tue 10/06" with hour ticks, empty row space with NO text and NO labels. Clicking an empty spot
+  makes a 1-hour shift at that hour and slides in the "Add Shift" panel (Regular [1.00], Start Time,
+  End Time, date, Transfer Employee, Comments, Cancel/Apply). Apply only puts it on the grid;
+  the toolbar Save stores it (window.added).
+  Options (query string):
+    view=table        Table view: one cell per person/day instead of the timeline
+    open=dblclick     single click only selects; double-click opens the panel
+    open=menu         right-click -> menu -> "Add Shift"
+    aria=1            friendlier build: role=grid/row/gridcell, aria-label "<name> <date>", labelled inputs
+    save=apply        Apply stores the shift straight away (no toolbar Save step)
+    jobpath=1         the Transfer Employee menu shows "Restaurant/Bar" instead of "Bar"
+  The test calls window.mockInit(names, primaryJobs) to fill in the rows.
+-->
+<style>
+:root{--teal:#0b5560;--bar:#8a4fd1;--line:#dde2e6}
+*{box-sizing:border-box}
+body{font:12px "Segoe UI",sans-serif;margin:0;color:#222;background:#fff;overflow:hidden}
+#top{background:var(--teal);color:#fff;padding:7px 12px;font-size:13px}
+#top b{background:#fff;color:var(--teal);padding:0 4px;border-radius:2px;margin-right:6px;font-size:11px}
+#tools{display:flex;gap:16px;align-items:center;padding:4px 12px;border-bottom:1px solid var(--line)}
+#tools .tb{display:flex;flex-direction:column;align-items:center;font-size:10px;color:#0a5b9c;cursor:pointer;background:none;border:0}
+#tools .tb i{font-style:normal;font-size:16px}
+#tools .sp{flex:1}
+#viewby{color:#0a5b9c;font-size:11px}
+#msg{padding:3px 12px;font-size:11px;min-height:18px}
+#msg.ok{background:#e4f5e8;color:#226b33}
+#wrap{position:relative;height:640px;overflow:auto;border-top:1px solid var(--line)}
+#head{position:sticky;top:0;z-index:3;background:#fff;display:flex;border-bottom:1px solid #bbb}
+#head .nm{width:180px;flex:none;padding:16px 6px 0;font-weight:600;position:sticky;left:0;background:#fff}
+.dh{flex:none;border-left:1px solid var(--line);text-align:center}
+.dh .d{padding:2px 0;font-size:11px}
+.dh .ticks{display:flex;font-size:9px;color:#777}
+.dh .ticks span{flex:1;text-align:left;padding-left:2px}
+.row{display:flex;height:30px;border-bottom:1px solid var(--line)}
+.row .nm{width:180px;flex:none;padding:7px 6px;position:sticky;left:0;background:#fff;z-index:2;white-space:nowrap;overflow:hidden}
+.row .nm input{margin:0 6px 0 0;vertical-align:middle}
+.lane{position:relative;flex:none;height:29px;cursor:cell}
+.lane .gc{position:absolute;top:0;bottom:0;border-left:1px solid var(--line)}
+.lane .gc.sel{background:#d8ecff}
+.bar{position:absolute;top:5px;height:18px;background:var(--bar);color:#fff;font-size:9px;line-height:18px;padding:0 3px;border-radius:2px;overflow:hidden;white-space:nowrap;cursor:pointer}
+.bar.pending{background:repeating-linear-gradient(45deg,#fff,#fff 3px,#e6d6fb 3px,#e6d6fb 6px);color:#5b2aa0;border:1px solid var(--bar)}
+.bar.job{background:#0b4f8a}
+#now{position:absolute;top:0;bottom:0;width:2px;background:#c03bc0;z-index:1;pointer-events:none}
+/* table view */
+.tcell{flex:none;border-left:1px solid var(--line);height:29px;position:relative;cursor:cell}
+.tcell.sel{background:#d8ecff}
+.tcell .bar{position:static;display:block;margin:5px 4px}
+/* right-click menu */
+#ctx{position:fixed;z-index:20;background:#fff;border:1px solid #aaa;box-shadow:0 2px 8px #0003;padding:3px 0;min-width:140px}
+#ctx div{padding:4px 12px;cursor:pointer}#ctx div:hover{background:#eef}
+/* the slide-in shift panel */
+#panel{position:fixed;top:0;right:0;bottom:0;width:330px;background:#fff;box-shadow:-3px 0 12px #0004;z-index:10;transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column}
+#panel.open{transform:none}
+#panel:not(.open){visibility:hidden;transition:transform .2s,visibility 0s .2s}
+#panel .hd{display:flex;justify-content:space-between;padding:12px;font-size:15px;border-bottom:1px solid var(--line)}
+#panel .hd span[role=button]{cursor:pointer;color:#0a5b9c}
+#panel .bd{padding:10px 12px;flex:1;overflow:auto}
+#panel .sum{color:#333;margin-bottom:8px}
+#panel .emp{border:1px solid #999;padding:3px 6px;width:190px;display:flex;justify-content:space-between}
+#panel .jobline{color:#555;font-size:11px;margin:3px 0 10px}
+#panel .seg{border-left:3px solid var(--bar);padding-left:8px;margin-top:8px}
+#panel .segtype{color:#0a5b9c;cursor:pointer}
+#panel .times{display:flex;gap:8px;align-items:flex-end;margin:6px 0}
+#panel .times .f span{display:block;font-size:10px;color:#666}
+#panel .times input{width:80px;padding:3px}
+#panel .dt{color:#0a5b9c;margin-left:auto}
+#panel .link{color:#0a5b9c;cursor:pointer;border:1px solid transparent;display:inline-block;padding:2px 0}
+#panel .menu{border:1px solid #aaa;margin:4px 0;padding:2px 0}
+#panel .menu div{padding:3px 8px;cursor:pointer}#panel .menu div:hover{background:#eef}
+#panel .cm{margin-top:14px;font-size:11px}
+#panel .err{color:#c00;margin-top:8px;min-height:16px}
+#panel .ft{display:flex;justify-content:flex-end;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+#panel .ft button{padding:4px 12px;border:1px solid #0a5b9c;background:#fff;color:#0a5b9c}
+#panel .ft button.pri{background:#0a5b9c;color:#fff}
+#tabs{display:flex;justify-content:space-around;border-top:1px solid var(--line);padding:6px;color:#0a5b9c;font-size:11px}
+</style></head>
+<body>
+<div id="top"><b>UKG</b>Schedule Planner with Absence Calendar</div>
+<div id="viewby">View by employee &#9662;</div>
+<div id="tools">
+  <button class="tb"><i>&#9889;</i>Quick actions</button>
+  <button class="tb"><i>&#9673;</i>Show/ Hide</button>
+  <button class="tb" id="tview"><i>&#9638;</i><span></span></button>
+  <button class="tb"><i>A</i>Zoom</button>
+  <div class="sp"></div>
+  <span style="font-size:11px">Yesterday Plus 6 Days &#9662;</span>
+  <span style="font-size:11px" id="loaded">Loaded 8:57 PM</span>
+  <button class="tb"><i>&#8635;</i>Refresh</button>
+  <button class="tb" id="save"><i>&#128190;</i>Save</button>
+</div>
+<div id="msg"></div>
+<div id="wrap"><div id="head"></div><div id="body"></div></div>
+<div id="tabs"><span>Absence calendar</span><span>Comments</span><span>Audit</span></div>
+<div id="panel" aria-hidden="true"></div>
+<script>
+(() => {
+  const Q = new URLSearchParams(location.search);
+  const VIEW = Q.get("view") === "table" ? "table" : "gantt", OPEN = Q.get("open") || "click";
+  const ARIA = Q.get("aria") === "1", APPLY_SAVES = Q.get("save") === "apply";
+  const YEAR = 2026, DAYS = [["Mon", 10, 5], ["Tue", 10, 6], ["Wed", 10, 7], ["Thu", 10, 8], ["Fri", 10, 9], ["Sat", 10, 10], ["Sun", 10, 11]];
+  const DW = VIEW === "gantt" ? 168 : 150, NAMEW = 180;
+  const JOBS = ["Server", "Bar", "Bus", "Host", "Manager"];
+  const md = (d) => `${String(d[1]).padStart(2, "0")}/${String(d[2]).padStart(2, "0")}`;
+  const mdShort = (d) => `${d[1]}/${String(d[2]).padStart(2, "0")}`;
+  const $ = (s, r = document) => r.querySelector(s);
+  window.added = []; window.pending = []; window.mockLog = [];
+  let names = [], primary = {}, sel = null;
+  const log = (m) => window.mockLog.push(m);
+  $("#tview span").textContent = VIEW === "gantt" ? "Table view" : "Gantt view";
+
+  // ---- times ----
+  const fmt = (min) => { min = ((min % 1440) + 1440) % 1440; const h = Math.floor(min / 60), m = min % 60; return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+  // what UKG accepts when typed: "5:00 PM", "5:00PM", "5pm", "17:00"
+  function parse(t) {
+    const m = /^\s*(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m?\.?\s*$/i.exec(t) || /^\s*([01]?\d|2[0-3]):([0-5]\d)\s*$/.exec(t);
+    if (!m) return null;
+    let h = Number(m[1]); const mi = Number(m[2] || 0);
+    if (m[3]) { if (h < 1 || h > 12) return null; h = (h % 12) + (/p/i.test(m[3]) ? 12 : 0); }
+    return h * 60 + mi;
+  }
+  const hrs = (a, b) => (((b - a) + 1440) % 1440 || 1440) / 60;
+
+  // ---- grid ----
+  function renderHead() {
+    const h = $("#head"); h.innerHTML = `<div class="nm">Name (0/${names.length})</div>`;
+    if (ARIA) { h.setAttribute("role", "row"); h.firstChild.setAttribute("role", "columnheader"); }
+    for (const d of DAYS) {
+      const c = document.createElement("div"); c.className = "dh"; c.style.width = DW + "px";
+      if (ARIA) c.setAttribute("role", "columnheader");
+      c.innerHTML = `<div class="d">${d[0]} ${mdShort(d)}</div>` + (VIEW === "gantt" ? `<div class="ticks">${["12A", "4A", "8A", "12P", "4P", "8P"].map((t) => `<span>${t}</span>`).join("")}</div>` : "");
+      h.appendChild(c);
+    }
+  }
+  function renderBody() {
+    const b = $("#body"); b.innerHTML = "";
+    if (ARIA) { $("#wrap").setAttribute("role", "grid"); }
+    for (const n of names) {
+      const r = document.createElement("div"); r.className = "row"; r.dataset.emp = names.indexOf(n);
+      if (ARIA) r.setAttribute("role", "row");
+      r.innerHTML = `<div class="nm"${ARIA ? ' role="rowheader"' : ""}><input type="checkbox"><span>${n}</span></div>`;
+      if (VIEW === "gantt") {
+        const lane = document.createElement("div"); lane.className = "lane"; lane.style.width = DW * 7 + "px";
+        DAYS.forEach((d, i) => {
+          const g = document.createElement("div"); g.className = "gc"; g.style.left = i * DW + "px"; g.style.width = DW + "px";
+          if (ARIA) { g.setAttribute("role", "gridcell"); g.setAttribute("aria-label", `${n} ${d[0]} ${mdShort(d)}`); g.dataset.date = `${YEAR}-${md(d).replace("/", "-")}`; }
+          lane.appendChild(g);
+        });
+        r.appendChild(lane);
+      } else {
+        DAYS.forEach((d, i) => {
+          const c = document.createElement("div"); c.className = "tcell"; c.style.width = DW + "px"; c.dataset.day = i;
+          if (ARIA) { c.setAttribute("role", "gridcell"); c.setAttribute("aria-label", `${n} ${d[0]} ${mdShort(d)}`); }
+          r.appendChild(c);
+        });
+      }
+      b.appendChild(r);
+    }
+    drawBars();
+    if (VIEW === "gantt") { const now = document.createElement("div"); now.id = "now"; now.style.left = NAMEW + 2 * DW + DW * 0.4 + "px"; b.style.position = "relative"; b.appendChild(now); }
+  }
+  function drawBars() {
+    document.querySelectorAll(".bar").forEach((e) => e.remove());
+    const all = [...window.added.map((s) => [s, false]), ...window.pending.map((s) => [s, true])];
+    for (const [s, pend] of all) {
+      const r = document.querySelector(`.row[data-emp="${names.indexOf(s.name)}"]`); if (!r) continue;
+      const bar = document.createElement("div"); bar.className = "bar" + (pend ? " pending" : "") + (s.job !== primary[s.name] ? " job" : "");
+      bar.textContent = `${s.start} - ${s.end}`; bar.title = `${s.name} ${s.start} - ${s.end} ${s.job}`;
+      bar.onclick = (e) => { e.stopPropagation(); log("bar click"); }; // editing existing shifts isn't part of the mock
+      if (VIEW === "gantt") {
+        const a = parse(s.start), len = hrs(a, parse(s.end));
+        bar.style.left = s.day * DW + (a / 1440) * DW + "px"; bar.style.width = Math.max(14, (len / 24) * DW) + "px";
+        r.querySelector(".lane").appendChild(bar);
+      } else r.querySelector(`.tcell[data-day="${s.day}"]`).appendChild(bar);
+    }
+  }
+  // where on the grid is (x, y)? -> {emp, day, min}
+  function spot(e) {
+    const r = e.target.closest(".row"); if (!r || e.target.closest(".bar,.nm")) return null;
+    const emp = Number(r.dataset.emp);
+    if (VIEW === "gantt") {
+      const lane = r.querySelector(".lane").getBoundingClientRect(), x = e.clientX - lane.left;
+      if (x < 0 || x >= DW * 7) return null;
+      const day = Math.floor(x / DW), min = Math.floor(((x % DW) / DW) * 24) * 60;
+      return { emp, day, min };
+    }
+    const c = e.target.closest(".tcell"); return c ? { emp, day: Number(c.dataset.day), min: null } : null;
+  }
+  function select(s) {
+    document.querySelectorAll(".sel").forEach((e) => e.classList.remove("sel"));
+    sel = s; if (!s) return;
+    const r = document.querySelector(`.row[data-emp="${s.emp}"]`);
+    (VIEW === "gantt" ? r.querySelectorAll(".gc")[s.day] : r.querySelector(`.tcell[data-day="${s.day}"]`)).classList.add("sel");
+  }
+  $("#body").addEventListener("click", (e) => {
+    closeCtx(); const s = spot(e); if (!s) return; log(`click ${names[s.emp]} ${s.day} ${s.min}`);
+    select(s); if (OPEN === "click") openPanel(s);
+  });
+  $("#body").addEventListener("dblclick", (e) => { const s = spot(e); if (s && OPEN === "dblclick") { log("dblclick"); openPanel(s); } });
+  $("#body").addEventListener("contextmenu", (e) => {
+    if (OPEN !== "menu") return; const s = spot(e); if (!s) return; e.preventDefault(); select(s); closeCtx();
+    const m = document.createElement("div"); m.id = "ctx"; m.setAttribute("role", "menu");
+    m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px";
+    for (const t of ["Add Shift", "Add Paycode", "Comment", "Lock"]) {
+      const it = document.createElement("div"); it.setAttribute("role", "menuitem"); it.textContent = t;
+      it.onclick = () => { closeCtx(); if (t === "Add Shift") openPanel(s); }; m.appendChild(it);
+    }
+    document.body.appendChild(m);
+  });
+  const closeCtx = () => { const m = $("#ctx"); if (m) m.remove(); };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeCtx(); closePanel(); } });
+
+  // ---- the slide-in Add Shift panel ----
+  let cur = null;
+  function openPanel(s) {
+    const n = names[s.emp], d = DAYS[s.day];
+    cur = { name: n, day: s.day, job: primary[n] || "--", seg: "Regular" };
+    const st = s.min == null ? "" : fmt(s.min), en = s.min == null ? "" : fmt(s.min + 60);
+    const lab = (txt, id) => ARIA ? `<label for="${id}">${txt}</label>` : `<span>${txt}</span>`; // real one: plain text over the box
+    const p = $("#panel");
+    p.innerHTML = `
+      <div class="hd"><span>Add Shift</span><span role="button" id="px" title="Close">&#10005;</span></div>
+      <div class="bd">
+        <div class="sum" id="sum"></div>
+        <div class="emp"><span>${n}</span><span>&#9662;</span></div>
+        <div class="jobline">Restaurant/<span id="jobpath">${cur.job}</span></div>
+        <div class="seg">
+          <div><span class="segtype" id="segtype">${cur.seg} &#9662;</span> <span id="segh"></span></div>
+          <div class="menu" id="segmenu" hidden></div>
+          <div class="times">
+            <div class="f">${lab("Start Time", "st")}<input id="st" value="${st}"${ARIA ? "" : ' autocomplete="off"'}></div>
+            <div class="f">${lab("End Time", "en")}<input id="en" value="${en}"></div>
+            <span class="dt">${mdShort(d)}</span>
+          </div>
+          <span class="link" id="xfer" tabindex="0">Transfer Employee</span>
+          <div class="menu" id="xmenu" hidden></div>
+        </div>
+        <div class="cm">Comments [0] <span class="link">Add Comment</span></div>
+        <div class="err" id="err"></div>
+      </div>
+      <div class="ft"><button id="pcancel">Cancel</button><button class="pri" id="papply">Apply</button></div>`;
+    const sum = () => {
+      const a = parse($("#st", p).value), b = parse($("#en", p).value);
+      const h = a != null && b != null ? `[${hrs(a, b).toFixed(2)}]` : "";
+      $("#sum", p).textContent = a != null && b != null ? `${fmt(a)}-${fmt(b)} ${h}` : ""; $("#segh", p).textContent = h;
+    };
+    sum(); $("#st", p).oninput = sum; $("#en", p).oninput = sum;
+    $("#px", p).onclick = closePanel; $("#pcancel", p).onclick = closePanel;
+    $("#segtype", p).onclick = () => {
+      const m = $("#segmenu", p); m.innerHTML = "";
+      for (const t of ["Regular", "Transfer", "Break"]) {
+        const it = document.createElement("div"); it.setAttribute("role", "option"); it.textContent = t;
+        it.onclick = () => { cur.seg = t; $("#segtype", p).innerHTML = `${t} &#9662;`; m.hidden = true; if (t === "Transfer") $("#xfer", p).click(); };
+        m.appendChild(it);
+      }
+      m.hidden = false;
+    };
+    // like UKG: "Transfer Employee" opens a short menu of jobs (the full Transfer panel is behind "More")
+    $("#xfer", p).onclick = () => {
+      const m = $("#xmenu", p); m.innerHTML = "";
+      for (const j of JOBS) {
+        const it = document.createElement("div"); it.setAttribute("role", "menuitem"); it.textContent = (window.JOB_PATH || Q.get("jobpath") === "1" ? "Restaurant/" : "") + j;
+        it.onclick = () => { cur.job = j; cur.seg = j === primary[n] ? "Regular" : "Transfer"; $("#jobpath", p).textContent = j; $("#segtype", p).innerHTML = `${cur.seg} &#9662;`; m.hidden = true; };
+        m.appendChild(it);
+      }
+      m.hidden = false;
+    };
+    if (window.HIDE_JOB) $("#xfer", p).remove();
+    $("#papply", p).onclick = apply;
+    p.classList.add("open"); p.setAttribute("aria-hidden", "false");
+    if (ARIA) { p.setAttribute("role", "dialog"); p.setAttribute("aria-label", "Add Shift"); }
+    log(`panel ${n} ${md(d)} ${st}`);
+  }
+  function closePanel() { const p = $("#panel"); p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); p.innerHTML = ""; cur = null; }
+  function apply() {
+    const p = $("#panel"), err = $("#err", p);
+    const a = parse($("#st", p).value), b = parse($("#en", p).value);
+    if (a == null) return (err.textContent = "Start Time is not a valid time");
+    if (b == null) return (err.textContent = "End Time is not a valid time");
+    if (cur.job === "--") return (err.textContent = "No job");
+    const s = { name: cur.name, date: `${md(DAYS[cur.day])}/${YEAR}`, start: fmt(a), end: fmt(b), job: cur.job, day: cur.day };
+    log("apply " + JSON.stringify(s));
+    closePanel(); select(null);
+    if (APPLY_SAVES) { window.added.push(s); saved(); } else { window.pending.push(s); $("#msg").className = ""; $("#msg").textContent = "Unsaved changes"; }
+    drawBars();
+  }
+  function saved() { $("#msg").className = "ok"; $("#msg").textContent = "Success The schedule has been successfully saved."; }
+  $("#save").onclick = () => {
+    if (!window.pending.length) return;
+    log("save " + window.pending.length); window.added.push(...window.pending); window.pending = []; saved(); drawBars();
+  };
+
+  // the test (or a person poking at the page) fills in the staff list
+  window.mockInit = (dir, prim) => { names = [...dir].sort(); primary = prim || {}; renderHead(); renderBody(); };
+  window.mockAdded = () => window.added.map(({ day, ...s }) => s); // same shape as the old mock's window.added
+  if (window.DIRECTORY && window.DIRECTORY.length) window.mockInit(window.DIRECTORY, window.PRIMARY);
+  else window.mockInit(["Doe, Jane", "Rivera, Sam", "Lee, Morgan", "Park, Casey", "Stone, Robin", "Vega, Alex"], {});
+})();
+</script></body></html>

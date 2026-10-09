@@ -53,6 +53,26 @@
     } catch (e) { /* ignore */ }
     return "";
   }
+  // The words printed next to a box ("Start time" in front of it), never a whole
+  // container's text: walk up a few levels and take the closest short text before the box.
+  const FORM = "input,select,textarea";
+  function nearLabel(el) {
+    let prev = null;
+    for (let a = el.parentElement, n = 0; a && n < 4; a = a.parentElement, n++) {
+      const w = document.createTreeWalker(a, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode()) {
+        if (el.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) break; // past the box
+        if (t.parentElement.closest("option,script,style") || !visible(t.parentElement)) continue;
+        const v = t.textContent.replace(/\s+/g, " ").trim();
+        if (v && v.length <= 30 && !/^\[|^\d/.test(v)) prev = v;
+      }
+      if (prev) return prev.replace(/[:*]\s*$/, "");
+    }
+    return "";
+  }
+  function fieldLabel(el) {
+    return labelOf(el) || el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("title") || (el.matches && el.matches(FORM) ? nearLabel(el) : "");
+  }
   function cssPath(el) {
     const parts = [];
     for (let e = el, n = 0; e && e.nodeType === 1 && n < 6; e = e.parentElement, n++) {
@@ -67,8 +87,8 @@
     const d = { tag: el.tagName.toLowerCase() };
     if (el.id && !UNSTABLE_ID.test(el.id)) d.id = el.id;
     for (const a of ATTRS) { const v = el.getAttribute(a); if (v) d[a] = v; }
-    const t = ownText(el); if (t) d.text = t;
-    const l = labelOf(el); if (l) d.label = l;
+    const t = ownText(el); if (t && t.length <= 60) d.text = t; // a long text is a container, not a name
+    const l = labelOf(el) || (el.matches(FORM) && !d["aria-label"] && !d.placeholder ? nearLabel(el) : ""); if (l) d.label = l;
     d.path = cssPath(el);
     return d;
   }
@@ -76,11 +96,12 @@
     let s = el.tagName.toLowerCase() === d.tag ? 1 : -3;
     if (d.id && el.id === d.id) s += 10;
     for (const a of ATTRS) if (d[a] && el.getAttribute(a) === d[a]) s += a === "type" || a === "role" ? 1 : 6;
-    if (d.label && labelOf(el) === d.label) s += 6;
+    if (d.label && (labelOf(el) || (el.matches(FORM) ? nearLabel(el) : "")) === d.label) s += 6;
     const t = ownText(el);
     if (wantText != null) {
       if (norm(t) === norm(wantText)) s += 8;
       else if (norm(t).startsWith(norm(wantText))) s += 4;
+      else if (norm(t).split(/\s*[/>]\s*/).pop() === norm(wantText) && /[/>]/.test(t)) s += 4; // "Restaurant/Bar"
       else return -99;
     } else if (d.text) {
       s += t === d.text ? 6 : -4;
@@ -109,6 +130,186 @@
       if (el || Date.now() > until) return el;
       await sleep(250);
     }
+  }
+
+
+  // ---------------- the schedule grid ----------------
+  // In UKG's Schedule Planner a shift is added by clicking an empty spot on the
+  // grid: the person's row x the day's column. We don't rely on how the grid is
+  // built inside: the day columns are found from their headers ("Tue 10/06") and
+  // the row from the person's name ("Last, First") to the left of the spot.
+  const DAY_RE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?,?\s+(\d{1,2})\/(\d{1,2})(\/\d{2,4})?$/i;
+  const NAME_RE = /^[^\d,()|]{2,40},\s*[^\d,()|]{1,40}$/;
+  const TIME_RE = /\d{1,2}:\d\d|\b\d{1,2}\s*(a|p)m?\b/i;
+  const NOT_GRID = "input,select,textarea,button,a,[role=button],[role=dialog],[role=menu],[role=menuitem],[role=option],[role=tab],form";
+  function textLeaves() {
+    const out = [];
+    for (const e of document.querySelectorAll("body *")) {
+      if (e.childElementCount || (panelHost && panelHost.contains(e)) || /^(SCRIPT|STYLE|OPTION)$/.test(e.tagName)) continue;
+      const t = e.textContent.replace(/\s+/g, " ").trim();
+      if (t && t.length <= 60 && visible(e)) out.push([e, t]);
+    }
+    return out;
+  }
+  const mdKey = (m, d) => `${Number(m)}/${Number(d)}`;
+  function dayBands(leaves = textLeaves()) {
+    const byMd = new Map();
+    for (const [e, t] of leaves) {
+      const m = DAY_RE.exec(t);
+      if (m) byMd.set(mdKey(m[2], m[3]), e); // the last one on the page is the grid's own header
+    }
+    const heads = [...byMd].map(([md, el]) => ({ md, el, r: el.getBoundingClientRect() })).sort((a, b) => a.r.left - b.r.left);
+    const gaps = heads.slice(1).map((h, i) => h.r.left - heads[i].r.left).sort((a, b) => a - b);
+    const step = gaps.length ? gaps[gaps.length >> 1] : 0;
+    return heads.map((h) => {
+      // grow from the header's words to its whole column header cell
+      let box = h.el;
+      while (box.parentElement && step && box.parentElement.getBoundingClientRect().width <= step * 1.15 &&
+        !heads.some((o) => o !== h && box.parentElement.contains(o.el))) box = box.parentElement;
+      const b = box.getBoundingClientRect();
+      const w = step || b.width;
+      const whole = b.width >= w * 0.6;
+      return { md: h.md, left: whole ? b.left : h.r.left + h.r.width / 2 - w / 2, width: whole ? b.width : w, bottom: h.r.bottom, el: h.el };
+    });
+  }
+  function nameLeaves(leaves = textLeaves()) { return leaves.filter(([, t]) => NAME_RE.test(t) && !TIME_RE.test(t)); }
+  function rowBox(nameEl) {
+    const row = nameEl.closest("[role=row],tr");
+    const r = row && row.getBoundingClientRect().height < 150 ? row.getBoundingClientRect() : nameEl.getBoundingClientRect();
+    return { cy: r.top + r.height / 2, h: r.height };
+  }
+  // Is the clicked thing on a panel/popup lying over the grid rather than in the grid?
+  // (walk up to where it meets the name column: a fixed layer, a dialog, or a part with
+  // boxes to fill in means it's the add-shift panel, not an empty grid spot)
+  function onTop(target, nameEl) {
+    for (let e = target; e && !e.contains(nameEl); e = e.parentElement) {
+      if (e.matches("[role=dialog],[aria-modal=true]") || getComputedStyle(e).position === "fixed") return true;
+      if (e !== target && e.querySelector("input:not([type=checkbox]):not([type=radio]):not([type=hidden]),select,textarea")) return true;
+    }
+    return false;
+  }
+  // Which grid spot is at (x, y)? -> { name, md, rel, dy } or null
+  function gridAt(x, y, target) {
+    if (!target || (target.closest && target.closest(NOT_GRID))) return null;
+    const leaves = textLeaves();
+    const band = dayBands(leaves).find((b) => x >= b.left && x < b.left + b.width && y > b.bottom);
+    if (!band) return null;
+    // an existing shift (a block smaller than the day with a time on it), not an empty spot
+    const own = ownText(target);
+    if (own && own.length <= 40 && TIME_RE.test(own) && (!target.childElementCount || target.getBoundingClientRect().width < band.width * 0.9)) return null;
+    let name = null, cy = 0;
+    const row = target.closest && target.closest("[role=row],tr");
+    if (row) {
+      const n = [...row.querySelectorAll("*")].find((e) => !e.childElementCount && NAME_RE.test(e.textContent.trim()));
+      if (n) { name = n.textContent.replace(/\s+/g, " ").trim(); cy = rowBox(n).cy; }
+    }
+    if (!name) {
+      const names = nameLeaves(leaves).map(([e, t]) => ({ t, el: e, r: e.getBoundingClientRect(), b: rowBox(e) })).filter((n) => n.r.right <= x + 4);
+      const ys = names.map((n) => n.b.cy).sort((a, b) => a - b);
+      const gaps = ys.slice(1).map((v, i) => v - ys[i]).filter((g) => g > 2).sort((a, b) => a - b);
+      const rowH = gaps.length ? gaps[gaps.length >> 1] : 30;
+      const best = names.sort((a, b) => Math.abs(a.b.cy - y) - Math.abs(b.b.cy - y))[0];
+      if (!best || Math.abs(best.b.cy - y) > Math.max(rowH * 0.6, 12)) return null;
+      name = best.t; cy = best.b.cy;
+      if (onTop(target, best.el)) return null;
+    }
+    return { name, md: band.md, rel: (x - band.left) / band.width, dy: Math.round(y - cy) };
+  }
+  // What Zack can send Joseph when a grid click can't be worked out: the clicked spot's
+  // tags and attributes (no page text, no other staff, no typed values).
+  function debugInfo(target, x, y) {
+    const chain = [];
+    for (let e = target, n = 0; e && e.nodeType === 1 && n < 10; e = e.parentElement, n++) {
+      const a = {};
+      for (const at of e.attributes) {
+        if (/^(id|class|role|tabindex|title|name|type)$/.test(at.name) || /^(aria-|data-)/.test(at.name)) a[at.name] = at.value.slice(0, 120);
+      }
+      const r = e.getBoundingClientRect();
+      chain.push({ tag: e.tagName.toLowerCase(), attrs: a, box: [r.left, r.top, r.width, r.height].map(Math.round) });
+    }
+    const leaves = textLeaves();
+    return {
+      page: location.origin + location.pathname + location.hash.split("?")[0], at: [Math.round(x), Math.round(y)],
+      clicked_and_parents: chain,
+      day_headers: dayBands(leaves).map((b) => ({ day: b.md, left: Math.round(b.left), width: Math.round(b.width), header_tag: b.el.tagName.toLowerCase() })),
+      name_rows_on_screen: nameLeaves(leaves).length,
+      grid_guess: gridAt(x, y, target),
+    };
+  }
+  function findRow(name) {
+    const want = norm(name);
+    const ls = nameLeaves();
+    const hit = ls.find(([, t]) => norm(t) === want) || ls.find(([, t]) => norm(t).startsWith(want));
+    return hit ? hit[0] : null;
+  }
+  function scroller(el) {
+    for (let e = el && el.parentElement; e; e = e.parentElement) {
+      if (e.scrollHeight > e.clientHeight + 5 && /auto|scroll|overlay/.test(getComputedStyle(e).overflowY)) return e;
+    }
+    return document.scrollingElement;
+  }
+  // Is the name really on screen, not hidden under the grid's sticky header or a panel?
+  function shown(el) {
+    const r = el.getBoundingClientRect(), x = r.left + Math.min(r.width / 2, 20), y = r.top + r.height / 2;
+    if (y < 0 || y > innerHeight || x < 0 || x > innerWidth) return false;
+    const top = document.elementsFromPoint(x, y).find((e) => !(panelHost && (panelHost === e || panelHost.contains(e))));
+    return !!top && (top === el || el.contains(top) || (el.parentElement && el.parentElement.contains(top)));
+  }
+  function viewOf(box) { return box === document.scrollingElement ? { top: 0, bottom: innerHeight } : box.getBoundingClientRect(); }
+  async function scrollToRow(name) {
+    // like Zack scrolling down the list of names until the person shows up
+    const any = nameLeaves()[0];
+    if (!any) return null;
+    const box = scroller(any[0]);
+    let el = findRow(name);
+    if (!el) { box.scrollTop = 0; await sleep(300); }
+    for (let k = 0; k < 80; k++) {
+      el = findRow(name);
+      if (el && shown(el)) return el;
+      if (el) { const r = el.getBoundingClientRect(), v = viewOf(box); box.scrollTop += r.top - (v.top + v.bottom) / 2; await sleep(300); continue; }
+      const before = box.scrollTop;
+      box.scrollTop += box.clientHeight * 0.8; await sleep(300);
+      if (box.scrollTop === before) break;
+    }
+    return findRow(name);
+  }
+  function mouseAt(el, x, y, how) {
+    const o = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
+    el.dispatchEvent(new MouseEvent("mouseover", o)); el.dispatchEvent(new MouseEvent("mousemove", o));
+    const press = (button, detail) => {
+      const b = { ...o, button, buttons: button === 2 ? 2 : 1, detail };
+      el.dispatchEvent(new PointerEvent("pointerdown", b)); el.dispatchEvent(new MouseEvent("mousedown", b));
+      el.dispatchEvent(new PointerEvent("pointerup", { ...b, buttons: 0 })); el.dispatchEvent(new MouseEvent("mouseup", { ...b, buttons: 0 }));
+      if (button === 0) el.dispatchEvent(new MouseEvent("click", { ...b, buttons: 0 }));
+    };
+    if (how === "context") { press(2, 1); el.dispatchEvent(new MouseEvent("contextmenu", { ...o, button: 2, buttons: 0 })); return; }
+    press(0, 1);
+    if (how === "dblclick") { press(0, 2); el.dispatchEvent(new MouseEvent("dblclick", { ...o, button: 0, detail: 2 })); }
+  }
+  // Click the empty spot for this person on this day, the way Zack did.
+  async function clickGrid(step, g) {
+    let row = findRow(g.name);
+    if (!row || !shown(row)) row = await scrollToRow(g.name);
+    if (!row) return { ok: false, why: `I couldn't find ${g.name}'s row on the schedule. Scroll so their name shows, then press Try again (or click their empty spot on ${g.md} yourself and press I did it).` };
+    let band = dayBands().find((b) => b.md === g.md);
+    if (!band) return { ok: false, why: `The schedule on screen doesn't show ${g.md}. Go to that week in Kronos, then press Try again.` };
+    if (band.left < 0 || band.left + band.width > innerWidth) {
+      band.el.scrollIntoView({ block: "nearest", inline: "center" }); await sleep(300);
+      band = dayBands().find((b) => b.md === g.md) || band; row = findRow(g.name) || row;
+    }
+    const cy = rowBox(row).cy, dy0 = step.grid.dy || 0;
+    // the spot Zack used; if a shift is already there (a double), use a free part of the day
+    const tries = [step.grid.rel, 0.15, 0.85, 0.5, 0.3, 0.7, 0.05, 0.95].map((r) => Math.min(0.97, Math.max(0.03, r)));
+    // (and above/below a shift bar that fills the day, as in Table view)
+    for (const dy of [dy0, -11, 11, -13, 13]) for (const rel of tries) {
+      const x = band.left + rel * band.width, y = cy + dy;
+      const el = document.elementsFromPoint(x, y).find((e) => !(panelHost && (panelHost === e || panelHost.contains(e))));
+      const g2 = el && gridAt(x, y, el);
+      if (!g2 || norm(g2.name) !== norm(g.name) || g2.md !== g.md) continue;
+      mouseAt(el, x, y, step.how);
+      return { ok: true };
+    }
+    return { ok: false, why: `I couldn't find a free spot for ${g.name} on ${g.md} on the grid. Click it yourself and press I did it.` };
   }
 
   // ---------------- doing a step (same thing Zack would do) ----------------
@@ -174,6 +375,7 @@
       pressKey(el, step.key);
       return { ok: true };
     }
+    if (step.action === "grid") return clickGrid(step, m.grid);
     const el = await waitFind(step.desc, wantText, timeout || 12000);
     if (!el) return { ok: false, why: `I couldn't find ${describeForPeople(step.desc, wantText)} on the screen.` };
     if (step.action === "click") clickEl(el);
@@ -222,13 +424,60 @@
   const fromPanel = (e) => panelHost && e.composedPath().includes(panelHost);
   const toTop = (msg) => post(window.top, { ...msg, frameKey: FRAME_KEY });
   const CLICKABLE = "button,a,[role=button],[role=option],[role=menuitem],[role=tab],[role=link],[role=checkbox],[role=radio],[role=gridcell],li,label,input,select,textarea,td,th";
+  // the thing that was really clicked: a button/option/box, but never a big container
+  // (a click on the edge of a time box used to come out as the whole shift row's text)
+  function clickedThing(t) {
+    const el = t.closest ? (t.closest(CLICKABLE) || t) : t;
+    if (el === t || ownText(el).length <= 40) return el;
+    for (let e = t; e && e !== el; e = e.parentElement) { const w = ownText(e); if (w && w.length <= 40) return e; }
+    return t;
+  }
+  // Grid spot under the mouse, worked out when the button goes down (before Kronos opens
+  // its panel over it). One step per spot: a double-click updates the step it started.
+  let down = null, lastGrid = null;
+  document.addEventListener("mousedown", (e) => {
+    if (!recording || fromPanel(e)) return;
+    down = { t: e.target, at: Date.now(), x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, e.target) };
+  }, true);
+  function gridFromEvent(e) {
+    const d = down && down.t === e.target && Date.now() - down.at < 2000 ? down : { t: e.target, x: e.clientX, y: e.clientY, g: gridAt(e.clientX, e.clientY, e.target) };
+    return d;
+  }
+  function recordGrid(e, how) {
+    const d = gridFromEvent(e);
+    if (!d.g) return false;
+    const key = `${d.g.name}|${d.g.md}`;
+    if (lastGrid && lastGrid.key === key && Date.now() - lastGrid.at < 700) {
+      if (how !== "click") toTop({ type: "rec-update", seq: lastGrid.seq, how });
+      lastGrid.at = Date.now();
+      return true;
+    }
+    lastGrid = { key, at: Date.now(), seq: `${FRAME_KEY}#g${++seqN}` };
+    toTop({ type: "rec-step", step: { action: "grid", how, seq: lastGrid.seq, grid: d.g, desc: describe(e.target), debug: debugInfo(e.target, d.x, d.y) } });
+    lastType = null;
+    return true;
+  }
   document.addEventListener("click", (e) => {
     if (!recording || fromPanel(e)) return;
-    const el = e.target.closest ? (e.target.closest(CLICKABLE) || e.target) : e.target;
+    if (recordGrid(e, "click")) return;
+    const el = clickedThing(e.target);
     if (el === lastType?.el) return; // clicking into the box being typed in
-    toTop({ type: "rec-step", step: { action: "click", desc: describe(el), text: ownText(el) } });
+    const step = { action: "click", desc: describe(el), text: el.matches(FORM) ? "" : ownText(el).slice(0, 60) };
+    if (!step.desc.text && !step.desc.label && !step.desc["aria-label"] && !step.desc.title) step.debug = debugInfo(e.target, e.clientX, e.clientY);
     lastType = null;
+    // a click on a box's frame or label puts the cursor in the box: record it as that box
+    // (the cursor usually moves on mouse-down, so look now; if not yet, look again right after)
+    const intoBox = () => {
+      const a = document.activeElement;
+      if (!a || a === el || !a.matches || !a.matches(FORM) || el.matches("button,a,[role=button],[role=option],[role=menuitem],[role=tab]")) return false;
+      step.desc = describe(a); step.text = ""; delete step.debug;
+      return true;
+    };
+    if (intoBox() || el.matches(FORM)) toTop({ type: "rec-step", step });
+    else setTimeout(() => { intoBox(); toTop({ type: "rec-step", step }); }, 0);
   }, true);
+  document.addEventListener("dblclick", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "dblclick"); }, true);
+  document.addEventListener("contextmenu", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "context"); }, true);
   document.addEventListener("input", (e) => {
     if (!recording || fromPanel(e)) return;
     const el = e.target;
@@ -330,7 +579,23 @@
       panel.style.left = Math.max(0, e.clientX - dx) + "px"; panel.style.top = Math.max(0, e.clientY - dy) + "px";
       panel.style.right = "auto"; panel.style.bottom = "auto";
     });
-    window.addEventListener("mouseup", () => { drag = false; });
+    // remember where Zack put it (Kronos' Add Shift panel and its Apply are on the right)
+    window.addEventListener("mouseup", () => {
+      if (!drag) return;
+      drag = false;
+      const r = panel.getBoundingClientRect();
+      try { chrome.storage.local.set({ sh_panelpos: { left: Math.round(r.left), top: Math.round(r.top) } }); } catch (e) { /* ignore */ }
+    });
+    try {
+      chrome.storage.local.get("sh_panelpos", (v) => {
+        const p = v && v.sh_panelpos;
+        if (!p) return;
+        // keep it on screen if the window got smaller
+        panel.style.left = Math.max(0, Math.min(p.left, innerWidth - 120)) + "px";
+        panel.style.top = Math.max(0, Math.min(p.top, innerHeight - 60)) + "px";
+        panel.style.right = "auto"; panel.style.bottom = "auto";
+      });
+    } catch (e) { /* ignore */ }
     $("#min").addEventListener("click", () => panel.classList.toggle("sh-min"));
   })();
 
@@ -355,7 +620,25 @@
 
   // ---------------- Show me once ----------------
   recSteps = []; example = null;
-  const STEP_WORD = { click: "Click", type: "Type", select: "Pick", key: "Press" };
+  const STEP_WORD = { click: "Click", type: "Type", select: "Pick", key: "Press", grid: "Click" };
+  const HOW = { click: "Click", dblclick: "Double-click", context: "Right-click" };
+  const mdOf = (s) => { const [, m, d] = s.date.split("-"); return `${Number(m)}/${Number(d)}`; };
+  // short words for a step in the "seen so far" lists
+  function stepWords(x) {
+    if (x.action === "grid") return `${HOW[x.how] || "Click"} the empty spot for ${x.grid.name} on ${x.grid.md}`;
+    if (x.action === "key") return `Press ${x.key}`;
+    if (x.action === "click") return /^(input|textarea|select)$/.test(x.desc.tag) ? `Click into the ${x.desc.label || x.desc["aria-label"] || x.desc.placeholder || x.desc.name || ""} box` : `Click ${x.text || x.desc.label || x.desc["aria-label"] || x.desc.title || "(a spot)"}`;
+    const box = x.desc.label || x.desc["aria-label"] || x.desc.placeholder || x.desc.name;
+    return `${STEP_WORD[x.action]} ${x.value}${box ? ` in ${box}` : ""}`;
+  }
+  function saveDebug(st) {
+    // a small file Zack can send Joseph: how this spot of Kronos is built (no names besides the row clicked)
+    const blob = new Blob([JSON.stringify({ helper: chrome.runtime.getManifest().version, step: { action: st.action, how: st.how, grid: st.grid, desc: st.desc }, details: st.debug }, null, 1)], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "schedule-helper-debug.txt";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
 
   function mappingSelect(st, i) {
     const opts = [["fixed", "", R.FIELD_LABELS.fixed]];
@@ -369,6 +652,14 @@
     return `<select data-map="${i}">${opts.map(([f, fmt, l]) => `<option value="${f}|${fmt}" ${`${f}|${fmt}` === cur ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   }
   function stepLine(st, i) {
+    const dbg = st.debug ? ` <button class="sh-small" data-dbg="${i}" title="Saves a small file about this spot on the Kronos page, to send to Joseph">debug export</button>` : "";
+    if (st.action === "grid") {
+      const same = example && st.grid.name === example.kronosName && st.grid.md === mdOf(example);
+      return `<li>${HOW[st.how] || "Click"} <b>the empty spot on the grid</b> for this shift's person and day
+        <br><span class="sh-small sh-muted">You clicked ${esc(st.grid.name)} on ${esc(st.grid.md)}${same ? " &#10003;" : ""}. For every shift I'll use that shift's own person and day.</span>
+        ${example && !same ? `<div class="sh-warn">That isn't ${esc(example.kronosName)} on ${esc(mdOf(example))} (the shift you picked). If I read the row or day wrong, use <b>debug export</b> and send the file to Joseph.</div>` : ""}
+        <br><button class="sh-small" data-del="${i}" title="Remove this step">remove</button>${dbg}</li>`;
+    }
     if (st.action === "click" && /^(input|textarea|select)$/.test(st.desc.tag)) {
       return `<li>Click into the <b>${esc(st.desc.label || st.desc["aria-label"] || st.desc.placeholder || st.desc.name || "")}</b> box <button class="sh-small" data-del="${i}" title="Remove this step">remove</button></li>`;
     }
@@ -378,9 +669,9 @@
     const risky = st.action === "click" && !st.text && !st.desc.label && !st.desc["aria-label"] && !st.desc.id && !st.desc.title;
     return `<li>${STEP_WORD[st.action]} <b>${esc(what)}</b>${where ? ` <span class="sh-muted">in ${esc(where)}</span>` : ""}
       ${mappable ? `<br>This is: ${mappingSelect(st, i)}` : ""}
-      ${st.action === "click" ? `<br><label><input type="radio" name="save" data-save="${i}" ${st.isSave ? "checked" : ""}> this is the Save button</label>` : ""}
-      ${risky ? `<div class="sh-warn">This click has no name I can find again. If it was a spot on the schedule grid, please use Kronos' "Add shift" button instead and show me again.</div>` : ""}
-      <button class="sh-small" data-del="${i}" title="Remove this step">remove</button></li>`;
+      ${st.action === "click" ? `<br><label><input type="radio" name="save" data-save="${i}" ${st.isSave ? "checked" : ""}> this is the Save / Apply button (closes the form)</label>` : ""}
+      ${risky ? `<div class="sh-warn">This click has no name I can find again. If it was an empty spot on the schedule grid, I couldn't work out whose row or which day it was: press <b>debug export</b> and send the file to Joseph.</div>` : ""}
+      <button class="sh-small" data-del="${i}" title="Remove this step">remove</button>${dbg}</li>`;
   }
 
   function renderTeach() {
@@ -389,8 +680,8 @@
     if (teaching === "watching") {
       el.innerHTML = `<p><b>I'm watching.</b> Add this shift in Kronos the normal way, including pressing Save:</p>
         <div class="sh-card"><b>${esc(example.kronosName)}</b><br>${esc(example.day)} ${esc(example.date)} &middot; ${R.niceTime(example.start)} to ${R.niceTime(example.end)} &middot; ${esc(example.kronosJob)}</div>
-        <p class="sh-small sh-muted">Use Kronos' own add-shift button and type the times into the boxes (not the grid). ${recSteps.length} steps seen so far.</p>
-        <ol class="sh-steps">${recSteps.map((s) => `<li>${STEP_WORD[s.action]} ${esc(s.action === "click" ? s.text || s.desc.label || "" : s.action === "key" ? s.key : s.value)}</li>`).join("")}</ol>
+        <p class="sh-small sh-muted">Click the empty spot on the grid for ${esc(example.kronosName)} on ${esc(example.day)}, fill in the panel, then Save. ${recSteps.length} steps seen so far.</p>
+        <ol class="sh-steps">${recSteps.map((s) => `<li>${esc(stepWords(s))}</li>`).join("")}</ol>
         <div class="sh-row"><button class="sh-primary" id="recdone">I saved it - done</button><button id="reccancel">Cancel</button></div>`;
       $("#recdone").onclick = () => { broadcast({ type: "rec-stop" }); teaching = "review"; autoMap(); renderTeach(); };
       $("#reccancel").onclick = () => { broadcast({ type: "rec-stop" }); teaching = false; renderTeach(); };
@@ -406,7 +697,11 @@
         if (t.dataset.map) { const [field, fmt] = t.value.split("|"); recSteps[t.dataset.map].map = field === "fixed" ? null : { field, fmt }; }
         if (t.dataset.save) recSteps.forEach((s, i) => { s.isSave = i === Number(t.dataset.save); });
       };
-      el.onclick = (e) => { const t = e.target; if (t.dataset.del) { recSteps.splice(Number(t.dataset.del), 1); renderTeach(); } };
+      el.onclick = (e) => {
+        const t = e.target;
+        if (t.dataset.del) { recSteps.splice(Number(t.dataset.del), 1); renderTeach(); }
+        if (t.dataset.dbg) saveDebug(recSteps[t.dataset.dbg]);
+      };
       $("#recsave").onclick = async () => {
         if (!recSteps.some((s) => s.isSave)) { alert("Please pick which click was the Save button."); return; }
         await S.set("sh_recipe", { steps: recSteps, jobSteps: recipe?.jobSteps || null, taughtAt: Date.now() });
@@ -447,7 +742,7 @@
   onRecStep = (m) => {
     if (teaching === "job") return onJobRec && onJobRec(m);
     if (teaching !== "watching") return;
-    if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) s.value = m.value; }
+    if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) { if (m.how) s.how = m.how; else s.value = m.value; } }
     else recSteps.push({ ...m.step, frameKey: m.frameKey });
     renderTeach();
   };
@@ -456,12 +751,16 @@
     recSteps = recSteps.filter((s) => s.action !== "type" || s.value !== "");
     let dates = 0;
     for (const s of recSteps) {
+      if (s.action === "grid") { s.map = null; continue; } // always this shift's person + day
       const v = s.action === "click" ? s.text : s.action === "key" ? "" : s.value;
       s.map = v ? R.guessMapping(v, example, { click: s.action === "click" }) : null;
       if (s.map && s.map.field === "date" && s.action !== "click" && ++dates === 2) s.map = { field: "endDate", fmt: s.map.fmt };
     }
     const saves = recSteps.map((s, i) => [s, i]).filter(([s]) => s.action === "click" && /save|submit|apply|ok\b|add\b/i.test(s.text || s.desc["aria-label"] || ""));
-    const last = saves.length ? saves[saves.length - 1][1] : -1;
+    // UKG: the panel's Apply closes the form, then the toolbar Save stores it. The step that
+    // closes the form is the first Save/Apply after the last box filled in.
+    let filled = -1; recSteps.forEach((s, i) => { if (s.action === "type" || s.action === "select") filled = i; });
+    const last = (saves.find(([, i]) => i > filled) || saves[saves.length - 1] || [null, -1])[1];
     recSteps.forEach((s, i) => { s.isSave = i === last; });
   }
 
@@ -560,7 +859,8 @@
     const value = st.map ? R.formatValue(s, st.map) : st.value;
     const wantText = st.action === "click" && st.map ? value : null;
     for (;;) {
-      const res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key }, value, wantText, pace }, 20000);
+      const grid = st.action === "grid" ? { name: s.kronosName, md: mdOf(s) } : null;
+      const res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key, how: st.how, grid: st.grid }, value, wantText, grid, pace }, st.action === "grid" ? 45000 : 20000);
       if (res.ok) return "ok";
       const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${isJob ? "Changing the job: " : ""}${esc(res.why)}</div>
         <p>${isJob ? `Change the job to <b>${esc(R.formatValue(s, { field: "job", fmt: "Kronos job" }))}</b> yourself and press <b>I did it</b>, or try again.` : "You can do this step by hand and press <b>I did it</b>, or try again."}</p>`,
@@ -607,7 +907,7 @@
     const ans = await new Promise((res) => {
       const draw = () => {
         el.innerHTML = `${head}${shiftLine(s)}${flag}<p><b>I'm watching.</b> In the Kronos form, change the job to <b>${esc(s.kronosJob)}</b> the way you normally do. <b>Don't press Save</b> &ndash; I'll do that next.</p>
-          <ol class="sh-steps">${rec.map((x) => `<li>${STEP_WORD[x.action]} ${esc(x.action === "click" ? x.text || x.desc.label || "" : x.action === "key" ? x.key : x.value)}</li>`).join("")}</ol>
+          <ol class="sh-steps">${rec.map((x) => `<li>${esc(stepWords(x))}</li>`).join("")}</ol>
           <div class="sh-row"><button class="sh-primary" id="jobdone" data-ans="done">I changed it &ndash; done</button><button data-ans="cancel">Cancel</button></div>`;
       };
       onJobRec = (m) => {
@@ -688,8 +988,11 @@
         // wait for Kronos to close the form; if it doesn't, it probably showed an error
         await sleep(1500);
         let gone = false;
+        // the form is gone when its boxes are gone (a toolbar Save button stays on screen)
+        const box = steps.slice(0, i).reverse().find((x) => (x.action === "type" || x.action === "select") && x.frameKey === st.frameKey);
+        const probe = box ? { desc: box.desc, wantText: null } : { desc: st.desc, wantText };
         for (let k = 0; k < 16 && !gone; k++) {
-          const t = await request({ type: "there", frameKey: st.frameKey, desc: st.desc, wantText }, 3000);
+          const t = await request({ type: "there", frameKey: st.frameKey, ...probe }, 3000);
           gone = !t.ok || !t.there;
           if (!gone) await sleep(500);
         }
