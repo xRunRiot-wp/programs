@@ -156,7 +156,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--jar", default=str(DEFAULT_JAR))
     ap.add_argument("--out", default=str(Path("H:/HomeDashboard/work/pixeldex2/out")))
-    ap.add_argument("--version", default="2.3")
+    ap.add_argument("--version", default="2.3.1")
     ap.add_argument("--runtime", default="H:/HomeDashboard/work/pixeldex2/runtime",
                     help="portable Python (embeddable 3.12 + pywebview) copied in as runtime/")
     a = ap.parse_args()
@@ -405,6 +405,108 @@ def main():
                           S("Raid" if cat == "raid" else ""), S(lv), S("")])
         return found
 
+    # --- "How to summon": Pokemon that come from shrines/altars/items, built from the jar's recipes, structures and drops ---
+    def item_name(i):
+        ns, _, path = i.partition(":")
+        return lang.get(f"item.{ns}.{path}") or lang.get(f"block.{ns}.{path}") or title(path)
+
+    def recipe_text(name):
+        fn = f"data/pixelmon/recipe/summon/{name}.json"
+        if fn not in names:
+            fn = f"data/pixelmon/recipe/{name}.json"
+        if fn not in names:
+            return ""
+        r = json.loads(z.read(fn).decode("utf-8"))
+        if r.get("type", "").endswith("shapeless"):
+            return " + ".join(item_name(x["item"]) for x in r["ingredients"])
+        counts = {}
+        for row in r["pattern"]:
+            for ch in row:
+                if ch.strip():
+                    counts[ch] = counts.get(ch, 0) + 1
+        return " + ".join(f"{n_}x {item_name(r['key'][ch]['item'])}" for ch, n_ in counts.items())
+
+    def structure_where(path):
+        fn = f"data/pixelmon/worldgen/structure/{path}.json"
+        sname = lang.get(f"structure.pixelmon.{path}") or title(path.split("/")[-1])
+        if fn not in names:
+            return sname
+        b = json.loads(z.read(fn).decode("utf-8")).get("biomes")
+        b = b if isinstance(b, str) else (b[0] if b else "")
+        where = title(b.split(":")[-1].replace("has_structure/", "").replace("is_", "").replace("mineshaft_", "")) if b else ""
+        return f"{sname} ({where} biomes)" if where else sname
+
+    pokedrops = json.loads(z.read("data/pixelmon/drops/pokedrops.json").decode("utf-8"))
+
+    def dropped_by(item, limit=6):
+        who = []
+        for e in pokedrops if isinstance(pokedrops, list) else pokedrops.get("drops", []):
+            for it in e.get("items", []):
+                if it.get("item") == item:
+                    who.append((e["pokemon"].split(" ")[0], it.get("chance", 0)))
+        seen_, out_ = set(), []
+        for w, c in who:
+            if w not in seen_:
+                seen_.add(w)
+                out_.append(f"{w} ({c * 100:g}%)" if c else w)
+        more = f" and {len(out_) - limit} more" if len(out_) > limit else ""
+        return ", ".join(out_[:limit]) + more
+
+    raid_tiers = sorted({int(k) for k, v in json.loads(z.read("data/pixelmon/drops/raiddrops.json").decode("utf-8")).items()
+                         if "pixelmon:orb" in json.dumps(v)})
+    orb_from = (f"Plain Orb: dropped by {dropped_by('pixelmon:orb', 5)}; also from {raid_tiers[0]}-{raid_tiers[-1]}★ raid rewards and Poké Loot"
+                if raid_tiers else f"Plain Orb: dropped by {dropped_by('pixelmon:orb', 5)}")
+    once = "Each shrine/altar can be used once per real-life day (Pixelmon's \"shrine-encounter-mode\" setting, default)."
+
+    def bird(name, orb, stone_type, shrine):
+        return {"title": f"Summoned at the {lang.get('block.pixelmon.' + shrine[1]) or title(shrine[1])}", "steps": [
+            f"Find the {structure_where(shrine[0])}.",
+            f"Craft the {item_name('pixelmon:' + orb)}: {recipe_text(orb)}.",
+            orb_from + ".",
+            f"Fill the orb by defeating {stone_type}-type Pokémon with it in your inventory (it shows how many KOs are left).",
+            f"Use the full orb on the shrine and {name} appears. {once}",
+            f"This is for the normal {name}; Galarian {name} only comes from raids."]}
+
+    timespace = structure_where("temples/spear_pillar")
+    chain = (f"Bind the altar with a Red Chain: {recipe_text('red_chain')}. Each Ruby is infused by your own Azelf / Mesprit / Uxie "
+             "(it must trust you, be friendly enough and a high enough level; each one can only infuse a few).")
+    SUMMON = {
+        "Articuno": bird("Articuno", "uno_orb", "Ice", ("shrines/articuno", "shrineuno")),
+        "Zapdos": bird("Zapdos", "dos_orb", "Electric", ("shrines/zapdos", "shrinedos")),
+        "Moltres": bird("Moltres", "tres_orb", "Fire", ("shrines/moltres", "shrinetres")),
+    }
+    for nm, orb in (("Dialga", "adamant_orb"), ("Palkia", "lustrous_orb"), ("Giratina", "griseous_orb")):
+        SUMMON[nm] = {"title": "Summoned at the Timespace Altar", "steps": [
+            f"Find the Timespace Altar at the {timespace}.", chain,
+            f"Place the {item_name('pixelmon:' + orb)} on the altar and {nm} appears. "
+            f"The orb drops from {dropped_by('pixelmon:' + orb)} and is an Ultimate boss reward.", once]}
+    SUMMON["Arceus"] = {"title": "Summoned with the Azure Flute", "steps": [
+        f"Find an Arc Chalice in the {structure_where('temples/land_chalice')} or the {structure_where('temples/water_chalice')}.",
+        "Add every type Plate to the Arc Chalice (it tells you how many are left; Plates come from Poké Loot) — it creates the Azure Flute.",
+        f"Bind the Timespace Altar at the {timespace} with a Red Chain ({recipe_text('red_chain')}).",
+        f"Play the Azure Flute at the altar and Arceus appears. Arceus drops the {item_name('pixelmon:legend_plate')}.", once]}
+    SUMMON["Celebi"] = {"title": "Summoned at the Ilex Shrine", "steps": [
+        f"Find the {structure_where('shrines/ilex')}.",
+        "Use a GS Ball on the Ilex Shrine and Celebi appears (the GS Ball has no recipe in Pixelmon's data files).", once]}
+    for nm, bell in (("Lugia", "tidal_bell"), ("Ho-Oh", "clear_bell")):
+        SUMMON[nm] = {"title": f"Called by the {item_name('pixelmon:' + bell)}", "steps": [
+            f"Place a {item_name('pixelmon:' + bell)}.",
+            f"At dawn the bell has a small chance to start ringing (Pixelmon's default: 1%) and call {nm}; "
+            "other bells within 10 blocks join in.",
+            "How to get the bell isn't listed in Pixelmon's data files (no recipe there)."]}
+    SUMMON["Zygarde"] = {"title": "Assembled from Zygarde Cells", "steps": [
+        f"Craft a Zygarde Cube: {recipe_text('zygarde_cube')}.",
+        "Collect Zygarde Cells and Cores, which appear in the world on their own; the cube holds 100 cells and 5 cores.",
+        "Use the cube on a Reassembly Unit (needs at least one Core): 10 cells = Zygarde 10%, 50 cells = Zygarde 50%, "
+        "100 cells = Zygarde 50% with Power Construct."]}
+    SUMMON["Meltan"] = {"title": "From a Mystery Box", "steps": [
+        f"Craft a Mystery Box: {recipe_text('mystery_box') or 'Ruby + Sapphire + Nether Star + 6 Netherite Scrap'}.",
+        "Open it (it needs scraps, more each time); each opening has a 1 in 300 chance (Pixelmon default) to make a Meltan "
+        "appear within 15 blocks. The box then cools down for about 50 minutes."]}
+    SUMMON["Mewtwo"] = {"title": "Made in the Cloning Machine", "steps": [
+        "Build a Cloning Machine (one of its parts is the Cloner Cord).",
+        "Insert a Mew and a catalyst, then start it — the clone is Mewtwo."]}
+
     S = Strings()
     sprite_cache = {}
     missing_sprites = []
@@ -477,7 +579,7 @@ def main():
             })
         out_species.append({"d": dex, "n": display, "k": name, "q": norm(display + " " + name),
                              "g": d.get("generation"), "df": (d.get("defaultForms") or [d["forms"][0]["name"]])[0],
-                             "leg": is_leg, "f": forms_out})
+                             "leg": is_leg, "f": forms_out, **({"sm": SUMMON[name]} if name in SUMMON else {})})
 
     for a_, af, b, bf, txt in SPECIAL_EDGES:
         edges.append((a_, af, b, bf, txt))

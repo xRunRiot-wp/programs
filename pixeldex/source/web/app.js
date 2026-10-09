@@ -222,9 +222,11 @@ function renderForms() {
 }
 
 // ---------- Palettes tab ----------
+// Megas, Gigantamax and Primal are battle forms: they're listed in the Forms tab, not here (v2.3.1)
+const isBattleForm = f => f.tags.includes('mega') || f.tags.includes('gmax') || /^(mega|gmax|primal)/.test(f.n);
 const PAL_ITEMS = [];
 const palCounts = new Map();
-for (const sp of species) if (!SKIPPED_PALS.includes(sp)) for (const f of sp.f) for (const [pi, g, file] of f.p) {
+for (const sp of species) if (!SKIPPED_PALS.includes(sp)) for (const f of sp.f) if (!isBattleForm(f)) for (const [pi, g, file] of f.p) {
   const name = S[pi];
   if (name === 'none' || !file) continue;
   PAL_ITEMS.push({ sp, f, pal: name, g, file });
@@ -436,9 +438,11 @@ function renderDetail(sp) {
     ${saveSets.sp.has(String(sp.d)) ? '<div class="hint">Status auto-synced from your save file.</div>' : ''}
     <div class="section-title">Evolution family</div>
     ${renderFamily(sp)}
+    ${sp.sm ? `<div class="section-title">How to summon</div><div class="summon"><div class="summon-title">${esc(sp.sm.title)}</div>
+      <ol>${sp.sm.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></div>` : ''}
     <div class="section-title">Where to find</div>
     ${ySummary}
-    ${spawnTable(wild, sp) || '<div class="spawn-row meta">No known wild spawn — see evolution/breeding info below.</div>'}
+    ${spawnTable(wild, sp) || `<div class="spawn-row meta">${sp.sm ? 'No natural wild spawn — see How to summon above.' : 'No known wild spawn — see evolution/breeding info below.'}</div>`}
     ${raid.length ? `<div class="section-title">Raids &amp; boss encounters</div>${spawnTable(raid, sp)}` : ''}
     <div class="section-title">Evolution &amp; breeding</div>
     ${evoInto.join('') || '<div class="spawn-row meta">No evolution data.</div>'}

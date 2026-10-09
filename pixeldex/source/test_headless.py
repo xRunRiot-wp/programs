@@ -233,6 +233,33 @@ try:
     print("'Pictures: default' still shows the normal one:", src(393))
     assert "shiny" not in src(393)
     ev("$('lookMode').value='picks'; store.set('look','picks'); refreshAll()")
+    # v2.3.1: Megas / Gigantamax / Primal only in the Forms tab, never in Palettes
+    battle = ev("PAL_ITEMS.filter(it => isBattleForm(it.f)).length")
+    want = ev("species.reduce((t, sp) => t + sp.f.filter(f => isBattleForm(f) && f.s).length, 0)")
+    listed = ev("FORM_ITEMS.filter(({f}) => isBattleForm(f)).length")
+    print("battle forms in Palettes tab:", battle, "| in Forms tab:", listed, "of", want)
+    assert battle == 0 and listed == want
+    ev("showTab('palettes'); $('palName').value='*all'; $('palSearch').value='charizard'; renderPalettes()")
+    print("Charizard in Palettes:", ev("[...document.querySelectorAll('#palGrid .card .sub')].map(s=>s.textContent)"))
+    ev("$('palSearch').value=''; renderPalettes(); showTab('forms'); $('formSearch').value='charizard'; renderForms()")
+    print("Charizard in Forms:", ev("[...document.querySelectorAll('#formGrid .card .sub')].map(s=>s.textContent)"))
+    ev("$('formSearch').value=''; renderForms(); showTab('pokedex')")
+    # v2.3.1: summoned legendaries get a "How to summon" section
+    for dex, want in ((249, "Tidal Bell"), (250, "Clear Bell"), (144, "Orb of Frozen Souls"), (483, "Adamant Orb"), (493, "Azure Flute"), (251, "Ilex Shrine"), (718, "Zygarde Cube"), (808, "Mystery Box")):
+        ev(f"openDetail({dex})")
+        txt = ev("(document.querySelector('.summon')||{innerText:''}).innerText")
+        print(dex, "how to summon:", txt.split(chr(10))[0], "| mentions", want, ":", want in txt)
+        assert want in txt, (dex, txt)
+    for dex in (382, 486, 25):   # Kyogre / Regigigas spawn naturally in 9.4.1, Pikachu obviously
+        ev(f"openDetail({dex})")
+        assert not ev("!!document.querySelector('.summon')"), dex
+    ev("openDetail(249)")
+    time.sleep(0.4)
+    shot("14_lugia_summon")
+    ev("openDetail(144)")
+    time.sleep(0.4)
+    shot("15_articuno_summon")
+    ev("closeDetail()")
     print("footer:", ev("document.getElementById('versionFooter').textContent"), "| title:", ev("document.title"))
     shot("13_auto_shiny")
     print("JS errors:", errors)
