@@ -524,6 +524,12 @@
       await sleep(rand(pace.keyMin, pace.keyMax));
     }
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    // Kronos only takes a typed time/date when you leave the box (the bar and end date
+    // update then), so leave it like Zack moving on to the next box
+    await sleep(150);
+    if (document.activeElement === el) el.blur();
+    else { el.dispatchEvent(new FocusEvent("blur")); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); }
+    await sleep(350);
   }
   function selectOption(el, text) {
     const opt = [...el.options].find((o) => norm(o.text) === norm(text)) || [...el.options].find((o) => norm(o.value) === norm(text));
@@ -834,8 +840,25 @@
   shadow.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { if (!running && !teaching) showTab(b.dataset.tab); }));
 
   let data = null, done = {}, recipe = null;
+  // Recordings from before v3.1 saved the click on the real Kronos grid as "this spot on the
+  // page" (its hover box), which only ever hits one day. Turn that into a grid step; a step
+  // that types into something that isn't a box can't work, so the recording must be redone.
+  function fixOldRecipe(r) {
+    if (!r || !r.steps) return r;
+    for (const st of r.steps) {
+      const dbg = st.action === "click" && st.debug;
+      const chain = dbg && dbg.clicked_and_parents;
+      if (!chain || !chain.some((c) => /krn_(shadow|matrix)/.test((c.attrs && c.attrs.class) || ""))) continue;
+      const band = (dbg.day_headers || []).find((b) => dbg.at && dbg.at[0] >= b.left && dbg.at[0] < b.left + b.width);
+      st.action = "grid"; st.how = "click";
+      st.grid = { name: "", md: band ? band.day : "", rel: band ? (dbg.at[0] - band.left) / band.width : 0.5, dy: 0 };
+    }
+    r.broken = r.steps.some((x) => (x.action === "type" || x.action === "select") && x.desc && !/^(input|select|textarea)$/.test(x.desc.tag)) ||
+      (!r.steps.some((x) => x.action === "grid") && /kronos/i.test(location.hostname) && !!document.querySelector(".krn_matrix"));
+    return r;
+  }
   async function loadAll() {
-    data = await S.get("sh_data"); done = (await S.get("sh_done")) || {}; recipe = await S.get("sh_recipe");
+    data = await S.get("sh_data"); done = (await S.get("sh_done")) || {}; recipe = fixOldRecipe(await S.get("sh_recipe"));
     const left = data ? data.shifts.filter((s) => !done[s.id]).length : 0;
     $("#count").textContent = data ? `${left} of ${data.shifts.length} left` : "";
   }
@@ -1004,6 +1027,7 @@
     if (running) return;
     if (!data || !data.shifts.length) { el.innerHTML = `<p class="sh-muted">Load the week first (Schedule Helper button in Chrome's toolbar).</p>`; return; }
     if (!recipe) { el.innerHTML = `<p>Before auto-fill can work, use <b>Show me once</b> to add one shift by hand while I watch.</p>`; return; }
+    if (recipe.broken) { el.innerHTML = `<div class="sh-warn">Your <b>Show me once</b> recording was made with an older version and won't work on this Kronos screen.</div><p>Please do <b>Show me once</b> again (one shift, about a minute). After that, auto-fill picks the right person and day by itself.</p>`; return; }
     const days = [...new Set(data.shifts.map((s) => s.day))];
     const left = (d) => data.shifts.filter((s) => s.day === d && !done[s.id]).length;
     const c = settings().confirm;
@@ -1137,6 +1161,10 @@
     onPointPick = null; $("#auto").onclick = null;
     broadcast({ type: "point-stop" });
     if (!pick) return "cancel";
+    if ((st.action === "type" || st.action === "select") && !/^(input|select|textarea)$/.test(pick.desc.tag)) {
+      const a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">That wasn't a box you can type in. Click right inside the box (where the cursor goes).</div>`, [["again", "Point again", "sh-primary"], ["cancel", "Cancel"]]);
+      return a === "stop" ? "stop" : a === "again" ? pointTo(st, s, head) : "cancel";
+    }
     if (st.action === "grid") return "clicked"; // the grid step stays "this person's spot on this day"
     st.alt = st.alt || st.desc;
     st.desc = { ...pick.desc };
