@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mock krn planner</title>
+<!-- Shaped like Zack's real debug export: #schedule.krn_main[role=region] > ... > div.krn_scrollable > div > div.krn_matrix,
+     a hover box div.krn_shadow (one day x one row, 42 px high, rows 43 px apart), <time> day headers 246 px wide starting at x=173,
+     names in a SEPARATE left pane (173 px) that scrolls along with the matrix, words split over tags, group header rows. -->
+<style>body{font:12px sans-serif;margin:0;overflow:hidden}#bar{background:#0b5560;color:#fff;padding:8px;height:40px;box-sizing:border-box}
+#tools{height:30px;text-align:right;padding:4px}#schedule{position:relative}
+.hdr{display:flex;height:40px}.corner{width:173px;flex:none;padding-top:14px;font-weight:600}
+.hdr time{display:block;width:246px;flex:none;border-left:1px solid #ddd;text-align:center;padding-top:6px;box-sizing:border-box}
+.body{display:flex}.names{width:173px;flex:none;height:512px;overflow:hidden}
+.nrow{height:43px;box-sizing:border-box;border-bottom:1px solid #eee;display:flex;align-items:center;gap:4px}
+.nrow .hrs{color:#888;font-size:10px;margin-left:auto;padding-right:4px}.grp{height:43px;background:#f3f3f3;font-weight:bold;line-height:43px;padding-left:4px}
+.krn_scrollable{height:512px;overflow:auto;flex:1}.krn_matrix{position:relative;width:1722px;
+background:repeating-linear-gradient(#fff 0 42px,#eee 42px 43px)}
+.krn_shadow{position:absolute;width:246px;height:42px;background:#d8ecff88;display:none}
+.b{position:absolute;height:22px;background:#8a4fd1;color:#fff;font-size:9px;overflow:hidden;white-space:nowrap;z-index:2}
+#panel{position:fixed;right:0;top:0;bottom:0;width:330px;background:#fff;border-left:2px solid #333;padding:10px;visibility:hidden}
+#panel.open{visibility:visible}.f span{display:block;font-size:10px}#err{color:red}</style></head>
+<body><div id="bar">UKG Schedule Planner</div><div id="tools"><button id="tsave">Save</button></div>
+<div id="schedule" class="krn_main" role="region" aria-label="scheduler">
+ <div class="hdr"><div class="corner">Name</div><div id="days" style="display:flex"></div></div>
+ <div class="body"><div class="names"><div id="nin"></div></div>
+  <div class="krn_scrollable" id="sc"><div><div class="krn_matrix" id="mx"><div class="krn_shadow" id="sh"></div></div></div></div></div>
+</div>
+<div id="panel"><b>Add Shift</b><div id="pemp"></div>
+ <div class="seg">Regular [1.00] <div class="f"><span>Start Time</span><input id="st"></div><div class="f"><span>End Time</span><input id="en"></div> <span id="pd"></span>
+ <div>Job: <span id="job">--</span> <span id="xfer" style="color:#06c;cursor:pointer">Transfer Employee</span><div id="jobmenu" hidden></div></div></div>
+ <div id="err"></div><button id="cancel">Cancel</button> <button id="save">Apply</button></div>
+<script>
+const DAYS = [["Mon","10/05"],["Tue","10/06"],["Wed","10/07"],["Thu","10/08"],["Fri","10/09"],["Sat","10/10"],["Sun","10/11"]], RH = 43, DW = 246;
+window.added = []; window.pending = []; window.DIRECTORY = window.DIRECTORY || []; window.PRIMARY = window.PRIMARY || {};
+DAYS.forEach(([d, md]) => { const t = document.createElement('time'); t.textContent = `${d} ${md}`; days.appendChild(t); });
+let rows = [], cur = null;
+window.render = () => {
+  const ns = [...new Set([...DIRECTORY, 'Aaron, Filler', 'Zed, Filler'])].sort();
+  const half = Math.ceil(ns.length / 2);
+  rows = [{ g: 'FRONT OF HOUSE' }, ...ns.slice(0, half).map((n) => ({ n })), { g: 'BAR' }, ...ns.slice(half).map((n) => ({ n }))];
+  nin.innerHTML = rows.map((r) => r.g ? `<div class="grp">${r.g}</div>` : (() => { const [l, f] = r.n.split(', '); return `<div class="nrow"><input type="checkbox"><span class="krn_name">${l}, <span>${f}</span></span><i></i><span class="hrs">32.00</span></div>`; })()).join('');
+  mx.style.height = rows.length * RH + 'px';
+  draw();
+};
+sc.addEventListener('scroll', () => { document.querySelector('.names').scrollTop = sc.scrollTop; });
+const cellAt = (e) => { const r = mx.getBoundingClientRect(); const ri = Math.floor((e.clientY - r.top) / RH), di = Math.floor((e.clientX - r.left) / DW); return rows[ri] && rows[ri].n && di >= 0 && di < 7 ? { ri, di } : null; };
+mx.addEventListener('mousemove', (e) => { const c = cellAt(e); if (!c) return; sh.style.display = 'block'; sh.style.top = c.ri * RH + 'px'; sh.style.left = c.di * DW + 'px'; });
+mx.addEventListener('click', (e) => { if (e.target !== mx && e.target !== sh) return; const c = cellAt(e); if (c) open(rows[c.ri].n, DAYS[c.di][1]); });
+function open(n, md) { cur = n; pemp.textContent = n; pd.textContent = md; panel.dataset.md = md; st.value = '7:00 AM'; en.value = '8:00 AM'; err.textContent = ''; job.textContent = PRIMARY[n] || '--'; jobmenu.hidden = true; xfer.style.display = window.HIDE_JOB ? 'none' : ''; panel.classList.add('open'); }
+xfer.onclick = () => { jobmenu.innerHTML = ''; ['Server','Bar','Bus','Host','Manager'].forEach((j) => { const d = document.createElement('div'); d.setAttribute('role','menuitem'); d.textContent = j; d.onclick = () => { job.textContent = j; jobmenu.hidden = true; }; jobmenu.appendChild(d); }); jobmenu.hidden = false; };
+function draw() {
+  mx.querySelectorAll('.b').forEach((b) => b.remove());
+  for (const s of [...added, ...pending]) {
+    const ri = rows.findIndex((r) => r.n === s.name), di = DAYS.findIndex((d) => d[1] === s.date.slice(0, 5));
+    const [h, m, ap] = s.start.match(/(\d+):(\d+) (AM|PM)/).slice(1); const min = (h % 12 + (ap === 'PM' ? 12 : 0)) * 60 + +m;
+    const b = document.createElement('div'); b.className = 'b'; b.textContent = s.start + ' - ' + s.end; b.style.top = ri * RH + 10 + 'px'; b.style.left = di * DW + min / 1440 * DW + 'px'; b.style.width = '60px';
+    b.onclick = (e) => e.stopPropagation(); mx.appendChild(b);
+  }
+}
+const T = /^(1[0-2]|[1-9]):[0-5]\d (AM|PM)$/;
+save.onclick = () => { if (!T.test(st.value) || !T.test(en.value)) return err.textContent = 'Bad time'; if (job.textContent === '--') return err.textContent = 'No job';
+  pending.push({ name: cur, date: panel.dataset.md + '/2026', start: st.value, end: en.value, job: job.textContent }); panel.classList.remove('open'); draw(); };
+tsave.onclick = () => { added.push(...pending); pending = []; draw(); };
+cancel.onclick = () => panel.classList.remove('open');
+// for the test: scroll to a person and give the point of their empty spot on a day (~7 AM)
+window.spot = (n, md) => { const ri = rows.findIndex((r) => r.n === n), di = DAYS.findIndex((d) => d[1] === md); sc.scrollTop = ri * RH - 200; const r = mx.getBoundingClientRect(); return [r.left + di * DW + DW * 0.3, r.top + ri * RH + 21]; };
+</script></body></html>

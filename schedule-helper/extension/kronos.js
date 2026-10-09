@@ -188,6 +188,44 @@
     }
     return false;
   }
+  // The name column, read by what is drawn at a height: real Kronos keeps the names in their
+  // own pane left of the grid (krn_matrix), with the words split over several tags, so we
+  // look at what's under a few points of that pane and climb to the element holding the name.
+  const NAME_IN = /([A-Za-z][A-Za-z'.\-]*(?:[ -][A-Za-z'.\-]+)*,\s*[A-Za-z][A-Za-z'.\-]*(?:[ -][A-Za-z][A-Za-z'.\-]*)*)/;
+  const notPanel = (e) => !(panelHost && (panelHost === e || panelHost.contains(e)));
+  function gridLeft() { const b = dayBands(); return b.length ? b[0].left : 0; }
+  function nameAt(y, left = gridLeft()) {
+    if (left < 40) return null;
+    let loose = null;
+    for (const f of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+      const x = left * f;
+      const top = document.elementsFromPoint(x, y).find(notPanel);
+      for (let e = top, n = 0; e && e !== document.body && n < 8; e = e.parentElement, n++) {
+        const r = e.getBoundingClientRect();
+        if (r.height > 130 || r.right > left + 6) break; // left the row / the name pane
+        const t = (e.innerText || e.textContent || "").replace(/\s+/g, " ").trim();
+        if (!t || t.length > 80 || TIME_RE.test(t)) continue;
+        const m = NAME_IN.exec(t);
+        if (m) return { name: m[1].trim(), el: e };
+        if (!loose && /[A-Za-z]{2,}/.test(t) && !/^name\b/i.test(t)) loose = { name: t, el: e };
+      }
+    }
+    return loose;
+  }
+  // every name drawn in the name pane right now (scanning down it), as [{name, el}]
+  function paneNames() {
+    const left = gridLeft(), bands = dayBands();
+    if (left < 40 || !bands.length) return [];
+    const y0 = Math.max(0, Math.max(...bands.map((b) => b.bottom)) + 2), y1 = innerHeight - 2;
+    const out = [], seen = new Set();
+    for (let y = y0; y < y1; y += 7) {
+      const h = nameAt(y, left);
+      if (h && !seen.has(h.el)) { seen.add(h.el); out.push(h); }
+    }
+    return out;
+  }
+  const nameForms = (name) => { const i = name.indexOf(","); return i < 0 ? [norm(name)] : [norm(name), norm(`${name.slice(i + 1)} ${name.slice(0, i)}`)]; };
+  const sameName = (a, b) => { const fa = nameForms(a), nb = norm(b); return fa.some((f) => nb === f || nb.startsWith(f + " ")); };
   // Which grid spot is at (x, y)? -> { name, md, rel, dy } or null
   function gridAt(x, y, target) {
     if (!target || (target.closest && target.closest(NOT_GRID))) return null;
@@ -202,6 +240,10 @@
     if (row) {
       const n = [...row.querySelectorAll("*")].find((e) => !e.childElementCount && NAME_RE.test(e.textContent.trim()));
       if (n) { name = n.textContent.replace(/\s+/g, " ").trim(); cy = rowBox(n).cy; }
+    }
+    if (!name) {
+      const h = nameAt(y, dayBands(leaves)[0].left);
+      if (h && !onTop(target, h.el)) { name = h.name; const r = h.el.getBoundingClientRect(); cy = r.top + r.height / 2; }
     }
     if (!name) {
       const names = nameLeaves(leaves).map(([e, t]) => ({ t, el: e, r: e.getBoundingClientRect(), b: rowBox(e) })).filter((n) => n.r.right <= x + 4);
@@ -233,6 +275,20 @@
       clicked_and_parents: chain,
       day_headers: dayBands(leaves).map((b) => ({ day: b.md, left: Math.round(b.left), width: Math.round(b.width), header_tag: b.el.tagName.toLowerCase() })),
       name_rows_on_screen: nameLeaves(leaves).length,
+      name_pane_rows_seen: paneNames().length,
+      name_pane_at_click: (() => {
+        const left = gridLeft(); if (left < 40) return null;
+        const h = nameAt(y, left);
+        return {
+          found: h ? h.name.slice(0, 60) : null, // only the clicked row's text
+          points: [0.15, 0.5, 0.85].map((f) => ({ x: Math.round(left * f), under: document.elementsFromPoint(left * f, y).filter(notPanel).slice(0, 6).map((e) => {
+            const r = e.getBoundingClientRect();
+            return { tag: e.tagName.toLowerCase(), class: String(e.className && e.className.baseVal != null ? e.className.baseVal : e.className || "").slice(0, 80), role: e.getAttribute("role") || undefined, aria: (e.getAttribute("aria-label") || "").slice(0, 60) || undefined, box: [r.left, r.top, r.width, r.height].map(Math.round) };
+          }) })),
+        };
+      })(),
+      scrollers: (() => { const out = []; for (let e = target; e && e.nodeType === 1; e = e.parentElement) if (e.scrollHeight > e.clientHeight + 5) out.push({ tag: e.tagName.toLowerCase(), class: String(e.className || "").slice(0, 60), scrollTop: Math.round(e.scrollTop), scrollHeight: e.scrollHeight, clientHeight: e.clientHeight }); return out; })(),
+      clicked_height: Math.round(target.getBoundingClientRect().height),
       grid_guess: gridAt(x, y, target),
     };
   }
@@ -240,7 +296,17 @@
     const want = norm(name);
     const ls = nameLeaves();
     const hit = ls.find(([, t]) => norm(t) === want) || ls.find(([, t]) => norm(t).startsWith(want));
-    return hit ? hit[0] : null;
+    if (hit) return hit[0];
+    const p = paneNames().find((h) => sameName(name, h.name));
+    return p ? p.el : null;
+  }
+  // the box that scrolls the grid (real Kronos: krn_scrollable around krn_matrix)
+  function gridScroller() {
+    const b = dayBands();
+    if (!b.length) return null;
+    const y = Math.max(...b.map((x) => x.bottom)) + 20;
+    const el = document.elementsFromPoint(b[0].left + 10, y).find(notPanel);
+    return el ? scroller(el) : null;
   }
   function scroller(el) {
     for (let e = el && el.parentElement; e; e = e.parentElement) {
@@ -259,8 +325,8 @@
   async function scrollToRow(name) {
     // like Zack scrolling down the list of names until the person shows up
     const any = nameLeaves()[0];
-    if (!any) return null;
-    const box = scroller(any[0]);
+    const box = (any && scroller(any[0])) || gridScroller();
+    if (!box) return null;
     let el = findRow(name);
     if (!el) { box.scrollTop = 0; await sleep(300); }
     for (let k = 0; k < 80; k++) {
@@ -273,9 +339,12 @@
     }
     return findRow(name);
   }
-  function mouseAt(el, x, y, how) {
+  async function mouseAt(el, x, y, how) {
     const o = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
-    el.dispatchEvent(new MouseEvent("mouseover", o)); el.dispatchEvent(new MouseEvent("mousemove", o));
+    el.dispatchEvent(new PointerEvent("pointerover", o)); el.dispatchEvent(new MouseEvent("mouseover", o));
+    el.dispatchEvent(new PointerEvent("pointermove", o)); el.dispatchEvent(new MouseEvent("mousemove", o));
+    await sleep(120);
+    el = document.elementsFromPoint(x, y).find(notPanel) || el;
     const press = (button, detail) => {
       const b = { ...o, button, buttons: button === 2 ? 2 : 1, detail };
       el.dispatchEvent(new PointerEvent("pointerdown", b)); el.dispatchEvent(new MouseEvent("mousedown", b));
@@ -305,8 +374,8 @@
       const x = band.left + rel * band.width, y = cy + dy;
       const el = document.elementsFromPoint(x, y).find((e) => !(panelHost && (panelHost === e || panelHost.contains(e))));
       const g2 = el && gridAt(x, y, el);
-      if (!g2 || norm(g2.name) !== norm(g.name) || g2.md !== g.md) continue;
-      mouseAt(el, x, y, step.how);
+      if (!g2 || !(norm(g2.name) === norm(g.name) || sameName(g.name, g2.name) || sameName(g2.name, g.name)) || g2.md !== g.md) continue;
+      await mouseAt(el, x, y, step.how);
       return { ok: true };
     }
     return { ok: false, why: `I couldn't find a free spot for ${g.name} on ${g.md} on the grid. Click it yourself and press I did it.` };
@@ -401,8 +470,9 @@
     }
     heads.sort((a, b) => a.left - b.left);
     const flagged = [];
+    let pane = null; // the separate name column, read once (real Kronos)
     for (const s of shifts) {
-      const nameEl = vis.find((e) => norm(e.textContent) === norm(s.kronosName));
+      const nameEl = vis.find((e) => norm(e.textContent) === norm(s.kronosName)) || (pane || (pane = paneNames())).find((h) => sameName(s.kronosName, h.name))?.el;
       if (!nameEl) continue;
       const r = nameEl.closest("[role=row],tr")?.getBoundingClientRect() || nameEl.getBoundingClientRect();
       const [, mo, d] = s.date.split("-");
@@ -558,7 +628,7 @@
   const shadow = panelHost.attachShadow({ mode: "open" });
   shadow.innerHTML = `<link rel="stylesheet" href="${chrome.runtime.getURL("ui.css")}">
     <div class="sh-panel sh-root">
-      <div class="sh-head"><b>Schedule Helper</b><span class="sh-small" id="count"></span><button id="min" title="Shrink / grow">&#8211;</button></div>
+      <div class="sh-head"><b>Schedule Helper v${chrome.runtime.getManifest().version.replace(/\.0$/, "")}</b><span class="sh-small" id="count"></span><button id="min" title="Shrink / grow">&#8211;</button></div>
       <div class="sh-tabs"><button data-tab="copy">Copy</button><button data-tab="auto">Auto-fill</button><button data-tab="teach">Show me once</button></div>
       <div class="sh-body"><div id="copy"></div><div id="auto"></div><div id="teach"></div></div>
     </div>`;

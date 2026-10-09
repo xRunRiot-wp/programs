@@ -1,5 +1,10 @@
 # Schedule Helper (HotSchedules to Kronos)
 
+**How to update (every new version):**
+1. Download `schedule-helper.zip` and extract it over your old **ScheduleHelper** folder (same folder name every version, say yes to replace).
+2. Open `chrome://extensions` and click the round reload arrow on the Schedule Helper card, then refresh Kronos. The helper's title bar shows the version.
+3. If the release notes say so, redo **Show me once** (Show me once tab: Throw away the old steps, then show it one shift on the grid).
+
 A Chrome extension that takes the **Weekly Roster** export from HotSchedules and helps you
 enter the same shifts in the **Kronos / UKG Schedule Planner**, so nobody has to print the
 schedule and retype it.
