@@ -10,6 +10,8 @@
     view=table        Table view: one cell per person/day instead of the timeline
     open=dblclick     single click only selects; double-click opens the panel
     open=menu         right-click -> menu -> "Add Shift"
+    open=pattern      Zack's Kronos (10-10): double-click opens the full-screen "Schedule Pattern" window (NOT Add
+                      Shift); only right-click -> "Add Shift" opens the panel
     aria=1            friendlier build: role=grid/row/gridcell, aria-label "<name> <date>", labelled inputs
     save=apply        Apply stores the shift straight away (no toolbar Save step)
     jobpath=1         the Transfer Employee menu shows "Restaurant/Bar" instead of "Bar"
@@ -199,9 +201,27 @@ body{font:12px "Segoe UI",sans-serif;margin:0;color:#222;background:#fff;overflo
     closeCtx(); const s = spot(e); if (!s) return; log(`click ${names[s.emp]} ${s.day} ${s.min}`);
     select(s); if (OPEN === "click") openPanel(s);
   });
-  $("#body").addEventListener("dblclick", (e) => { const s = spot(e); if (s && OPEN === "dblclick") { log("dblclick"); openPanel(s); } });
+  $("#body").addEventListener("dblclick", (e) => {
+    const s = spot(e); if (!s) return;
+    if (OPEN === "dblclick") { log("dblclick"); openPanel(s); }
+    if (OPEN === "pattern") { log("dblclick -> pattern"); openPattern(s); }
+  });
+  // like the real one: a full-screen modal for the person's repeating pattern (radios, dates, its own grid)
+  function openPattern(s) {
+    window.patternOpened = (window.patternOpened || 0) + 1;
+    const m = document.createElement("div"); m.id = "pattern";
+    m.className = "modal action-modal in sp-modal-fixed"; m.setAttribute("role", "dialog");
+    m.style.cssText = "position:fixed;inset:10px 19px;background:#fff;border:1px solid #888;z-index:30;padding:12px";
+    m.innerHTML = `<div class="schedule-pattern"><h3>Schedule Pattern: ${names[s.emp]}</h3>
+      <form class="tab-pattern-form"><label><input type="radio" name="endDateRadio"> Specify Date</label>
+      <label><input type="radio" name="endDateRadio" checked> Forever</label>
+      <input type="text" value="10/26/2026"> <input type="text" value="1"></form>
+      <button type="button" id="pcancel">Cancel</button></div>`;
+    document.body.appendChild(m);
+    m.querySelector("#pcancel").onclick = () => m.remove();
+  }
   $("#body").addEventListener("contextmenu", (e) => {
-    if (OPEN !== "menu") return; const s = spot(e); if (!s) return; e.preventDefault(); select(s); closeCtx();
+    if (OPEN !== "menu" && OPEN !== "pattern") return; const s = spot(e); if (!s) return; e.preventDefault(); select(s); closeCtx();
     const m = document.createElement("div"); m.id = "ctx"; m.setAttribute("role", "menu");
     m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px";
     for (const t of ["Add Shift", "Add Paycode", "Comment", "Lock"]) {
@@ -211,7 +231,7 @@ body{font:12px "Segoe UI",sans-serif;margin:0;color:#222;background:#fff;overflo
     document.body.appendChild(m);
   });
   const closeCtx = () => { const m = $("#ctx"); if (m) m.remove(); };
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeCtx(); closePanel(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeCtx(); closePanel(); const pm = $("#pattern"); if (pm) pm.remove(); } });
 
   // ---- the slide-in Add Shift panel ----
   let cur = null;
