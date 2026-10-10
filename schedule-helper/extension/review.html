@@ -16,7 +16,10 @@
     <div class="sh-row">
       <input type="file" id="file" accept=".csv,.xlsx,.xls">
       <label>Week starting (Monday) <input type="date" id="week"></label>
+      <label>Location <input type="text" id="loc" list="locs" placeholder="e.g. the restaurant's name" style="width:12em"><datalist id="locs"></datalist></label>
     </div>
+    <p class="sh-small sh-muted">Each location's roster is loaded separately. The helper learns the job change once per location and uses the right one for this roster.</p>
+    <label class="sh-small"><input type="checkbox" id="xferall"> Every shift on this roster needs the Transfer (Kronos fills in a different location for these people)</label>
     <div id="problems"></div>
   </section>
 

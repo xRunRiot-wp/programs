@@ -1057,7 +1057,7 @@
         did.push(`step ${c.step + 1} changed`);
       }
       if (c.drop !== undefined && list && list[c.drop]) { list.splice(c.drop, 1); did.push(`step ${c.drop + 1} removed`); }
-      if (recipe && did.some((d) => /changed|removed/.test(d))) { delete recipe.broken; await S.set("sh_recipe", recipe); }
+      if (recipe && did.some((d) => /changed|removed/.test(d))) { delete recipe.broken; await saveRecipe(recipe); }
       if (c.pace || c.confirm) {
         data.settings = { ...(data.settings || {}), ...(c.pace ? { pace: { ...((data.settings || {}).pace || {}), ...c.pace } } : {}), ...(c.confirm ? { confirm: c.confirm } : {}) };
         await S.set("sh_data", data); did.push("settings changed");
@@ -1125,8 +1125,33 @@
       || r.steps.some((x) => x.desc && (/schedule-pattern/.test(x.desc.path || "") || x.desc.name === "endDateRadio"));
     return r;
   }
+  // The job change is learned once per location (Zack 10-10: one roster per location, each with its own
+  // Transfer). recipe.jobStepsBy[location] holds them; recipe.jobSteps is the one for the loaded roster.
+  const locKey = (l) => String(l || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  function useLocation(r) {
+    if (!r) return r;
+    if (!r.jobStepsBy) {
+      // a recording from before v3.13: file it under the location it typed (its unmapped typed word)
+      const typed = (r.jobSteps || []).find((x) => x.action === "type" && !x.map && x.value);
+      r.jobStepsBy = r.jobSteps ? { [typed ? locKey(typed.value) : ""]: r.jobSteps } : {};
+    }
+    const k = locKey(data && data.location);
+    const keys = Object.keys(r.jobStepsBy);
+    // "Grotto" also finds "The Grotto"; no location picked uses the only recording there is
+    const near = k && keys.find((x) => x && (x.includes(k) || k.includes(x)));
+    r.jobSteps = r.jobStepsBy[k] || (near ? r.jobStepsBy[near] : null) || (keys.length === 1 && (!k || !keys[0]) ? r.jobStepsBy[keys[0]] : null);
+    return r;
+  }
+  function saveRecipe(r) {
+    if (r) {
+      r.jobStepsBy = { ...(r.jobStepsBy || {}) };
+      const k = locKey(data && data.location);
+      if (r.jobSteps) r.jobStepsBy[k] = r.jobSteps; else delete r.jobStepsBy[k];
+    }
+    return S.set("sh_recipe", r);
+  }
   async function loadAll() {
-    data = await S.get("sh_data"); done = (await S.get("sh_done")) || {}; recipe = fixOldRecipe(await S.get("sh_recipe"));
+    data = await S.get("sh_data"); done = (await S.get("sh_done")) || {}; recipe = useLocation(fixOldRecipe(await S.get("sh_recipe")));
     const left = data ? data.shifts.filter((s) => !done[s.id]).length : 0;
     $("#count").textContent = data ? `${left} of ${data.shifts.length} left` : "";
   }
@@ -1220,7 +1245,7 @@
       };
       $("#recsave").onclick = async () => {
         if (!recSteps.some((s) => s.isSave)) { alert("Please pick which click was the Save button."); return; }
-        await S.set("sh_recipe", { steps: recSteps, jobSteps: recipe?.jobSteps || null, taughtAt: Date.now() });
+        await saveRecipe({ steps: recSteps, jobSteps: recipe?.jobSteps || null, jobStepsBy: recipe?.jobStepsBy, taughtAt: Date.now() });
         if ($("#exdone").checked) await S.markDone(example.id, true);
         teaching = false; await loadAll(); renderTeach();
       };
@@ -1238,7 +1263,7 @@
       <div class="sh-row"><button class="sh-primary" id="recgo" ${left.length ? "" : "disabled"}>Start watching</button></div>
       ${recipe ? `<hr><p><b>Part 2 (optional): job-change shifts.</b> ${
         jobInMain ? "You changed the job while I watched, so I already set the job on every shift." :
-        recipe.jobSteps ? `&#10003; I know how to change the job on one shift (${recipe.jobSteps.length} steps). I only do it on &#9888; shifts.` :
+        recipe.jobSteps ? `&#10003; I know how to change the job on one shift${data && data.location ? ` at ${esc(data.location)}` : ""} (${recipe.jobSteps.length} steps). I only do it on &#9888; shifts.` :
         "Kronos fills in each person's usual job. For a shift with a different job (a server working Bar) the job has to be changed. Show me once how you do it: I fill in the shift, then you change the job while I watch."}</p>
       ${jobInMain ? "" : flaggedLeft.length ? `<label>Job-change shift:<br><select id="exjob" style="width:100%">${flaggedLeft.map((s) => `<option value="${esc(s.id)}">${esc(s.day)} ${esc(s.kronosName)} ${R.niceTime(s.start)}-${R.niceTime(s.end)}: ${esc(s.usualJob)} &rarr; ${esc(s.kronosJob)}</option>`).join("")}</select></label>
         <div class="sh-row"><button class="sh-primary" id="jobgo">${recipe.jobSteps ? "Show me again on this shift" : "Show me on this shift"}</button>${recipe.jobSteps ? '<button id="jobforget">Forget part 2</button>' : ""}</div>`
@@ -1247,7 +1272,7 @@
       const s = data.shifts.find((x) => x.id === $("#exjob").value);
       showTab("auto"); runOne(s);
     };
-    if ($("#jobforget")) $("#jobforget").onclick = async () => { await S.set("sh_recipe", { ...recipe, jobSteps: null }); await loadAll(); renderTeach(); };
+    if ($("#jobforget")) $("#jobforget").onclick = async () => { await saveRecipe({ ...recipe, jobSteps: null }); await loadAll(); renderTeach(); };
     $("#recgo").onclick = () => {
       example = data.shifts.find((s) => s.id === $("#ex").value);
       recSteps = []; teaching = "watching"; patternSeen = false;
@@ -1294,7 +1319,8 @@
     const d = globalThis.SH_DEFAULTS;
     const saved = { ...(data?.settings?.pace || {}) };
     // v3.9: weeks loaded before 3.9 saved the old typing speed (70-160 ms a letter) -> use the faster one
-    if (saved.keyMin === 70 && saved.keyMax === 160) { delete saved.keyMin; delete saved.keyMax; }
+    // v3.13: 15-35 ms was too fast for Kronos's time boxes (a 3pm-12am shift came out 12am-1am) -> 60-110
+    if ((saved.keyMin === 70 && saved.keyMax === 160) || (saved.keyMin === 15 && saved.keyMax === 35)) { delete saved.keyMin; delete saved.keyMax; }
     return { confirm: data?.settings?.confirm || d.confirm, order: data?.settings?.order || "person", pace: { ...d.pace, ...saved } };
   }
   function renderAuto() {
@@ -1470,7 +1496,7 @@
     st.desc = { ...pick.desc };
     st.frameKey = pick.frameKey;
     if (st.action === "click" && !st.map) st.text = pick.text;
-    await S.set("sh_recipe", recipe);
+    await saveRecipe(recipe);
     return st.action === "click" || st.action === "grid" ? "clicked" : "learned";
   }
   async function saveStuck(st, why) {
@@ -1594,7 +1620,7 @@
         const b = t.closest("[data-ans]"); if (b) { el.onclick = el.onchange = null; res(b.dataset.ans); }
       };
     });
-    if (keep === "keep") { recipe = { ...recipe, jobSteps: rec }; await S.set("sh_recipe", recipe); }
+    if (keep === "keep") { recipe = { ...recipe, jobSteps: rec }; await saveRecipe(recipe); }
     return savedByZack ? "saved" : "ok";
   }
 
@@ -1617,7 +1643,7 @@
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i];
       if (stopAsked) return "stop";
-      if (i === saveAt && s.jobChange && !jobInMain) {
+      if (i === saveAt && (s.jobChange || (data && data.transferAll)) && !jobInMain) {
         const r = await changeJob(s, pace, head, opts.teachJob);
         if (r === "saved") return "saved";
         if (r !== "ok") return r;
