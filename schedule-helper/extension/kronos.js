@@ -547,6 +547,17 @@
             if (item.focus) item.focus();
             pressKey(item, "Enter");
           }
+          // v3.8 (Zack 10-10, 3.7 still couldn't press it): the menu is open, so let Zack press "Add shift" himself
+          // and carry on by ourselves as soon as the panel shows (no Try again / I did it needed)
+          if (!(await panelOpened(since, 2000)) && item.isConnected && visible(item)) {
+            try { live("info", "Add shift menu is open but my click didn't work; waiting for Zack to click it"); } catch (er) { /* optional */ }
+            try { showProgress(`<p><b>Click <u>Add shift</u> in the menu that's open on the schedule.</b></p><p class="sh-small sh-muted">I'll carry on by myself as soon as the Add Shift window opens.</p>`); } catch (er) { /* not the top frame */ }
+            for (const t0 = Date.now(); Date.now() - t0 < 60000;) {
+              const r = await panelOpened(since, 1000);
+              if (r === true) { openHow = "context"; try { live("info", "Zack clicked Add shift; carrying on"); } catch (er) { /* optional */ } return { ok: true }; }
+              if (r === "pattern" || !(item.isConnected && visible(item))) break;
+            }
+          }
         }
         const got = await panelOpened(since, 3000);
         if (got === "pattern") { await closePattern(); continue; }
