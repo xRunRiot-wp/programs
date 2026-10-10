@@ -177,6 +177,14 @@
     return s;
   }
   function find(d, wantText, loose) {
+    // Kronos's job list after a search (Transfer > business structure): pick the result for THIS shift's job,
+    // e.g. "770730.Bartender" for Bar, the server one for Server (v3.14, Zack 10-10: Grotto has both)
+    if (wantText != null && d.name === "jobSelection") {
+      const w = fuzzy(wantText);
+      const all = deepAll(`input[name="${d.name}"]`).filter((e) => visible(e) || visible(e.parentElement));
+      const nm = (e) => fuzzy(String(e.getAttribute("aria-label") || "").replace(/^[\d.\s]+/, ""));
+      return all.find((e) => nm(e) === w) || all.find((e) => nm(e).startsWith(w)) || all.find((e) => nm(e).includes(w)) || null;
+    }
     const exact = findExact(d, wantText);
     return exact || (loose ? findLoose(d, wantText) : null);
   }
@@ -1135,6 +1143,9 @@
       const typed = (r.jobSteps || []).find((x) => x.action === "type" && !x.map && x.value);
       r.jobStepsBy = r.jobSteps ? { [typed ? locKey(typed.value) : ""]: r.jobSteps } : {};
     }
+    // the click on a job in the search results follows the shift's job (recorded as one fixed job)
+    for (const list of Object.values(r.jobStepsBy)) for (const x of list || [])
+      if (x.action === "click" && !x.map && x.desc && x.desc.name === "jobSelection") x.map = { field: "job", fmt: "Kronos job" };
     const k = locKey(data && data.location);
     const keys = Object.keys(r.jobStepsBy);
     // "Grotto" also finds "The Grotto"; no location picked uses the only recording there is
