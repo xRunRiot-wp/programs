@@ -125,6 +125,11 @@
     "hh:mm AM": (t) => `${pad(t.h)}:${pad(t.M)} ${t.ap}`,
     "HH:mm": (t) => `${pad(t.H)}:${pad(t.M)}`,
     "H:mm": (t) => `${t.H}:${pad(t.M)}`,
+    // v3.7 (Zack 10-10 typed "5pm"/"10pm": no format matched, so every shift got 5pm-10pm)
+    "ham": (t) => `${t.h}${t.M ? ":" + pad(t.M) : ""}${t.ap.toLowerCase()}`,
+    "hAM": (t) => `${t.h}${t.M ? ":" + pad(t.M) : ""}${t.ap}`,
+    "h am": (t) => `${t.h}${t.M ? ":" + pad(t.M) : ""} ${t.ap.toLowerCase()}`,
+    "h AM": (t) => `${t.h}${t.M ? ":" + pad(t.M) : ""} ${t.ap}`,
   };
   const DATE = {
     // padded first: when the example date can't tell (10/10/2026), 10/05 is the safer guess

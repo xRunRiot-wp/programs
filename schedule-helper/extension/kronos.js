@@ -535,12 +535,20 @@
       const hows = [...new Set([openHow, "context", step.how && step.how !== "click" ? step.how : "dblclick", "dblclick", "click"].filter(Boolean))];
       for (const how of hows) {
         await mouseAt(el, x, y, how);
+        let since = before;
         if (how === "context") {
           const item = await waitAddShiftItem(2000);
           if (!item) { pressKey(document.activeElement || document.body, "Escape"); await sleep(300); continue; }
-          clickEl(item);
+          // v3.7 (Zack 10-10): his Kronos ignored a bare click on the menu's "Add shift", and the open menu itself
+          // counted as the panel -> compare with the menu open, pick the item like a mouse (hover, press), then Enter
+          since = panelSig();
+          await pickMenuItem(item);
+          if (!(await panelOpened(since, 1500)) && item.isConnected && visible(item)) {
+            if (item.focus) item.focus();
+            pressKey(item, "Enter");
+          }
         }
-        const got = await panelOpened(before, 3000);
+        const got = await panelOpened(since, 3000);
         if (got === "pattern") { await closePattern(); continue; }
         if (got) { openHow = how; return { ok: true }; }
       }
@@ -581,6 +589,11 @@
       if (n.boxes > before.boxes || n.inputs > before.inputs + 1 || n.dialogs > before.dialogs || n.title > before.title || n.frames > before.frames) return true;
     }
     return false;
+  }
+  // click a menu entry the way a mouse does: move over it, then press on whatever is drawn at its middle
+  async function pickMenuItem(item) {
+    const r = item.getBoundingClientRect();
+    await mouseAt(item, r.left + r.width / 2, r.top + r.height / 2, "click");
   }
   // the "Add Shift" entry of the right-click menu
   async function waitAddShiftItem(ms) {
@@ -723,6 +736,7 @@
   const fromPanel = (e) => {
     if (fromPanelOnly(e)) return true;
     if (!recording || !inPattern(realTarget(e))) return false;
+    if (fixingDbl) return true; // the helper itself closing the pattern window (v3.7)
     if (Date.now() - patternWarned > 4000) { patternWarned = Date.now(); toTop({ type: "rec-pattern" }); }
     return true;
   };
@@ -798,7 +812,28 @@
     toTop({ type: "rec-step", step });
     if (!now && !el.matches(FORM)) setTimeout(() => { if (intoBox()) toTop({ type: "rec-update", seq: step.seq, desc: step.desc, text: "" }); }, 0);
   }, true);
-  document.addEventListener("dblclick", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "dblclick"); }, true);
+  // v3.7 (Joseph 10-10: "make double click available"): a double-click on the grid that opens the Schedule
+  // Pattern window is fixed for Zack: the window is closed, the spot is right-clicked > Add Shift, learned as right-click
+  let fixingDbl = false;
+  document.addEventListener("dblclick", (e) => {
+    if (!recording || fromPanel(e) || fixingDbl) return;
+    if (!recordGrid(e, "dblclick")) return;
+    const x = e.clientX, y = e.clientY, el = realTarget(e), g = lastGrid;
+    (async () => {
+      fixingDbl = true;
+      try {
+        for (let k = 0; k < 8 && !patternWin(); k++) await sleep(250);
+        if (!patternWin()) return;
+        await closePattern();
+        g.at = Date.now();
+        toTop({ type: "rec-update", seq: g.seq, how: "context" });
+        await mouseAt(el, x, y, "context");
+        const item = await waitAddShiftItem(2000);
+        if (item) await pickMenuItem(item);
+        toTop({ type: "rec-dbl-fixed", ok: !!item });
+      } finally { fixingDbl = false; }
+    })();
+  }, true);
   document.addEventListener("contextmenu", (e) => { if (recording && !fromPanel(e)) recordGrid(e, "context"); }, true);
   document.addEventListener("input", (e) => {
     if (!recording || fromPanel(e)) return;
@@ -859,6 +894,7 @@
     // a frame that just opened (e.g. the add-shift form) asks whether we're watching
     if (m.type === "hello" && (teaching === "watching" || teaching === "job") && e.source) post(e.source, { type: "rec-start" });
     if ((m.type === "rec-step" || m.type === "rec-update") && onRecStep) onRecStep(m);
+    if (m.type === "rec-dbl-fixed" && IS_TOP && teaching === "watching") { patternSeen = !m.ok; try { live("info", m.ok ? "Show me once: double-click opened Schedule Pattern; closed it and opened Add Shift by right-click" : "Show me once: double-click opened Schedule Pattern; closed it, right-click menu had no Add Shift"); } catch (er) { /* optional */ } renderTeach(); }
     if (m.type === "rec-pattern" && IS_TOP && teaching === "watching") { patternSeen = true; try { live("info", "Show me once: Schedule Pattern window opened, steps there ignored"); } catch (er) { /* optional */ } renderTeach(); }
     if (m.type === "ack") acked.add(m.reqId);
     if (m.type === "result" && pending[m.reqId]) { pending[m.reqId](m); delete pending[m.reqId]; }
@@ -1036,6 +1072,9 @@
       let r;
       try { r = await chrome.runtime.sendMessage({ type: "live-poll" }); } catch (e) { continue; }
       if (!r || !r.content) continue;
+      // v3.7: a new mailbox (Live turned off and on, or a new webhook) counts from #1 again -> don't skip its lines
+      const top = Math.max(0, ...[...r.content.matchAll(/^`#(\d+)`/gm)].map((x) => Number(x[1])));
+      if (top < seenN) seenN = 0;
       for (const line of r.content.split("\n")) {
         const m = line.match(/^`#(\d+)` \*\*(.+?):\*\* ([\s\S]*)$/);
         if (!m || Number(m[1]) <= seenN) continue;
@@ -1145,7 +1184,7 @@
     if (teaching === "watching") {
       el.innerHTML = `<p><b>I'm watching.</b> Add this shift in Kronos the normal way, including pressing Save:</p>
         <div class="sh-card"><b>${esc(example.kronosName)}</b><br>${esc(example.day)} ${esc(example.date)} &middot; ${R.niceTime(example.start)} to ${R.niceTime(example.end)} &middot; ${esc(example.kronosJob)}</div>
-        <p class="sh-small sh-muted"><b>Right-click</b> the empty spot on the grid for ${esc(example.kronosName)} on ${esc(example.day)} and pick <b>Add Shift</b>, fill in the panel, then Save. ${recSteps.length} steps seen so far.</p>
+        <p class="sh-small sh-muted"><b>Double-click</b> (or right-click &gt; <b>Add Shift</b>) the empty spot on the grid for ${esc(example.kronosName)} on ${esc(example.day)}. If Schedule Pattern pops up, I close it and open Add Shift for you. Fill in the panel, then Save. ${recSteps.length} steps seen so far.</p>
         ${patternSeen ? `<div class="sh-warn">That opened the <b>Schedule Pattern</b> window. It changes the person's repeating pattern, so I'm not learning anything from it. Press <b>Cancel</b> in that window, then right-click the empty spot and pick <b>Add Shift</b>.</div>` : ""}
         <ol class="sh-steps">${recSteps.map((s) => `<li>${esc(stepWords(s))}</li>`).join("")}</ol>
         <div class="sh-row"><button class="sh-primary" id="recdone">I saved it - done</button><button id="reccancel">Cancel</button></div>`;
