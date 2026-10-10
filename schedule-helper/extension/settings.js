@@ -37,7 +37,7 @@ globalThis.SH_DEFAULTS = {
 
   // Typing speed and pauses (milliseconds). A normal person's pace.
   pace: {
-    keyMin: 15, keyMax: 35,        // between letters (v3.9, Zack 10-10: "types at a faster pace")
+    keyMin: 60, keyMax: 110,       // between letters (v3.9 sped up; 3.13 eased back: 15-35 garbled Kronos time boxes)
     stepMin: 500, stepMax: 1200,   // between clicks/fields
     shiftMin: 1500, shiftMax: 3000 // between shifts
   },

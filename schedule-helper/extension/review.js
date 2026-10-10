@@ -9,6 +9,14 @@
   let raw = "", filename = "", shifts = [], off = new Set(), jobEdits = {}, usual = {};
   prefs.usualJob = prefs.usualJob || {};
 
+  // one roster per location (Zack 10-10: two locations, each uploaded separately); settings remembered per location
+  prefs.locations = prefs.locations || {};
+  const locKey = (l) => String(l || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  function showLocs() { $("#locs").innerHTML = Object.keys(prefs.locations).map((l) => `<option value="${esc(l)}">`).join(""); }
+  function pickLoc(l) { $("#loc").value = l || ""; const k = Object.keys(prefs.locations).find((x) => locKey(x) === locKey(l)); $("#xferall").checked = !!(k && prefs.locations[k].transferAll); }
+  showLocs(); pickLoc(prefs.location || "");
+  $("#loc").addEventListener("change", () => pickLoc($("#loc").value.trim()));
+
   $("#openk").href = D.kronosUrl;
   document.querySelector(`[name=confirm][value=${prefs.confirm}]`).checked = true;
   document.querySelector(`[name=pace][value=${prefs.paceName}]`).checked = true;
@@ -20,6 +28,8 @@
       raw = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
     } else raw = await f.text();
     $("#week").value = R.weekFromFilename(filename) || $("#week").value;
+    const named = Object.keys(prefs.locations).find((l) => locKey(l) && locKey(filename).includes(locKey(l)));
+    if (named) pickLoc(named);
     off = new Set(); jobEdits = {};
     build();
   }
@@ -101,8 +111,15 @@
     const pace = prefs.paceName === "slow"
       ? { keyMin: 140, keyMax: 300, stepMin: 1000, stepMax: 2200, shiftMin: 3000, shiftMax: 5000 } : D.pace;
     const kept = shifts.filter((s) => !off.has(s.id));
+    const location = $("#loc").value.trim(), transferAll = $("#xferall").checked;
+    if (location) {
+      for (const k of Object.keys(prefs.locations)) if (locKey(k) === locKey(location)) delete prefs.locations[k];
+      prefs.locations[location] = { transferAll };
+    }
+    prefs.location = location;
+    showLocs();
     await S.set("sh_prefs", prefs);
-    await S.set("sh_data", { week: $("#week").value, filename, shifts: kept, settings: { confirm: prefs.confirm, pace }, loadedAt: Date.now() });
+    await S.set("sh_data", { week: $("#week").value, filename, location, transferAll, shifts: kept, settings: { confirm: prefs.confirm, pace }, loadedAt: Date.now() });
     $("#used").innerHTML = `&#10003; Sent ${kept.length} shifts. Open (or refresh) the Kronos Schedule Planner - the Schedule Helper panel appears in the bottom-right corner.`;
   });
   $("#cleardone").addEventListener("click", async () => { if (confirm("Untick every shift (mark all as not done)?")) await S.set("sh_done", {}); });
