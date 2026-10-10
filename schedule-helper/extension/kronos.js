@@ -1499,7 +1499,8 @@
       // pressing Apply sooner saves the usual job. Wait for that window to close, then a bit more.
       const last = recipe.jobSteps[recipe.jobSteps.length - 1];
       // Kronos's Transfer window has its own Apply; if the recording stopped at Ok, it's still open -- press it
-      const tApply = { action: "click", desc: { tag: "button", id: "transfer-dialog-summary-apply" }, text: "Apply", frameKey: last.frameKey };
+      // (it is on the schedule page itself, like the first job step -- not inside the job-picker frame)
+      const tApply = { action: "click", desc: { tag: "button", id: "transfer-dialog-summary-apply" }, text: "Apply", frameKey: recipe.jobSteps[0].frameKey };
       const tOpen = await request({ type: "there", frameKey: tApply.frameKey, desc: tApply.desc, wantText: null }, 3000);
       if (tOpen.ok && tOpen.there) {
         await sleep(rand(pace.stepMin, pace.stepMax));
