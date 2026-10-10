@@ -8,13 +8,14 @@ Necrobinder card (88), plus 3 token cards and 1 status card.
 **Download:** the `sts2-card-art-v1` zip on the Releases page (about 560 MB). It holds the `NewArtwork`
 folder.
 
-**Needs the Card Art Editor mod by ysg05:** https://www.nexusmods.com/slaythespire2/mods/293
-That mod isn't included here; it's their work, so get it from its own page.
+**Card Art Editor mod (by ysg05) is included** in [`mod/card_art_editor`](mod/card_art_editor) and as the small
+`card_art_editor-mod-v0.1.0.zip` on the same release. All credit for the mod goes to its author, ysg05; the original
+page is https://www.nexusmods.com/slaythespire2/mods/293.
 
 ```
 INSTALL
-1. Install Card Art Editor from Nexus (link above). It makes the folder
-   Slay the Spire 2\mods\card_art_editor
+1. Copy the "card_art_editor" folder (from mod/ here, or the small mod zip) into
+   Slay the Spire 2\mods\
    (Steam > right-click the game > Manage > Browse local files to find the game folder).
 2. Put the "NewArtwork" folder from this zip inside that "card_art_editor" folder.
    If it asks, replace the existing files.
