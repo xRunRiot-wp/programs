@@ -528,8 +528,11 @@
       // v3.4 (Zack 10-09: "I either have to double click the person, the day, or right click to get that option"):
       // a plain click doesn't open Add Shift in his Kronos -> try what he did, then double-click, then
       // right-click > Add Shift, then a plain click, until the panel shows up
+      // v3.6 (Zack 10-10): in his Kronos a double-click can open the "Schedule Pattern" window instead -> right-click >
+      // Add Shift first, a pattern window is closed and never counted as Add Shift, and what worked is tried first next time
+      await closePattern();
       const before = panelSig();
-      const hows = [...new Set([step.how && step.how !== "click" ? step.how : "dblclick", "dblclick", "context", "click"])];
+      const hows = [...new Set([openHow, "context", step.how && step.how !== "click" ? step.how : "dblclick", "dblclick", "click"].filter(Boolean))];
       for (const how of hows) {
         await mouseAt(el, x, y, how);
         if (how === "context") {
@@ -537,9 +540,11 @@
           if (!item) { pressKey(document.activeElement || document.body, "Escape"); await sleep(300); continue; }
           clickEl(item);
         }
-        if (await panelOpened(before, 3000)) return { ok: true };
+        const got = await panelOpened(before, 3000);
+        if (got === "pattern") { await closePattern(); continue; }
+        if (got) { openHow = how; return { ok: true }; }
       }
-      return { ok: false, why: `I clicked ${g.name}'s spot on ${g.md}, but Kronos didn't open Add Shift. Open it yourself (double-click the spot, or right-click > Add Shift) and press I did it.` };
+      return { ok: false, why: `I clicked ${g.name}'s spot on ${g.md}, but Kronos didn't open Add Shift. Open it yourself (right-click the spot > Add Shift) and press I did it. If the Schedule Pattern window opened, close it with Cancel first.` };
     }
     return { ok: false, why: `I couldn't find a free spot for ${g.name} on ${g.md} on the grid. Click it yourself and press I did it.` };
   }
@@ -550,9 +555,28 @@
     return { boxes: timeBoxes().length, inputs: deepAll("input:not([type=hidden]),select,textarea").filter(visible).length,
       dialogs: [...document.querySelectorAll("[role=dialog],[aria-modal=true]")].filter(visible).length, title: t, frames: document.querySelectorAll("iframe").length };
   }
+  // Kronos's "Schedule Pattern" window (opens on a double-click in Zack's Kronos): edits the repeating pattern, never use it
+  const PATTERN = ".schedule-pattern,.pattern-body,schedule-pattern-tab,schedule-pattern-cell";
+  let openHow = null;     // how Add Shift opened last time (tried first)
+  const inPattern = (el) => !!(el && el.closest && el.closest(PATTERN));
+  function patternWin() {
+    const p = deepAll(PATTERN).find(visible);
+    return p ? (p.closest("[role=dialog],.modal") || p) : null;
+  }
+  async function closePattern() {
+    for (let k = 0; k < 3; k++) {
+      const w = patternWin();
+      if (!w) return true;
+      const cancel = [...w.querySelectorAll("button,[role=button],a")].find((b) => /^(cancel|close|×|✕)$/i.test((b.innerText || b.getAttribute("aria-label") || b.title || "").trim()));
+      if (cancel) clickEl(cancel); else pressKey(document.activeElement || document.body, "Escape");
+      await sleep(700);
+    }
+    return !patternWin();
+  }
   async function panelOpened(before, ms) {
     for (const t0 = Date.now(); Date.now() - t0 < ms;) {
       await sleep(250);
+      if (patternWin()) return "pattern";
       const n = panelSig();
       if (n.boxes > before.boxes || n.inputs > before.inputs + 1 || n.dialogs > before.dialogs || n.title > before.title || n.frames > before.frames) return true;
     }
@@ -693,7 +717,15 @@
 
   // ---------------- watching ("Show me once") in every frame ----------------
   let recording = false, lastType = null, seqN = 0;
-  const fromPanel = (e) => panelHost && e.composedPath().includes(panelHost);
+  const fromPanelOnly = (e) => panelHost && e.composedPath().includes(panelHost);
+  // v3.6: steps done inside Kronos's Schedule Pattern window are never learned; the helper warns instead
+  let patternWarned = 0;
+  const fromPanel = (e) => {
+    if (fromPanelOnly(e)) return true;
+    if (!recording || !inPattern(realTarget(e))) return false;
+    if (Date.now() - patternWarned > 4000) { patternWarned = Date.now(); toTop({ type: "rec-pattern" }); }
+    return true;
+  };
   const realTarget = (e) => { const p = e.composedPath && e.composedPath()[0]; return p && p.nodeType === 1 ? p : e.target; }; // inside shadow roots too
   // "Point to it": the next click on the page is the thing the helper couldn't find
   let pointing = false;
@@ -793,7 +825,7 @@
 
   // ---------------- messages ----------------
   const pending = {}, acked = new Set(), handled = new Set();
-  let teaching = false, recSteps = [], example = null;
+  let teaching = false, recSteps = [], example = null, patternSeen = false;
   let onRecStep = null, checkReplies = null, snapReplies = null, onPointPick = null;
   window.addEventListener("message", async (e) => {
     let m = e.data;
@@ -827,6 +859,7 @@
     // a frame that just opened (e.g. the add-shift form) asks whether we're watching
     if (m.type === "hello" && (teaching === "watching" || teaching === "job") && e.source) post(e.source, { type: "rec-start" });
     if ((m.type === "rec-step" || m.type === "rec-update") && onRecStep) onRecStep(m);
+    if (m.type === "rec-pattern" && IS_TOP && teaching === "watching") { patternSeen = true; try { live("info", "Show me once: Schedule Pattern window opened, steps there ignored"); } catch (er) { /* optional */ } renderTeach(); }
     if (m.type === "ack") acked.add(m.reqId);
     if (m.type === "result" && pending[m.reqId]) { pending[m.reqId](m); delete pending[m.reqId]; }
     if (m.type === "snap-result" && snapReplies && snapReplies.reqId === m.reqId) snapReplies.list.push(m.snap);
@@ -1037,7 +1070,9 @@
       st.action = "grid"; st.how = "click";
       st.grid = { name: "", md: band ? band.day : "", rel: band ? (dbg.at[0] - band.left) / band.width : 0.5, dy: 0 };
     }
-    r.broken = r.steps.some((x) => (x.action === "type" || x.action === "select") && x.desc && !/^(input|select|textarea)$/.test(x.desc.tag));
+    r.broken = r.steps.some((x) => (x.action === "type" || x.action === "select") && x.desc && !/^(input|select|textarea)$/.test(x.desc.tag))
+      // v3.6: a recording made in the Schedule Pattern window (Zack 10-10) has to be redone the Add Shift way
+      || r.steps.some((x) => x.desc && (/schedule-pattern/.test(x.desc.path || "") || x.desc.name === "endDateRadio"));
     return r;
   }
   async function loadAll() {
@@ -1110,7 +1145,8 @@
     if (teaching === "watching") {
       el.innerHTML = `<p><b>I'm watching.</b> Add this shift in Kronos the normal way, including pressing Save:</p>
         <div class="sh-card"><b>${esc(example.kronosName)}</b><br>${esc(example.day)} ${esc(example.date)} &middot; ${R.niceTime(example.start)} to ${R.niceTime(example.end)} &middot; ${esc(example.kronosJob)}</div>
-        <p class="sh-small sh-muted">Click the empty spot on the grid for ${esc(example.kronosName)} on ${esc(example.day)}, fill in the panel, then Save. ${recSteps.length} steps seen so far.</p>
+        <p class="sh-small sh-muted"><b>Right-click</b> the empty spot on the grid for ${esc(example.kronosName)} on ${esc(example.day)} and pick <b>Add Shift</b>, fill in the panel, then Save. ${recSteps.length} steps seen so far.</p>
+        ${patternSeen ? `<div class="sh-warn">That opened the <b>Schedule Pattern</b> window. It changes the person's repeating pattern, so I'm not learning anything from it. Press <b>Cancel</b> in that window, then right-click the empty spot and pick <b>Add Shift</b>.</div>` : ""}
         <ol class="sh-steps">${recSteps.map((s) => `<li>${esc(stepWords(s))}</li>`).join("")}</ol>
         <div class="sh-row"><button class="sh-primary" id="recdone">I saved it - done</button><button id="reccancel">Cancel</button></div>`;
       $("#recdone").onclick = () => { broadcast({ type: "rec-stop" }); teaching = "review"; autoMap(); renderTeach(); };
@@ -1164,7 +1200,7 @@
     if ($("#jobforget")) $("#jobforget").onclick = async () => { await S.set("sh_recipe", { ...recipe, jobSteps: null }); await loadAll(); renderTeach(); };
     $("#recgo").onclick = () => {
       example = data.shifts.find((s) => s.id === $("#ex").value);
-      recSteps = []; teaching = "watching";
+      recSteps = []; teaching = "watching"; patternSeen = false;
       broadcast({ type: "rec-start" });
       renderTeach();
     };
@@ -1213,7 +1249,7 @@
     if (running) return;
     if (!data || !data.shifts.length) { el.innerHTML = `<p class="sh-muted">Load the week first (Schedule Helper button in Chrome's toolbar).</p>`; return; }
     if (!recipe) { el.innerHTML = `<p>Before auto-fill can work, use <b>Show me once</b> to add one shift by hand while I watch.</p>`; return; }
-    if (recipe.broken) { el.innerHTML = `<div class="sh-warn">Your <b>Show me once</b> recording was made with an older version and won't work on this Kronos screen.</div><p>Please do <b>Show me once</b> again (one shift, about a minute). After that, auto-fill picks the right person and day by itself.</p>`; return; }
+    if (recipe.broken) { el.innerHTML = `<div class="sh-warn">Your <b>Show me once</b> recording won't work: it was made with an older version or in the Schedule Pattern window.</div><p>Please do <b>Show me once</b> again (one shift, about a minute), opening the shift with <b>right-click &gt; Add Shift</b>. After that, auto-fill picks the right person and day by itself.</p>`; return; }
     const days = [...new Set(data.shifts.map((s) => s.day))];
     const left = (d) => data.shifts.filter((s) => s.day === d && !done[s.id]).length;
     const c = settings().confirm;
