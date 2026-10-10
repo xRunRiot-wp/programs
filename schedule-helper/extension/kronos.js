@@ -4,8 +4,12 @@
 //    at a normal pace, or click it). Kronos puts its screens inside frames, so
 //    frames talk to the top page with window.postMessage.
 //  * in the TOP page only: the Schedule Helper panel (Copy / Auto-fill / Show me once).
-// Nothing here logs in, sends data anywhere, or calls Kronos behind the screen:
-// it only uses the same buttons and boxes Zack does, one shift at a time.
+// Nothing here logs in or calls Kronos behind the screen: it only uses the same
+// buttons and boxes Zack does, one shift at a time. It sends nothing anywhere
+// unless Zack turns on "Live help" (the Live button, with a code from Joseph):
+// then what the helper does (steps, stuck messages, the screen description from
+// the debug file) goes to Joseph's private Discord channel, with every
+// "Last, First" name shortened to initials. Live help turns itself off after 2 hours.
 (function () {
   if (window.__scheduleHelper) return;
   window.__scheduleHelper = true;
@@ -17,6 +21,38 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
   let panelHost = null;
+
+  // ---------------- Live help (off unless Zack turns it on) ----------------
+  // Names are shortened before anything leaves the page: "Avery, Jamie" -> "A., J."
+  const maskNames = (s) => String(s ?? "").replace(/([A-Z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+)*),\s*([A-Z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+)*)/g,
+    (m, a, b) => `${a[0]}., ${b[0]}.`);
+  let liveOn = false;
+  const LIVE_HOURS = 2;
+  function liveCheck() {
+    try {
+      chrome.storage.local.get("sh_live", (v) => {
+        const l = v && v.sh_live;
+        liveOn = !!(l && l.on && l.code && Date.now() - (l.since || 0) < LIVE_HOURS * 3600e3);
+        if (l && l.on && !liveOn) chrome.storage.local.set({ sh_live: { ...l, on: false } });
+        if (typeof window.__shLiveShown === "function") window.__shLiveShown(liveOn);
+      });
+    } catch (e) { liveOn = false; }
+  }
+  liveCheck();
+  try { chrome.storage.onChanged.addListener((c) => { if (c.sh_live) liveCheck(); }); } catch (e) { /* ignore */ }
+  // kind: step | ok | stuck | asked | answer | note | error | info; file: an object sent as a JSON attachment
+  function live(kind, text, file) {
+    if (!liveOn) return;
+    try {
+      chrome.runtime.sendMessage({ type: "live", kind, text: maskNames(text).slice(0, 600),
+        file: file ? maskNames(JSON.stringify(file, null, 1)) : null, frame: IS_TOP ? "top" : location.pathname.slice(0, 60) });
+    } catch (e) { /* extension reloaded: ignore */ }
+  }
+  const plain = (html) => String(html).replace(/<br\s*\/?>/gi, " | ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+  // only the helper's own errors (Kronos' errors are none of our business)
+  window.addEventListener("error", (e) => { if (/^chrome-extension:/.test(e.filename || "")) live("error", `${e.message} @ ${e.filename.split("/").pop()}:${e.lineno}`); });
+  window.addEventListener("unhandledrejection", (e) => { const t = String(e.reason && (e.reason.stack || e.reason)); if (/chrome-extension:/.test(t)) live("error", `promise: ${t.slice(0, 300)}`); });
 
   // ---------------- messaging between frames ----------------
   function post(win, msg) { try { win.postMessage({ __sh: 1, ...msg }, "*"); } catch (e) { /* frame gone */ } }
@@ -825,7 +861,12 @@
   const shadow = panelHost.attachShadow({ mode: "open" });
   shadow.innerHTML = `<link rel="stylesheet" href="${chrome.runtime.getURL("ui.css")}">
     <div class="sh-panel sh-root">
-      <div class="sh-head"><b>Schedule Helper v${chrome.runtime.getManifest().version.replace(/\.0$/, "")}</b><span class="sh-small" id="count"></span><button id="min" title="Shrink / grow">&#8211;</button></div>
+      <div class="sh-head"><b>Schedule Helper v${chrome.runtime.getManifest().version.replace(/\.0$/, "")}</b><span class="sh-small" id="count"></span><button id="live" class="sh-livebtn" title="Live help: Joseph sees what the helper is doing">Live</button><button id="min" title="Shrink / grow">&#8211;</button></div>
+      <div class="sh-livebar" id="livebar" hidden>
+        <div class="sh-livehead">&#9679; Live help is ON &ndash; Joseph and Cisco can see what the helper does. <button id="liveoff">Turn off</button></div>
+        <div class="sh-livemsgs" id="livemsgs"><div class="sh-muted">Messages from Joseph / Cisco show up here.</div></div>
+        <div class="sh-livesend"><input id="livetext" placeholder="Type a message (what you see, what you expected)..." maxlength="600"><button id="livemsg">Send</button></div>
+      </div>
       <div class="sh-tabs"><button data-tab="copy">Copy</button><button data-tab="auto">Auto-fill</button><button data-tab="teach">Show me once</button></div>
       <div class="sh-body"><div id="copy"></div><div id="auto"></div><div id="teach"></div></div>
     </div>`;
@@ -864,6 +905,112 @@
       });
     } catch (e) { /* ignore */ }
     $("#min").addEventListener("click", () => panel.classList.toggle("sh-min"));
+  })();
+
+  // Live help switch: the code (from Joseph, privately) is a Discord webhook link; it's remembered
+  window.__shLiveShown = (on) => { $("#livebar").hidden = !on; $("#live").classList.toggle("sh-liveon", on); };
+  window.__shLiveShown(liveOn);
+  $("#live").addEventListener("click", () => {
+    chrome.storage.local.get("sh_live", (v) => {
+      const l = (v && v.sh_live) || {};
+      if (liveOn) { chrome.storage.local.set({ sh_live: { ...l, on: false } }); return; }
+      let code = l.code || "";
+      if (!code || !/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/[\w-]+$/.test(code)) {
+        code = (prompt("Live help lets Joseph watch what the helper does (staff names are shortened to initials).\n\nPaste the Live help code Joseph sent you:") || "").trim();
+        if (!/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/[\w-]+$/.test(code)) {
+          if (code) alert("That doesn't look like the Live help code. Copy the whole thing Joseph sent (it starts with https://discord.com/api/webhooks/).");
+          return;
+        }
+      }
+      chrome.storage.local.set({ sh_live: { on: true, code, since: Date.now() } }, () => {
+        liveOn = true; window.__shLiveShown(true);
+        live("info", `Live help ON - helper v${chrome.runtime.getManifest().version}, tab: ${tab}, screen ${innerWidth}x${innerHeight}, ${navigator.userAgent.match(/Chrome\/[\d.]+/) || ""}`);
+      });
+    });
+  });
+  $("#liveoff").addEventListener("click", () => { live("info", "Live help turned off by Zack"); chrome.storage.local.get("sh_live", (v) => chrome.storage.local.set({ sh_live: { ...(v.sh_live || {}), on: false } })); });
+  // the little chat: Zack's lines go out with a fresh screen description; replies come back through a "mailbox"
+  // message that the helper posted itself (Joseph/Cisco edit it; the helper reads it every 4 s with the same code)
+  const chatLines = [];
+  function addLine(who, text, mine) {
+    const box = $("#livemsgs");
+    if (!chatLines.length) box.innerHTML = "";
+    chatLines.push([who, text]);
+    const d = document.createElement("div");
+    d.className = mine ? "sh-lm sh-lm-me" : "sh-lm";
+    d.innerHTML = `<b>${esc(who)}:</b> ${esc(text)}`;
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+    if (!mine) { panel.classList.remove("sh-min"); panel.classList.add("sh-newmsg"); setTimeout(() => panel.classList.remove("sh-newmsg"), 4000); }
+  }
+  async function sendLine() {
+    const inp = $("#livetext"), t = inp.value.trim();
+    if (!t || !liveOn) return;
+    inp.value = ""; addLine("You", t, true);
+    const reqId = `s${++reqN}`;               // a fresh screen description goes with it
+    snapReplies = { reqId, list: [] };
+    broadcast({ type: "snap", reqId });
+    await sleep(1200);
+    const frames = snapReplies ? snapReplies.list : []; snapReplies = null;
+    live("note", `ZACK SAYS: ${t}`, { helper: chrome.runtime.getManifest().version, tab, screen_now: frames });
+  }
+  $("#livemsg").addEventListener("click", sendLine);
+  $("#livetext").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendLine(); } e.stopPropagation(); });
+  // Remote fixes (Joseph 10-10: "make it so you can troubleshoot and fix the process for him"): a mailbox line
+  // "⚙ {json}" is a change to the helper's OWN data -- never code. Allowed:
+  //   {"say": "..."}                             shown to Zack with the fix
+  //   {"step": 2, "part": "job"?, "set": {...}}  change recorded step 2 (0 = first) of the main recording or part 2
+  //                                              (keys: how, action, desc, text, value, map, frameKey, isSave)
+  //   {"drop": 3, "part": ...}                   remove a recorded step
+  //   {"pace": {...}} / {"confirm": "day"|"shift"}  settings
+  //   {"retry": true}                            press "Try again" on the stuck card
+  //   {"send": "recipe"|"screen"}                send the recording / a fresh screen description to Joseph
+  async function applyFix(json) {
+    let c;
+    try { c = JSON.parse(json); } catch (e) { live("error", "fix not understood: " + json.slice(0, 120)); return; }
+    const did = [];
+    try {
+      const list = c.part === "job" ? recipe && recipe.jobSteps : recipe && recipe.steps;
+      if ((c.step !== undefined || c.drop !== undefined) && !list) did.push("no recording yet");
+      if (c.step !== undefined && list && list[c.step]) {
+        const ok = ["how", "action", "desc", "text", "value", "map", "frameKey", "isSave"];
+        for (const [k, v] of Object.entries(c.set || {})) if (ok.includes(k)) { if (v === null) delete list[c.step][k]; else list[c.step][k] = v; }
+        did.push(`step ${c.step + 1} changed`);
+      }
+      if (c.drop !== undefined && list && list[c.drop]) { list.splice(c.drop, 1); did.push(`step ${c.drop + 1} removed`); }
+      if (recipe && did.some((d) => /changed|removed/.test(d))) { delete recipe.broken; await S.set("sh_recipe", recipe); }
+      if (c.pace || c.confirm) {
+        data.settings = { ...(data.settings || {}), ...(c.pace ? { pace: { ...((data.settings || {}).pace || {}), ...c.pace } } : {}), ...(c.confirm ? { confirm: c.confirm } : {}) };
+        await S.set("sh_data", data); did.push("settings changed");
+      }
+      if (c.send === "recipe") { live("info", "recording sent", { helper: chrome.runtime.getManifest().version, recipe }); did.push("recording sent"); }
+      if (c.send === "screen") {
+        const reqId = `s${++reqN}`; snapReplies = { reqId, list: [] }; broadcast({ type: "snap", reqId }); await sleep(1200);
+        const frames = snapReplies ? snapReplies.list : []; snapReplies = null;
+        live("info", "screen sent", { helper: chrome.runtime.getManifest().version, tab, screen_now: frames }); did.push("screen sent");
+      }
+      if (c.retry) { const b = $("#auto [data-ans=retry]"); if (b) { b.click(); did.push("pressed Try again"); } else did.push("nothing to retry"); }
+    } catch (e) { did.push("failed: " + e.message); }
+    live("info", `FIX APPLIED: ${did.join(", ") || "nothing"}`);
+    addLine("Cisco", `🔧 ${c.say || "I adjusted the helper."}${did.length ? ` (${did.join(", ")})` : ""}`, false);
+    if (tab === "teach") renderTeach();
+  }
+  // mailbox lines look like:  `#3` **Cisco:** text
+  let seenN = 0;
+  (async function pollReplies() {
+    for (;;) {
+      await sleep(4000);
+      if (!liveOn) continue;
+      let r;
+      try { r = await chrome.runtime.sendMessage({ type: "live-poll" }); } catch (e) { continue; }
+      if (!r || !r.content) continue;
+      for (const line of r.content.split("\n")) {
+        const m = line.match(/^`#(\d+)` \*\*(.+?):\*\* ([\s\S]*)$/);
+        if (!m || Number(m[1]) <= seenN) continue;
+        seenN = Number(m[1]);
+        if (m[3].startsWith("⚙ ")) { await applyFix(m[3].slice(2)); continue; }
+        addLine(m[2], m[3], false);
+      }
+    }
   })();
 
   let tab = "copy";
@@ -1026,7 +1173,10 @@
     if (teaching === "job") return onJobRec && onJobRec(m);
     if (teaching !== "watching") return;
     if (m.type === "rec-update") { const s = recSteps.find((x) => x.seq === m.seq); if (s) fixStep(s, m); }
-    else recSteps.push({ ...m.step, frameKey: m.frameKey });
+    else {
+      recSteps.push({ ...m.step, frameKey: m.frameKey });
+      try { live("info", `Show me once recorded #${recSteps.length}: ${stepWords(recSteps[recSteps.length - 1])}`); } catch (e) { /* words are optional */ }
+    }
     renderTeach();
   };
   function fixStep(s, m) {
@@ -1074,10 +1224,11 @@
   }
   function ask(html, buttons) {
     const el = $("#auto");
+    live("asked", `${plain(html)}  [${buttons.map(([, l]) => plain(l)).join(" / ")}]`);
     return new Promise((res) => {
       el.innerHTML = `${html}<div class="sh-row">${buttons.map(([k, l, cls]) => `<button data-ans="${k}" class="${cls || ""}">${l}</button>`).join("")}</div>
         <button class="sh-stop sh-danger" data-ans="stop">Stop</button>`;
-      el.onclick = (e) => { const b = e.target.closest("[data-ans]"); if (b) { el.onclick = null; res(b.dataset.ans); } };
+      el.onclick = (e) => { const b = e.target.closest("[data-ans]"); if (b) { el.onclick = null; live("answer", `Zack pressed: ${plain(b.textContent)}`); res(b.dataset.ans); } };
     });
   }
   function showProgress(html) {
@@ -1152,6 +1303,7 @@
       // Kronos is slow and redraws its panel (even its frame): ask in short rounds for up to 15 s,
       // so whichever frame has the thing once it settles can answer
       const t0 = Date.now(), limit = st.action === "grid" || st.action === "key" ? 0 : 15000;
+      live("step", `${s.kronosName} ${s.date}: ${stepWords({ ...st, value, grid: st.action === "grid" ? { ...(st.grid || {}), name: s.kronosName, md: mdOf(s) } : st.grid })}`);
       let res;
       do {
         const since = Date.now() - t0;
@@ -1160,7 +1312,19 @@
         if (res.ok || res.fatal) break;
         if (limit) await sleep(300);
       } while (Date.now() - t0 < limit);
-      if (res.ok) return "ok";
+      if (res.ok) {   // only slow steps are worth a line (each step's start is already sent)
+        if (Date.now() - t0 > 4000) live("ok", `done, but it took ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+        return "ok";
+      }
+      if (liveOn) {   // stuck: send the screen description straight away (what "Save debug file" would hold)
+        const reqId = `s${++reqN}`;
+        snapReplies = { reqId, list: [] };
+        broadcast({ type: "snap", reqId });
+        await sleep(1200);
+        const frames = snapReplies ? snapReplies.list : []; snapReplies = null;
+        live("stuck", `${res.why}${res.looking ? ` | looking for ${res.looking}` : ""}`,
+          { helper: chrome.runtime.getManifest().version, step: { action: st.action, how: st.how, grid: st.grid, desc: st.desc, frameKey: st.frameKey }, why: res.why, frames });
+      }
       let a, saved = false;
       for (;;) {
         a = await ask(`${head}${shiftLine(s)}<div class="sh-warn">${isJob ? "Changing the job: " : ""}${esc(res.why)}${res.looking ? `<br><span class="sh-small">Looking for ${esc(res.looking)}.</span>` : ""}</div>
