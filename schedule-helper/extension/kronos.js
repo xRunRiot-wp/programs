@@ -1498,6 +1498,20 @@
       // Kronos needs a moment after the job window's Ok before the new job is on the shift;
       // pressing Apply sooner saves the usual job. Wait for that window to close, then a bit more.
       const last = recipe.jobSteps[recipe.jobSteps.length - 1];
+      // Kronos's Transfer window has its own Apply; if the recording stopped at Ok, it's still open -- press it
+      const tApply = { action: "click", desc: { tag: "button", id: "transfer-dialog-summary-apply" }, text: "Apply", frameKey: last.frameKey };
+      const tOpen = await request({ type: "there", frameKey: tApply.frameKey, desc: tApply.desc, wantText: null }, 3000);
+      if (tOpen.ok && tOpen.there) {
+        await sleep(rand(pace.stepMin, pace.stepMax));
+        showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Pressing Apply on the Transfer window...</span>`);
+        const r = await doStep(tApply, s, pace, head, true);
+        if (r !== "ok") return r;
+        for (let k = 0; k < 16; k++) {
+          const t = await request({ type: "there", frameKey: tApply.frameKey, desc: tApply.desc, wantText: null }, 3000);
+          if (!t.ok || !t.there) break;
+          await sleep(500);
+        }
+      }
       if (last.action === "click") {
         for (let k = 0; k < 16; k++) {
           const t = await request({ type: "there", frameKey: last.frameKey, desc: last.desc, wantText: null }, 3000);
