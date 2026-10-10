@@ -1292,7 +1292,10 @@
   let running = false, stopAsked = false;
   function settings() {
     const d = globalThis.SH_DEFAULTS;
-    return { confirm: data?.settings?.confirm || d.confirm, pace: { ...d.pace, ...(data?.settings?.pace || {}) } };
+    const saved = { ...(data?.settings?.pace || {}) };
+    // v3.9: weeks loaded before 3.9 saved the old typing speed (70-160 ms a letter) -> use the faster one
+    if (saved.keyMin === 70 && saved.keyMax === 160) { delete saved.keyMin; delete saved.keyMax; }
+    return { confirm: data?.settings?.confirm || d.confirm, order: data?.settings?.order || "person", pace: { ...d.pace, ...saved } };
   }
   function renderAuto() {
     const el = $("#auto");
@@ -1300,11 +1303,10 @@
     if (!data || !data.shifts.length) { el.innerHTML = `<p class="sh-muted">Load the week first (Schedule Helper button in Chrome's toolbar).</p>`; return; }
     if (!recipe) { el.innerHTML = `<p>Before auto-fill can work, use <b>Show me once</b> to add one shift by hand while I watch.</p>`; return; }
     if (recipe.broken) { el.innerHTML = `<div class="sh-warn">Your <b>Show me once</b> recording won't work: it was made with an older version or in the Schedule Pattern window.</div><p>Please do <b>Show me once</b> again (one shift, about a minute), opening the shift with <b>right-click &gt; Add Shift</b>. After that, auto-fill picks the right person and day by itself.</p>`; return; }
-    const days = [...new Set(data.shifts.map((s) => s.day))];
-    const left = (d) => data.shifts.filter((s) => s.day === d && !done[s.id]).length;
-    const c = settings().confirm;
-    el.innerHTML = `<p>I'll type each shift into Kronos myself, one at a time at a normal pace. ${c === "shift" ? "You approve <b>every shift</b> before I save it." : "You approve <b>each day's list</b> before I start it."} You can stop any time.</p>
-      <ul class="sh-small">${days.map((d) => `<li>${d}: ${left(d)} to do</li>`).join("")}</ul>
+    const groups = autoGroups();
+    const c = settings().confirm, byPerson = settings().order === "person";
+    el.innerHTML = `<p>I'll type each shift into Kronos myself, ${byPerson ? "one person's whole week at a time" : "one day at a time"}. ${c === "shift" ? "You approve <b>every shift</b> before I save it." : `You approve <b>each ${byPerson ? "person's" : "day's"} list</b> before I start it.`} You can stop any time.</p>
+      <ul class="sh-small">${groups.map((g) => `<li>${esc(g.label)}: ${g.shifts.filter((s) => !done[s.id]).length} to do</li>`).join("")}</ul>
       <div class="sh-row"><button class="sh-primary" id="go">Start</button></div>`;
     $("#go").onclick = runAll;
   }
@@ -1323,15 +1325,23 @@
   }
   const shiftLine = (s) => `<b>${esc(s.kronosName)}</b> ${R.niceTime(s.start)} &ndash; ${R.niceTime(s.end)}${s.overnight ? " (next day)" : ""} &middot; ${s.jobChange ? `<span class="sh-jobtag" title="Usually ${esc(s.usualJob)} in Kronos">&#9888; ${esc(s.kronosJob)} (job change)</span>` : esc(s.kronosJob)}`;
 
+  // v3.9 (Zack 10-10: "type one singular employee's entire schedule in one go, instead of ... scrolling up and down"):
+  // by default one person's whole week at a time (in roster order, days in order); settings.order "day" = the old way
+  function autoGroups() {
+    const order = settings().order;
+    const keyOf = (s) => (order === "day" ? s.day : s.kronosName);
+    const keys = [...new Set(data.shifts.map(keyOf))];
+    return keys.map((k) => ({ label: k, shifts: data.shifts.filter((s) => keyOf(s) === k) }));
+  }
   async function runAll() {
     running = true; stopAsked = false;
     const { confirm, pace } = settings();
     try {
-      const days = [...new Set(data.shifts.map((s) => s.day))];
-      for (const day of days) {
-        let todo = data.shifts.filter((s) => s.day === day && !done[s.id]);
+      for (const grp of autoGroups()) {
+        const day = grp.label, byPerson = settings().order !== "day";
+        let todo = grp.shifts.filter((s) => !done[s.id]);
         if (!todo.length) continue;
-        showProgress(`Checking what's already on the schedule for ${day}...`);
+        showProgress(`Checking what's already on the schedule for ${esc(day)}...`);
         const reqId = `c${++reqN}`;
         checkReplies = { reqId, flagged: [] };
         broadcast({ type: "check", reqId, shifts: todo.map((s) => ({ id: s.id, kronosName: s.kronosName, date: s.date, startText: R.niceTime(s.start) })) });
@@ -1339,9 +1349,9 @@
         const flagged = new Set(checkReplies.flagged);
         checkReplies = null;
         if (stopAsked) break;
-        const ans = await ask(`<p><b>${esc(day)} ${esc(todo[0].date)}</b> &mdash; untick anything you don't want added:</p>
+        const ans = await ask(`<p><b>${esc(day)}${byPerson ? "" : ` ${esc(todo[0].date)}`}</b> &mdash; untick anything you don't want added:</p>
           <ol class="sh-list">${todo.map((s, i) => `<li class="${flagged.has(s.id) ? "sh-flag" : ""}"><input type="checkbox" data-pick="${i}" ${flagged.has(s.id) ? "" : "checked"}><span>${esc(s.day)}</span><span>${shiftLine(s)}</span>${flagged.has(s.id) ? '<span title="Looks like this is already on the schedule">&#9888; already there?</span>' : ""}</li>`).join("")}</ol>`,
-          [["go", "Add the ticked shifts", "sh-primary"], ["skip", "Skip this day"]]);
+          [["go", "Add the ticked shifts", "sh-primary"], ["skip", byPerson ? "Skip this person" : "Skip this day"]]);
         if (ans === "stop") break;
         if (ans === "skip") continue;
         const ticks = [...$("#auto").querySelectorAll("[data-pick]")];
@@ -1397,7 +1407,11 @@
           timeout: limit ? 1500 : undefined, loose: since > 2500, anyFrameNow: since > 3000 }, st.action === "grid" ? 45000 : limit ? 6000 : 20000);
         if (res.ok || res.fatal) break;
         if (limit) await sleep(300);
-      } while (Date.now() - t0 < limit);
+        // v3.9 (Zack 10-10): right after Apply, Kronos's panel is still sliding shut over the schedule and the
+        // next person's row "isn't there" for a moment -> wait up to 10 s for it instead of stopping
+        const rowGone = st.action === "grid" && /row on the schedule/.test(res.why || "");
+        if (rowGone) await sleep(800);
+      } while (Date.now() - t0 < limit || (st.action === "grid" && /row on the schedule/.test(res.why || "") && Date.now() - t0 < 10000));
       if (res.ok) {   // only slow steps are worth a line (each step's start is already sent)
         if (Date.now() - t0 > 4000) live("ok", `done, but it took ${((Date.now() - t0) / 1000).toFixed(1)} s`);
         return "ok";
