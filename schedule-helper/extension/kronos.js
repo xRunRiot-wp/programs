@@ -1495,6 +1495,17 @@
         if (r !== "ok") return r;
         await sleep(rand(pace.stepMin, pace.stepMax));
       }
+      // Kronos needs a moment after the job window's Ok before the new job is on the shift;
+      // pressing Apply sooner saves the usual job. Wait for that window to close, then a bit more.
+      const last = recipe.jobSteps[recipe.jobSteps.length - 1];
+      if (last.action === "click") {
+        for (let k = 0; k < 16; k++) {
+          const t = await request({ type: "there", frameKey: last.frameKey, desc: last.desc, wantText: null }, 3000);
+          if (!t.ok || !t.there) break;
+          await sleep(500);
+        }
+      }
+      await sleep(2500);
       return "ok";
     }
     if (!teach) {
