@@ -53,3 +53,17 @@ button:disabled { opacity: .5; cursor: default; }
 .sh-body { padding: 10px; overflow: auto; }
 .sh-panel.sh-min .sh-tabs, .sh-panel.sh-min .sh-body { display: none; }
 .sh-stop { position: sticky; bottom: 0; margin-top: 8px; width: 100%; }
+
+/* Live help (v3.5) */
+.sh-livebtn { font-size: 11px; padding: 1px 6px; margin-left: 6px; border-radius: 9px; }
+.sh-livebtn.sh-liveon { background: #d32f2f; color: #fff; border-color: #d32f2f; }
+.sh-livebar { background: #fdecea; color: #8a1c14; font-size: 12px; padding: 4px 8px; border-bottom: 1px solid #f5c2bd; }
+.sh-livebar button { font-size: 11px; padding: 1px 6px; }
+.sh-livebar[hidden] { display: none; }
+.sh-livehead { margin-bottom: 3px; }
+.sh-livemsgs { max-height: 110px; overflow-y: auto; background: #fff; border: 1px solid #f5c2bd; border-radius: 4px; padding: 3px 5px; margin: 3px 0; color: #222; }
+.sh-lm { margin: 2px 0; }
+.sh-lm-me { color: #555; }
+.sh-livesend { display: flex; gap: 4px; }
+.sh-livesend input { flex: 1; font-size: 12px; padding: 2px 4px; min-width: 0; }
+.sh-newmsg { box-shadow: 0 0 0 3px #d32f2f !important; }
