@@ -30,6 +30,10 @@ with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
     for name in ("INSTRUCTIONS.html", "INSTRUCTIONS.pdf", "QUICKSTART.html", "QUICKSTART.pdf"):
         z.write(DIST / name, f"ScheduleHelper/{name}")
     z.write(HERE / "README.md", "ScheduleHelper/README.md")
+    # one-click / hourly updater next to the extension folder (v3.19, Joseph 10-11)
+    for f in sorted((HERE / "updater").iterdir()):
+        if f.is_file():
+            z.write(f, f"ScheduleHelper/{f.name}")
     bad = [n for n in z.namelist() if re.search(r"weekly_roster|\.csv$|\.xlsx$", n, re.I)]
     assert not bad, bad
 print("built", zp, zp.stat().st_size, "bytes")

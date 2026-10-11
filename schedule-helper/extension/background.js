@@ -23,6 +23,21 @@ chrome.storage.onChanged.addListener(async (c) => {
 });
 
 const attached = new Set(), detachTimer = {};
+
+// Self-update (Joseph 10-11: "implement changes automatically for him"): "Update Schedule Helper.bat" (or the hourly
+// automatic check) copies the newest release over this folder; when the manifest on disk shows a new version,
+// reload -- but never in the middle of an auto-fill run (kronos.js keeps sh_busy fresh while running).
+chrome.alarms.create("sh-selfupdate", { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener(async (a) => {
+  if (a.name !== "sh-selfupdate") return;
+  try {
+    const disk = await (await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" })).json();
+    if (!disk.version || disk.version === chrome.runtime.getManifest().version) return;
+    const { sh_busy } = await chrome.storage.local.get("sh_busy");
+    if (sh_busy && Date.now() - sh_busy < 90000) return;
+    chrome.runtime.reload();
+  } catch (e) { /* half-copied files: try again next minute */ }
+});
 chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));   // closed bar / tab / timer
 
 chrome.runtime.onMessage.addListener((m, sender, reply) => {

@@ -567,7 +567,7 @@
           if (!(await panelOpened(since, 1000)) && item.isConnected && visible(item)) {
             const tc = await trustedClick(item);
             if (tc && tc.ok && (await panelOpened(since, 2500)) === true) { openHow = "context"; return { ok: true }; }
-            try { live("info", `real-mouse click on Add shift ${tc && tc.ok ? "didn't open it" : "not possible: " + ((tc && tc.why) || "?")}`); } catch (er) { /* optional */ }
+            try { live("info", `real-mouse click on Add shift ${tc && tc.ok ? "didn't open it" : "not possible: " + ((tc && tc.why) || "?")} ${(tc && tc.where) || ""}`); } catch (er) { /* optional */ }
           }
           // v3.8 (Zack 10-10, 3.7 still couldn't press it): the menu is open, so let Zack press "Add shift" himself
           // and carry on by ourselves as soon as the panel shows (no Try again / I did it needed)
@@ -639,7 +639,9 @@
         y += f.top + parseFloat(cs.borderTopWidth || 0) + parseFloat(cs.paddingTop || 0);
       }
     } catch (e) { /* a frame we can't see into: use what we have */ }
-    try { return await chrome.runtime.sendMessage({ type: "trusted-click", x, y }); } catch (e) { return { ok: false, why: e.message }; }
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, on = document.elementFromPoint(cx, cy);
+    const where = `at ${Math.round(x)},${Math.round(y)} (item ${Math.round(cx)},${Math.round(cy)} ${Math.round(r.width)}x${Math.round(r.height)}, top frame ${window === window.top}, zoom ${(window.outerWidth / window.innerWidth).toFixed(2)}, dpr ${window.devicePixelRatio}, on top: ${on ? on.tagName.toLowerCase() + "." + String(on.className || "").slice(0, 30) + (on === el || el.contains(on) ? " (the item)" : " (NOT the item)") : "nothing"})`;
+    try { const res = await chrome.runtime.sendMessage({ type: "trusted-click", x, y }); return { ...(res || {}), where }; } catch (e) { return { ok: false, why: e.message, where }; }
   }
   // the "Add Shift" entry of the right-click menu
   async function waitAddShiftItem(ms) {
@@ -1193,7 +1195,18 @@
     const left = data ? data.shifts.filter((s) => !done[s.id]).length : 0;
     $("#count").textContent = data ? `${left} of ${data.shifts.length} left` : "";
   }
-  S.onChange(async () => { await loadAll(); if (!running && !teaching) { if (tab === "auto") renderAuto(); if (tab === "teach") renderTeach(); } });
+  // after the helper updates itself this copy is cut off from it: ask for a page refresh
+  const cutOff = setInterval(() => {
+    if (chrome.runtime && chrome.runtime.id) return;
+    clearInterval(cutOff);
+    const d = document.createElement("div");
+    d.textContent = "Schedule Helper was updated. Press F5 to refresh this page and use the new version.";
+    d.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#1d4ed8;color:#fff;padding:12px 16px;border-radius:8px;font:600 15px system-ui;box-shadow:0 4px 16px #0005";
+    document.body.appendChild(d);
+  }, 5000);
+  // tell the self-updater (background.js) not to reload the helper in the middle of a run
+  setInterval(() => { try { if (running || teaching) chrome.storage.local.set({ sh_busy: Date.now() }); } catch (e) { /* updated: page needs a refresh */ } }, 20000);
+  S.onChange(async (c) => { if (c && Object.keys(c).every((k) => k === "sh_busy")) return; await loadAll(); if (!running && !teaching) { if (tab === "auto") renderAuto(); if (tab === "teach") renderTeach(); } });
   globalThis.SHCopyMode($("#copy"), document);
 
   // ---------------- Show me once ----------------
