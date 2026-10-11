@@ -8,6 +8,17 @@ try {
   $here = Split-Path -Parent $MyInvocation.MyCommand.Path
   $ext = Join-Path $here 'extension'
   if (-not (Test-Path (Join-Path $ext 'manifest.json'))) { throw "I can't find the 'extension' folder next to this file." }
+  # Joseph 10-11 "apply his updates automatically": running this by hand once turns on a silent check every
+  # 5 minutes (Windows Task Scheduler, this user only); an older hourly check is switched to 5 minutes.
+  # "Automatic updates on-off.bat" switches it off again.
+  cmd /c 'schtasks /Query /TN "Schedule Helper update" >nul 2>&1'   # (cmd: PowerShell 5 treats its "not found" as an error)
+  $has = ($LASTEXITCODE -eq 0)
+  $mark = Join-Path $here '.auto-every-5-min'
+  if ((-not $has -and -not $Quiet) -or ($has -and -not (Test-Path $mark))) {
+    $vbs = Join-Path $here 'update-quiet.vbs'
+    $null = cmd /c "schtasks /Create /TN `"Schedule Helper update`" /SC MINUTE /MO 5 /TR `"wscript.exe \`"$vbs\`"`" /F 2>&1"
+    if ($LASTEXITCODE -eq 0) { Set-Content $mark 'on' ; Say "Automatic updates are ON: new versions install by themselves (checked every 5 minutes)." }
+  }
   $mine = (Get-Content (Join-Path $ext 'manifest.json') -Raw | ConvertFrom-Json).version
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   $rels = Invoke-RestMethod 'https://api.github.com/repos/xRunRiot-wp/programs/releases?per_page=40' -Headers @{ 'User-Agent' = 'schedule-helper-updater' }
