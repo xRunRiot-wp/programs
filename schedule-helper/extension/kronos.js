@@ -503,7 +503,13 @@
         if (box.scrollTop === before && !findRow(name)) break;
       }
     }
-    return findRow(name);
+    const got = findRow(name);
+    if (!got) {   // v3.20: say what was scrolled, so a miss on his real Kronos can be fixed
+      const d = (b) => b ? `${b === document.scrollingElement ? "page" : b.tagName.toLowerCase() + "." + String(b.className || "").slice(0, 40)} top ${Math.round(b.scrollTop)}/${b.scrollHeight - b.clientHeight}` : "none";
+      const others = [...document.querySelectorAll("*")].filter((e) => e.scrollHeight > e.clientHeight + 50 && e.clientHeight > 150).slice(0, 6).map(d).join("; ");
+      try { live("info", `couldn't scroll to the row: scrolled ${d(box)}; names seen ${nameLeaves().length}; scrollable boxes: ${others || "none"}`); } catch (e) { /* optional */ }
+    }
+    return got;
   }
   async function mouseAt(el, x, y, how) {
     const o = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
@@ -565,8 +571,15 @@
           }
           // v3.18: still open -> a real mouse press through Chrome (background.js trusted-click)
           if (!(await panelOpened(since, 1000)) && item.isConnected && visible(item)) {
-            const tc = await trustedClick(item);
+            let tc = await trustedClick(item);
             if (tc && tc.ok && (await panelOpened(since, 2500)) === true) { openHow = "context"; return { ok: true }; }
+            // v3.20: on a new person's first shift the page may still be settling after scrolling -> measure again, once
+            if (tc && tc.ok && item.isConnected && visible(item)) {
+              try { live("info", `real-mouse click missed, trying once more ${tc.where || ""}`); } catch (er) { /* optional */ }
+              await sleep(600);
+              tc = await trustedClick(item);
+              if (tc && tc.ok && (await panelOpened(since, 2500)) === true) { openHow = "context"; return { ok: true }; }
+            }
             try { live("info", `real-mouse click on Add shift ${tc && tc.ok ? "didn't open it" : "not possible: " + ((tc && tc.why) || "?")} ${(tc && tc.where) || ""}`); } catch (er) { /* optional */ }
           }
           // v3.8 (Zack 10-10, 3.7 still couldn't press it): the menu is open, so let Zack press "Add shift" himself
