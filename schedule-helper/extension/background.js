@@ -27,7 +27,7 @@ const attached = new Set(), detachTimer = {};
 // Self-update (Joseph 10-11: "implement changes automatically for him"): "Update Schedule Helper.bat" (or the hourly
 // automatic check) copies the newest release over this folder; when the manifest on disk shows a new version,
 // reload -- but never in the middle of an auto-fill run (kronos.js keeps sh_busy fresh while running).
-chrome.alarms.create("sh-selfupdate", { periodInMinutes: 1 });
+chrome.alarms.create("sh-selfupdate", { periodInMinutes: 0.5 });   // Chrome's shortest
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name !== "sh-selfupdate") return;
   try {
