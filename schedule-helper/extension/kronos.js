@@ -482,18 +482,26 @@
   function viewOf(box) { return box === document.scrollingElement ? { top: 0, bottom: innerHeight } : box.getBoundingClientRect(); }
   async function scrollToRow(name) {
     // like Zack scrolling down the list of names until the person shows up
+    // v3.17 (Zack 10-11: "make it scroll itself to the next person"): the names column often isn't the box that
+    // scrolls (it fell back to the whole page, which doesn't move, and gave up at once) -- use the first box that
+    // really scrolls, nudge it with the mouse wheel too, and give Kronos time to load more people at the bottom
     const any = nameLeaves()[0];
-    const box = (any && scroller(any[0])) || gridScroller();
+    const cands = [any && scroller(any[0]), gridScroller(), document.scrollingElement].filter(Boolean);
+    const box = cands.find((b) => b !== document.scrollingElement && b.scrollHeight > b.clientHeight + 5) || cands[0];
     if (!box) return null;
+    const wheel = (dy) => { const v = viewOf(box); const at = document.elementFromPoint((any ? any[0].getBoundingClientRect().left : 200) + 20, (v.top + v.bottom) / 2) || box; at.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, bubbles: true, cancelable: true })); };
     let el = findRow(name);
-    if (!el) { box.scrollTop = 0; await sleep(300); }
-    for (let k = 0; k < 80; k++) {
+    if (!el) { box.scrollTop = 0; await sleep(600); }
+    for (let k = 0; k < 120; k++) {
       el = findRow(name);
       if (el && shown(el)) return el;
-      if (el) { const r = el.getBoundingClientRect(), v = viewOf(box); box.scrollTop += r.top - (v.top + v.bottom) / 2; await sleep(300); continue; }
+      if (el) { const r = el.getBoundingClientRect(), v = viewOf(box); box.scrollTop += r.top - (v.top + v.bottom) / 2; await sleep(500); if (!shown(el)) el.scrollIntoView({ block: "center" }); await sleep(300); continue; }
       const before = box.scrollTop;
-      box.scrollTop += box.clientHeight * 0.8; await sleep(300);
-      if (box.scrollTop === before) break;
+      box.scrollTop += box.clientHeight * 0.7; await sleep(600);
+      if (box.scrollTop === before) {
+        wheel(box.clientHeight * 0.7); await sleep(1200);   // at the bottom, or Kronos is loading more rows
+        if (box.scrollTop === before && !findRow(name)) break;
+      }
     }
     return findRow(name);
   }
@@ -1441,7 +1449,7 @@
       do {
         const since = Date.now() - t0;
         res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key, how: st.how, grid: st.grid }, value, wantText, grid, pace,
-          timeout: limit ? 1500 : undefined, loose: since > 2500, anyFrameNow: since > 3000 }, st.action === "grid" ? 45000 : limit ? 6000 : 20000);
+          timeout: limit ? 1500 : undefined, loose: since > 2500, anyFrameNow: since > 3000 }, st.action === "grid" ? 120000 : limit ? 6000 : 20000);
         if (res.ok || res.fatal) break;
         if (limit) await sleep(300);
         // v3.9 (Zack 10-10): right after Apply, Kronos's panel is still sliding shut over the schedule and the
