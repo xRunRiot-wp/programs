@@ -486,18 +486,24 @@
     // scrolls (it fell back to the whole page, which doesn't move, and gave up at once) -- use the first box that
     // really scrolls, nudge it with the mouse wheel too, and give Kronos time to load more people at the bottom
     const any = nameLeaves()[0];
-    const cands = [any && scroller(any[0]), gridScroller(), document.scrollingElement].filter(Boolean);
-    const box = cands.find((b) => b !== document.scrollingElement && b.scrollHeight > b.clientHeight + 5) || cands[0];
-    if (!box) return null;
+    // v3.21: his Kronos (log 10-11): the grid scrolls in div.krn_scrollable, the names in div.krn_rowheader_scroll
+    const kGrid = document.querySelector(".krn_scrollable"), kNames = document.querySelector(".krn_rowheader_scroll");
+    const cands = [kGrid, kNames, any && scroller(any[0]), gridScroller(), document.scrollingElement].filter(Boolean);
+    const box0 = cands.find((b) => b !== document.scrollingElement && b.scrollHeight > b.clientHeight + 5) || cands[0];
+    if (!box0) return null;
+    // move the grid and the names together (Kronos keeps them in step, but don't count on it)
+    const pair = [kGrid, kNames].filter((b) => b && b !== box0 && b.scrollHeight > b.clientHeight + 5);
+    const box = box0;
+    const scrollBy = (dy) => { box.scrollTop += dy; for (const o of pair) o.scrollTop = box.scrollTop; };
     const wheel = (dy) => { const v = viewOf(box); const at = document.elementFromPoint((any ? any[0].getBoundingClientRect().left : 200) + 20, (v.top + v.bottom) / 2) || box; at.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, bubbles: true, cancelable: true })); };
     let el = findRow(name);
-    if (!el) { box.scrollTop = 0; await sleep(600); }
+    if (!el) { scrollBy(-box.scrollTop); await sleep(600); }
     for (let k = 0; k < 120; k++) {
       el = findRow(name);
       if (el && shown(el)) return el;
-      if (el) { const r = el.getBoundingClientRect(), v = viewOf(box); box.scrollTop += r.top - (v.top + v.bottom) / 2; await sleep(500); if (!shown(el)) el.scrollIntoView({ block: "center" }); await sleep(300); continue; }
+      if (el) { const r = el.getBoundingClientRect(), v = viewOf(box); scrollBy(r.top - (v.top + v.bottom) / 2); await sleep(500); if (!shown(el)) el.scrollIntoView({ block: "center" }); await sleep(300); continue; }
       const before = box.scrollTop;
-      box.scrollTop += box.clientHeight * 0.7; await sleep(600);
+      scrollBy(box.clientHeight * 0.7); await sleep(600);
       if (box.scrollTop === before) {
         wheel(box.clientHeight * 0.7); await sleep(1200);   // at the bottom, or Kronos is loading more rows
         if (box.scrollTop === before && !findRow(name)) break;
@@ -505,7 +511,7 @@
     }
     const got = findRow(name);
     if (!got) {   // v3.20: say what was scrolled, so a miss on his real Kronos can be fixed
-      const d = (b) => b ? `${b === document.scrollingElement ? "page" : b.tagName.toLowerCase() + "." + String(b.className || "").slice(0, 40)} top ${Math.round(b.scrollTop)}/${b.scrollHeight - b.clientHeight}` : "none";
+      const d = (b) => b ? `${b === box ? "(chosen) " : ""}${b === document.scrollingElement ? "page" : b.tagName.toLowerCase() + "." + String(b.className || "").slice(0, 40)} top ${Math.round(b.scrollTop)}/${b.scrollHeight - b.clientHeight}` : "none";
       const others = [...document.querySelectorAll("*")].filter((e) => e.scrollHeight > e.clientHeight + 50 && e.clientHeight > 150).slice(0, 6).map(d).join("; ");
       try { live("info", `couldn't scroll to the row: scrolled ${d(box)}; names seen ${nameLeaves().length}; scrollable boxes: ${others || "none"}`); } catch (e) { /* optional */ }
     }
