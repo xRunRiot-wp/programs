@@ -70,7 +70,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           await new Promise((r) => setTimeout(r, 400));   // let the page settle under Chrome's bar
         }
         clearTimeout(detachTimer[t.tabId]);
-        detachTimer[t.tabId] = setTimeout(() => chrome.debugger.detach(t).catch(() => {}), 5 * 60000);
+        detachTimer[t.tabId] = setTimeout(() => chrome.debugger.detach(t).catch(() => {}), 30 * 60000);
         if (m.prepare) return reply({ ok: true });       // just put the bar up before the run starts
         const at = { x: m.x, y: m.y };
         await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });

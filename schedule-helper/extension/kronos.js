@@ -487,7 +487,10 @@
     // really scrolls, nudge it with the mouse wheel too, and give Kronos time to load more people at the bottom
     const any = nameLeaves()[0];
     // v3.21: his Kronos (log 10-11): the grid scrolls in div.krn_scrollable, the names in div.krn_rowheader_scroll
-    const kGrid = document.querySelector(".krn_scrollable"), kNames = document.querySelector(".krn_rowheader_scroll");
+    // v3.25: there are several of each (log 10-11: the first names box only scrolls 19 px) -> the one that scrolls most
+    const biggest = (sel) => [...document.querySelectorAll(sel)].filter((b) => b.clientHeight > 150)
+      .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || null;
+    const kGrid = biggest(".krn_scrollable"), kNames = biggest(".krn_rowheader_scroll");
     const cands = [kGrid, kNames, any && scroller(any[0]), gridScroller(), document.scrollingElement].filter(Boolean);
     const box0 = cands.find((b) => b !== document.scrollingElement && b.scrollHeight > b.clientHeight + 5) || cands[0];
     if (!box0) return null;
