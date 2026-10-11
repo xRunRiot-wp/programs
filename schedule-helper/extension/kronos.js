@@ -784,7 +784,7 @@
   }
   async function stillThere(m) {
     const el = find(m.desc, m.wantText);
-    return { ok: true, there: !!el };
+    return { ok: true, there: !!el, value: el && typeof el.value === "string" ? el.value : undefined };
   }
 
   // "Is this shift already on the schedule?" - look for the start time on the
@@ -1753,8 +1753,30 @@
         if (a === "skip") return "skipped";
       }
       showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Step ${i + 1} of ${steps.length}: ${STEP_WORD[st.action]}...</span>`);
+      // v3.23 (Zack 10-11: a 4pm-12am shift saved as 12am-1am): before Apply, read the time boxes back; Kronos can
+      // fill in its own default times after we typed (the form was still loading) -> type ours again
+      if (i === saveAt) {
+        const asMin = (v) => { const m = /(\d{1,2})(?::(\d{2}))?\s*([ap])?/i.exec(String(v || "")); if (!m) return null; let h = Number(m[1]) % (m[3] ? 12 : 24); if (m[3] && /p/i.test(m[3])) h += 12; return h * 60 + Number(m[2] || 0); };
+        for (let pass = 0; pass < 2; pass++) {
+          let fixed = false;
+          for (const t of steps.slice(0, i)) {
+            if (t.action !== "type" || !t.map || !/^(start|end)$/.test(t.map.field)) continue;
+            const want = R.formatValue(s, t.map);
+            const got = await request({ type: "there", frameKey: t.frameKey, desc: t.desc, wantText: null }, 3000);
+            if (!got.ok || got.value === undefined || asMin(got.value) === asMin(want)) continue;
+            live("info", `${t.map.field} time shows "${got.value}" instead of ${want} before Apply; typing it again`);
+            const r2 = await doStep(t, s, pace, head);
+            if (r2 !== "ok") return r2;
+            fixed = true;
+          }
+          if (!fixed) break;
+          await sleep(600);
+        }
+      }
       const r = await doStep(st, s, pace, head);
       if (r !== "ok") return r;
+      // v3.23: give the Add Shift form a moment to fill in its own defaults before we type over them
+      if (st.action === "grid") await sleep(1200);
       const wantText = st.action === "click" && st.map ? R.formatValue(s, st.map) : null;
       if (i === saveAt) {
         // wait for Kronos to close the form; if it doesn't, it probably showed an error
