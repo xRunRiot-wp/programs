@@ -1654,7 +1654,7 @@
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i];
       if (stopAsked) return "stop";
-      if (i === saveAt && (s.jobChange || (data && data.transferAll && !s.noTransfer)) && !jobInMain) {
+      if (i === saveAt && !s.noTransfer && (s.jobChange || (data && data.transferAll)) && !jobInMain) {
         const r = await changeJob(s, pace, head, opts.teachJob);
         if (r === "saved") return "saved";
         if (r !== "ok") return r;
