@@ -548,6 +548,22 @@
       band = dayBands().find((b) => b.md === g.md) || band; row = findRow(g.name) || row;
     }
     const cy = rowBox(row).cy, dy0 = step.grid.dy || 0;
+    // v3.31 (Zack 10-11: "it's putting a schedule on top of a schedule that's already done"): right before adding,
+    // look in this person's box for that day; if a shift starting at the same time is there, leave this one out
+    if (g.start) {
+      const [H, M] = g.start.split(":").map(Number), h12 = H % 12 || 12, ap = H < 12 ? "a" : "p", mm = String(M).padStart(2, "0");
+      const pats = [new RegExp(`(^|[^\\d:])${h12}:${mm}\\s*${ap}`, "i"), new RegExp(`(^|[^\\d:])${H}:${mm}(?!\\s*[ap])`, "i")];
+      if (M === 0) pats.push(new RegExp(`(^|[^\\d:])${h12}\\s*${ap}m?\\b`, "i"));
+      const rb = rowBox(row), x0 = band.left + 1, x1 = band.left + band.width - 1;
+      const texts = textLeaves().filter(([e]) => notPanel(e)).filter(([e]) => {
+        const b = e.getBoundingClientRect(), mx = b.left + b.width / 2, my = b.top + b.height / 2;
+        return mx >= x0 && mx <= x1 && Math.abs(my - rb.cy) <= Math.max(14, rb.h / 2 + 2);
+      }).map(([, t]) => t);
+      // only a shift's START counts (the first time written in the box), so one ending at that time doesn't
+      const first = (t) => { const m = /\d{1,2}(?::\d{2})?\s*(?:[ap]m?)?/i.exec(t); return m ? " " + m[0] : ""; };
+      const hit = texts.find((t) => pats.some((p) => p.test(first(t))));
+      if (hit) return { ok: false, already: hit.slice(0, 40), why: `${g.name} already has a shift on ${g.md}.` };
+    }
     // the spot Zack used; if a shift is already there (a double), use a free part of the day
     const tries = [step.grid.rel, 0.15, 0.85, 0.5, 0.3, 0.7, 0.05, 0.95].map((r) => Math.min(0.97, Math.max(0.03, r)));
     // (and above/below a shift bar that fills the day, as in Table view)
@@ -1512,6 +1528,7 @@
           skipAsked = null;
           const r = await enterShift(s, pace, confirm, `${esc(day)}: shift ${i + 1} of ${todo.length}<br>`);
           if (r === "stop") { stopAsked = true; break; }
+          if (r === "already") { maybeThere.push(s); done = await S.markDone(s.id, true); await loadAll(); continue; }
           if (skipAsked) {   // skipped from the progress card: close a half-filled Kronos form, then go on
             live("info", `Zack skipped ${skipAsked === "person" ? "the rest of this person" : "this shift"}: ${s.kronosName} ${s.date}`);
             await closeOpenForm();
@@ -1566,7 +1583,7 @@
     const value = st.map ? R.formatValue(s, st.map) : st.value;
     const wantText = st.action === "click" && st.map ? value : null;
     for (;;) {
-      const grid = st.action === "grid" ? { name: s.kronosName, md: mdOf(s) } : null;
+      const grid = st.action === "grid" ? { name: s.kronosName, md: mdOf(s), start: s.start } : null;
       // Kronos is slow and redraws its panel (even its frame): ask in short rounds for up to 15 s,
       // so whichever frame has the thing once it settles can answer
       const t0 = Date.now(), limit = st.action === "grid" || st.action === "key" ? 0 : 15000;
@@ -1576,13 +1593,14 @@
         const since = Date.now() - t0;
         res = await request({ type: "exec", frameKey: st.frameKey, step: { action: st.action, desc: st.desc, key: st.key, how: st.how, grid: st.grid }, value, wantText, grid, pace,
           timeout: limit ? 1500 : undefined, loose: since > 2500, anyFrameNow: since > 3000 }, st.action === "grid" ? 120000 : limit ? 6000 : 20000);
-        if (res.ok || res.fatal) break;
+        if (res.ok || res.fatal || res.already) break;
         if (limit) await sleep(300);
         // v3.9 (Zack 10-10): right after Apply, Kronos's panel is still sliding shut over the schedule and the
         // next person's row "isn't there" for a moment -> wait up to 10 s for it instead of stopping
         const rowGone = st.action === "grid" && /row on the schedule/.test(res.why || "");
         if (rowGone) await sleep(800);
       } while (Date.now() - t0 < limit || (st.action === "grid" && /row on the schedule/.test(res.why || "") && Date.now() - t0 < 10000));
+      if (res.already) { live("info", `already on the schedule, left out: ${s.kronosName} ${s.date} (${res.already})`); return "already"; }
       if (res.ok) {   // only slow steps are worth a line (each step's start is already sent)
         if (Date.now() - t0 > 4000) live("ok", `done, but it took ${((Date.now() - t0) / 1000).toFixed(1)} s`);
         return "ok";
