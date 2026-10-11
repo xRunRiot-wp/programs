@@ -670,7 +670,12 @@
     for (const t0 = Date.now(); Date.now() - t0 < ms;) {
       await sleep(200);
       const hit = textLeaves().find(([e, x]) => /^\+?\s*add\s+shift\b/i.test(x) && notPanel(e));
-      if (hit) return hit[0].closest("[role=menuitem],li,button,a,[tabindex]") || hit[0];
+      // v3.27: the log showed the "item" was the whole 395x187 menu (its [tabindex] box), so the real mouse pressed
+      // the middle of the menu, not "Add shift" -> take the entry itself: the smallest wrapper that's one line high
+      if (hit) {
+        const wrap = hit[0].closest("[role=menuitem],li,button,a,[tabindex]");
+        return wrap && wrap.getBoundingClientRect().height < 60 ? wrap : hit[0];
+      }
     }
     return null;
   }
