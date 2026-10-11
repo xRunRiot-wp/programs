@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="gatchamachine"
+version="1.0.0"
+displayName="Gatcha Machine"
+authors="xRunRiot"
+description='''Craft the Gatcha Machine to start earning points (5 every 5 seconds, plus bonuses for new Pokedex species, forms and palettes) and spend them on a case-opening spin for a Rare, Epic, Legendary or Ultimate boss. Needs to be on the host and every player joining (LAN).'''
+
+[[dependencies.gatchamachine]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.gatchamachine]]
+modId="pixelmon"
+type="required"
+versionRange="[9.4,)"
+ordering="AFTER"
+side="BOTH"

@@ -1,0 +1,17 @@
+{
+  "parent": "minecraft:story/root",
+  "display": {
+    "icon": {"id": "gatchamachine:gatcha_machine"},
+    "title": {"translate": "advancements.gatchamachine.got_gatcha_machine.title"},
+    "description": {"translate": "advancements.gatchamachine.got_gatcha_machine.description"},
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "has_machine": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {"items": [{"items": "gatchamachine:gatcha_machine"}]}
+    }
+  }
+}

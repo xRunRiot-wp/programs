@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": ["GGG", "GPG", "INI"],
+  "key": {
+    "G": {"item": "minecraft:glass"},
+    "P": {"item": "pixelmon:poke_ball"},
+    "I": {"item": "minecraft:iron_ingot"},
+    "N": {"item": "minecraft:gold_ingot"}
+  },
+  "result": {"id": "gatchamachine:gatcha_machine", "count": 1}
+}

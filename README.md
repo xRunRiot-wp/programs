@@ -12,5 +12,6 @@ of this repo.
 | [PixelDex](pixeldex/) | Pokedex companion for Pixelmon Reforged: where to catch each Pokemon, biome browser, caught tracker | Release `pixeldex-v2.1` |
 | [Schedule Helper](schedule-helper/) | Chrome extension: HotSchedules Weekly Roster into Kronos/UKG Schedule Planner (copy mode or auto-fill with approval) | Release `schedule-helper-v3.3` |
 | [Card Art Pack](sts2-card-art/) | Slay the Spire 2: 180 custom card pictures (all Defect + Necrobinder cards) for the Card Art Editor mod | Release `sts2-card-art-v1` |
+| [Gatcha Machine](gatcha-machine/) | Pixelmon add-on mod: earn points, case-opening spin for Rare/Epic/Legendary/Ultimate bosses | Release `gatcha-machine-v1` |
 
 The first four are Windows programs; Schedule Helper is a Chrome/Edge extension (no install, no .exe).

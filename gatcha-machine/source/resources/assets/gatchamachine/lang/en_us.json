@@ -1,0 +1,16 @@
+{
+  "item.gatchamachine.gatcha_machine": "Gatcha Machine",
+  "advancements.gatchamachine.got_gatcha_machine.title": "Insert Coin",
+  "advancements.gatchamachine.got_gatcha_machine.description": "Get a Gatcha Machine. Boss points start adding up!",
+  "gatchamachine.unlocked": "Gatcha Machine unlocked! You now earn 5 points every 5 seconds, plus bonuses for new Pokedex entries.",
+  "gatchamachine.dex.species": "+%s Gatcha points (new Pokemon!)",
+  "gatchamachine.dex.palette": "+%s Gatcha points (new palette!)",
+  "gatchamachine.dex.form": "+%s Gatcha points (new form!)",
+  "gatchamachine.locked": "You need the Gatcha Machine achievement first.",
+  "gatchamachine.busy": "Your last boss is still on its way!",
+  "gatchamachine.poor": "Not enough Gatcha points.",
+  "gatchamachine.allseen": "You've already encountered every Ultimate boss!",
+  "gatchamachine.notier": "That boss tier isn't available.",
+  "gatchamachine.spawnfailed": "The boss couldn't spawn here - your points were refunded.",
+  "gatchamachine.spawned": "A %2$s %1$s appeared!"
+}
