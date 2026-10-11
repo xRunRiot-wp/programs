@@ -56,6 +56,7 @@ public class GatchaMachine {
         });
         Pixelmon.EVENT_BUS.addListener(PokedexPoints::onPokedex);
         Pixelmon.EVENT_BUS.addListener(EventPriority.LOWEST, PokedexPoints::onCapture); // after anything that might cancel the catch
+        Pixelmon.EVENT_BUS.addListener(PokedexPoints::onHatch);
         if (Boolean.getBoolean("gatchamachine.selftest")) NeoForge.EVENT_BUS.addListener(SelfTest::run);
     }
 

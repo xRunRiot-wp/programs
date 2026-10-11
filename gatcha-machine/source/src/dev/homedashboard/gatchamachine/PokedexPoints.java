@@ -1,6 +1,7 @@
 package dev.homedashboard.gatchamachine;
 
 import com.pixelmonmod.pixelmon.api.events.CaptureEvent;
+import com.pixelmonmod.pixelmon.api.events.EggHatchEvent;
 import com.pixelmonmod.pixelmon.api.pokedex.PokeDexStorageProxy;
 import com.pixelmonmod.pixelmon.api.pokedex.Pokedex;
 import com.pixelmonmod.pixelmon.api.pokedex.PokedexStorage;
@@ -42,13 +43,19 @@ public final class PokedexPoints {
         player.displayClientMessage(Component.translatable("gatchamachine.dex." + kind, award), true);
     }
 
-    /** Every shiny caught is worth 500, even a repeat of a species (Adam 10-11). Stacks with the Pokedex bonus. */
+    /** Every shiny caught or hatched is worth 500, even a repeat of a species (Adam 10-11). Stacks with the Pokedex bonus. */
     public static void onCapture(CaptureEvent.SuccessfulCapture e) {
-        ServerPlayer player = e.getPlayer();
-        Pokemon mon = e.getPokemon();
+        shinyReward(e.getPlayer(), e.getPokemon(), "gatchamachine.shiny");
+    }
+
+    public static void onHatch(EggHatchEvent.Post e) {
+        shinyReward(e.getPlayer(), e.getPokemon(), "gatchamachine.shiny.hatch");
+    }
+
+    private static void shinyReward(ServerPlayer player, Pokemon mon, String message) {
         if (player == null || mon == null || !mon.isShiny() || !GatchaMachine.isUnlocked(player)) return;
         GatchaMachine.addPoints(player, SHINY_CATCH);
-        player.sendSystemMessage(Component.translatable("gatchamachine.shiny", SHINY_CATCH));
+        player.sendSystemMessage(Component.translatable(message, SHINY_CATCH));
     }
 
     /** What the just-registered entry is worth, looking at every OTHER entry of the same species. */
