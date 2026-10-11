@@ -1529,6 +1529,9 @@
           const r = await enterShift(s, pace, confirm, `${esc(day)}: shift ${i + 1} of ${todo.length}<br>`);
           if (r === "stop") { stopAsked = true; break; }
           if (r === "already") { maybeThere.push(s); done = await S.markDone(s.id, true); await loadAll(); continue; }
+          // v3.32 (looking ahead): a shift skipped on a stuck card can leave Kronos's Add Shift form open, and the
+          // next right-click then lands under it -> close it before going on
+          if (r === "skipped" && !skipAsked) { await closeOpenForm(); continue; }
           if (skipAsked) {   // skipped from the progress card: close a half-filled Kronos form, then go on
             live("info", `Zack skipped ${skipAsked === "person" ? "the rest of this person" : "this shift"}: ${s.kronosName} ${s.date}`);
             await closeOpenForm();
@@ -1552,14 +1555,13 @@
   // a half-filled Add Shift form (or Transfer window) is closed with its Cancel / Close button, else Escape
   async function closeOpenForm() {
     for (let k = 0; k < 3; k++) {
-      const btn = [...document.querySelectorAll("button,[role=button]")].filter((b) => visible(b) && notPanel(b))
-        .find((b) => /^(cancel|close)$/i.test((b.innerText || b.getAttribute("aria-label") || b.title || "").trim()));
+      const btn = [...document.querySelectorAll("[role=dialog] button,[aria-modal=true] button,krn-slide-out-container button,[role=dialog] [role=button]")].filter((b) => visible(b) && notPanel(b))
+        .find((b) => /^(cancel|close|discard|discard changes|don't save|do not save)$/i.test((b.innerText || b.getAttribute("aria-label") || b.title || "").trim()));
       if (!btn) break;
       btn.click();
       await sleep(800);
     }
-    pressKey(document.activeElement || document.body, "Escape");
-    await sleep(500);
+    if ([...document.querySelectorAll("[role=dialog],[aria-modal=true]")].some((d) => visible(d) && notPanel(d))) { pressKey(document.activeElement || document.body, "Escape"); await sleep(500); }
   }
 
   // Part 2 of "Show me once": fill in one job-change shift, then watch Zack change the job.
@@ -1620,7 +1622,7 @@
           ${st.action !== "key" ? `<p class="sh-small"><b>Point to it:</b> press the button, then click the right ${st.action === "type" || st.action === "select" ? "box" : "thing"} on the Kronos screen. I'll remember it for every shift after this.</p>` : ""}
           <p>${isJob ? `Change the job to <b>${esc(R.formatValue(s, { field: "job", fmt: "Kronos job" }))}</b> yourself and press <b>I did it</b>, or try again.` : "You can do this step by hand and press <b>I did it</b>, or try again."}</p>
           <p class="sh-small">${saved ? "&#10003; Saved <b>schedule-helper-debug.txt</b> in Downloads &ndash; send it to Joseph." : "Stuck? <b>Save debug file</b> and send it to Joseph (it only describes the boxes on the screen)."}</p>`,
-          [["retry", "Try again", "sh-primary"], ...(st.action !== "key" ? [["point", "Point to it", "sh-primary"]] : []), ["manual", "I did it"], ["skip", "Skip this shift"], ["debug", "Save debug file"]]);
+          [["retry", "Try again", "sh-primary"], ...(st.action !== "key" ? [["point", "Point to it", "sh-primary"]] : []), ["manual", "I did it"], ["skip", "Skip this shift"], ["skipperson", "Skip this person"], ["debug", "Save debug file"]]);
         if (a === "debug") { await saveStuck(st, res.why); saved = true; continue; }
         if (a === "point") {
           const got = await pointTo(st, s, head);
@@ -1634,6 +1636,7 @@
       if (a === "point") continue;
       if (a === "stop") return "stop";
       if (a === "skip") return "skipped";
+      if (a === "skipperson") { skipAsked = "person"; return "skipped"; }
       if (a === "manual") return "ok";
     }
   }
