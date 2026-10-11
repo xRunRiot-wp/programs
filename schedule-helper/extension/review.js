@@ -13,7 +13,14 @@
   prefs.locations = prefs.locations || {};
   const locKey = (l) => String(l || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   function showLocs() { $("#locs").innerHTML = Object.keys(prefs.locations).map((l) => `<option value="${esc(l)}">`).join(""); }
-  function pickLoc(l) { $("#loc").value = l || ""; const k = Object.keys(prefs.locations).find((x) => locKey(x) === locKey(l)); $("#xferall").checked = !!(k && prefs.locations[k].transferAll); }
+  let noXfer = new Set();  // people Kronos already has at this location in their job (Zack 10-10): no Transfer for them
+  function pickLoc(l) {
+    $("#loc").value = l || "";
+    const k = Object.keys(prefs.locations).find((x) => locKey(x) === locKey(l));
+    $("#xferall").checked = !!(k && prefs.locations[k].transferAll);
+    noXfer = new Set((k && prefs.locations[k].noTransfer) || []);
+    if (shifts.length) render();
+  }
   showLocs(); pickLoc(prefs.location || "");
   $("#loc").addEventListener("change", () => pickLoc($("#loc").value.trim()));
 
@@ -66,7 +73,8 @@
       <label class="sh-small">Usual job in Kronos <select data-usual="${esc(p)}">
         <option value="">auto: ${esc(u.jobs[0] || "")}</option>
         ${opts.map((j) => `<option ${prefs.usualJob[p] === j ? "selected" : ""}>${esc(j)}</option>`).join("")}</select>
-        ${u.how === "tie" ? '<span class="tag job" title="Works as many shifts in two jobs - check which one Kronos has as their main job">check</span>' : ""}</label></div>`;
+        ${u.how === "tie" ? '<span class="tag job" title="Works as many shifts in two jobs - check which one Kronos has as their main job">check</span>' : ""}</label>
+      <label class="sh-small"><input type="checkbox" data-noxfer="${esc(p)}" ${noXfer.has(p) ? "checked" : ""}> No Transfer for them (Kronos already has them in this job here)</label></div>`;
     }).join("");
     const scheds = [...new Set(shifts.map((s) => s.schedule))].filter(Boolean).sort();
     $("#jobs").innerHTML = scheds.map((sc) => {
@@ -102,6 +110,7 @@
       if (t.value) prefs.usualJob[t.dataset.usual] = t.value; else delete prefs.usualJob[t.dataset.usual];
       S.set("sh_prefs", prefs); build();
     }
+    if (t.dataset.noxfer !== undefined) { if (t.checked) noXfer.add(t.dataset.noxfer); else noXfer.delete(t.dataset.noxfer); }
     if (t.dataset.sjob) { jobEdits[t.dataset.sjob] = t.value.trim(); build(); }
   });
 
@@ -110,11 +119,11 @@
     prefs.paceName = document.querySelector("[name=pace]:checked").value;
     const pace = prefs.paceName === "slow"
       ? { keyMin: 140, keyMax: 300, stepMin: 1000, stepMax: 2200, shiftMin: 3000, shiftMax: 5000 } : D.pace;
-    const kept = shifts.filter((s) => !off.has(s.id));
+    const kept = shifts.filter((s) => !off.has(s.id)).map((s) => (noXfer.has(s.employee) ? { ...s, noTransfer: true } : s));
     const location = $("#loc").value.trim(), transferAll = $("#xferall").checked;
     if (location) {
       for (const k of Object.keys(prefs.locations)) if (locKey(k) === locKey(location)) delete prefs.locations[k];
-      prefs.locations[location] = { transferAll };
+      prefs.locations[location] = { transferAll, noTransfer: [...noXfer] };
     }
     prefs.location = location;
     showLocs();
