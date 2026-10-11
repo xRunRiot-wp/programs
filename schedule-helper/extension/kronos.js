@@ -691,6 +691,10 @@
   async function typeInto(el, text, pace) {
     el.scrollIntoView({ block: "center" });
     el.focus();
+    // v3.24 (Zack 10-11: "is it having issues any time I click off the browser?" -- yes): with Chrome not the
+    // window in front, focus()/blur() fire no events, so Kronos never takes the typed time -> send them ourselves
+    const away = !document.hasFocus();
+    if (away) { el.dispatchEvent(new FocusEvent("focus")); el.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); }
     setVal(el, "");
     el.dispatchEvent(new Event("input", { bubbles: true }));
     for (const ch of text) {
@@ -706,7 +710,7 @@
     await sleep(150);
     const leave = () => {
       if (document.activeElement === el) el.blur();
-      else { el.dispatchEvent(new FocusEvent("blur")); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); }
+      if (away || !document.hasFocus() || document.activeElement === el) { el.dispatchEvent(new FocusEvent("blur")); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); }
     };
     leave();
     await sleep(350);

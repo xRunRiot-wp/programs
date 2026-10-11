@@ -56,7 +56,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   // v3.18 (Zack 10-11: "have it click Add shift itself"): Kronos ignores clicks a page script makes on its
   // right-click menu, so press it like a real mouse through Chrome's debugger, then let go at once.
   // Chrome shows a "started debugging this browser" bar while attached; it stays for the run (attaching each
-  // time would resize the page and close Kronos's menu) and goes 5 minutes after the last click.
+  // time would resize the page and close Kronos's menu) and goes 30 minutes after the last use.
   if (m && m.type === "trusted-click" && sender.tab) {
     const t = { tabId: sender.tab.id };
     const send = (method, params) => chrome.debugger.sendCommand(t, method, params);
@@ -64,6 +64,9 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       try {
         if (!attached.has(t.tabId)) {
           await chrome.debugger.attach(t, "1.3"); attached.add(t.tabId);
+          // v3.24: Kronos only takes typed times when the page has focus; keep it "focused" even when Zack clicks
+          // another window during a run
+          await send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
           await new Promise((r) => setTimeout(r, 400));   // let the page settle under Chrome's bar
         }
         clearTimeout(detachTimer[t.tabId]);
