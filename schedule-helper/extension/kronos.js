@@ -1420,7 +1420,7 @@
   }
 
   // ---------------- Auto-fill ----------------
-  let running = false, stopAsked = false;
+  let running = false, stopAsked = false, skipAsked = null;   // skipAsked: "shift" | "person" (v3.30)
   function settings() {
     const d = globalThis.SH_DEFAULTS;
     const saved = { ...(data?.settings?.pace || {}) };
@@ -1452,8 +1452,12 @@
     });
   }
   function showProgress(html) {
-    $("#auto").innerHTML = `${html}<button class="sh-stop sh-danger" id="stopnow">Stop</button>`;
+    // v3.30 (Zack 10-11: "an option to skip alongside the Stop button")
+    $("#auto").innerHTML = `${html}<div class="sh-row"><button class="sh-stop sh-danger" id="stopnow">Stop</button>${running ? '<button id="skipshift">Skip this shift</button><button id="skipperson">Skip this person</button>' : ""}</div>`;
     $("#stopnow").onclick = () => { stopAsked = true; $("#stopnow").textContent = "Stopping after this step..."; };
+    const sk = (what, el) => { skipAsked = what; el.textContent = "Skipping..."; };
+    if ($("#skipshift")) $("#skipshift").onclick = (e) => sk("shift", e.target);
+    if ($("#skipperson")) $("#skipperson").onclick = (e) => sk("person", e.target);
   }
   const shiftLine = (s) => `<b>${esc(s.kronosName)}</b> ${R.niceTime(s.start)} &ndash; ${R.niceTime(s.end)}${s.overnight ? " (next day)" : ""} &middot; ${s.jobChange ? `<span class="sh-jobtag" title="Usually ${esc(s.usualJob)} in Kronos">&#9888; ${esc(s.kronosJob)} (job change)</span>` : esc(s.kronosJob)}`;
 
@@ -1505,8 +1509,16 @@
         for (let i = 0; i < todo.length; i++) {
           if (stopAsked) break;
           const s = todo[i];
+          skipAsked = null;
           const r = await enterShift(s, pace, confirm, `${esc(day)}: shift ${i + 1} of ${todo.length}<br>`);
           if (r === "stop") { stopAsked = true; break; }
+          if (skipAsked) {   // skipped from the progress card: close a half-filled Kronos form, then go on
+            live("info", `Zack skipped ${skipAsked === "person" ? "the rest of this person" : "this shift"}: ${s.kronosName} ${s.date}`);
+            await closeOpenForm();
+            const who = skipAsked; skipAsked = null;
+            if (who === "person") break;
+            continue;
+          }
           if (r === "saved") { done = await S.markDone(s.id, true); await loadAll(); }
           await sleep(rand(pace.shiftMin, pace.shiftMax));
         }
@@ -1518,6 +1530,19 @@
       $("#auto").innerHTML = `<p>${stopAsked ? "Stopped." : "All done for this week."} Shifts I saved are ticked off in the Copy tab.</p>${maybeThere.length ? `<p>I left these out because they look like they're already on the schedule. Check them and add any that are missing by hand:</p><ul class="sh-list">${maybeThere.map((s) => `<li>${esc(s.day)} ${shiftLine(s)}</li>`).join("")}</ul>` : ""}<div class="sh-row"><button id="again">OK</button></div>`;
       $("#again").onclick = renderAuto;
     }
+  }
+
+  // a half-filled Add Shift form (or Transfer window) is closed with its Cancel / Close button, else Escape
+  async function closeOpenForm() {
+    for (let k = 0; k < 3; k++) {
+      const btn = [...document.querySelectorAll("button,[role=button]")].filter((b) => visible(b) && notPanel(b))
+        .find((b) => /^(cancel|close)$/i.test((b.innerText || b.getAttribute("aria-label") || b.title || "").trim()));
+      if (!btn) break;
+      btn.click();
+      await sleep(800);
+    }
+    pressKey(document.activeElement || document.body, "Escape");
+    await sleep(500);
   }
 
   // Part 2 of "Show me once": fill in one job-change shift, then watch Zack change the job.
@@ -1636,6 +1661,7 @@
     if (recipe.jobSteps && recipe.jobSteps.length && !teach) {
       for (let k = 0; k < recipe.jobSteps.length; k++) {
         if (stopAsked) return "stop";
+        if (skipAsked) return "skipped";
         showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Changing the job to ${esc(job)} (step ${k + 1} of ${recipe.jobSteps.length})...</span>`);
         const r = await doStep(recipe.jobSteps[k], s, pace, head, true);
         if (r !== "ok") return r;
@@ -1763,6 +1789,7 @@
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i];
       if (stopAsked) return "stop";
+      if (skipAsked) return "skipped";
       if (i === saveAt && !s.noTransfer && (s.jobChange || (data && data.transferAll)) && !jobInMain) {
         const r = await changeJob(s, pace, head, opts.teachJob);
         if (r === "saved") return "saved";
