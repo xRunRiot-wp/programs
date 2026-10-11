@@ -563,6 +563,12 @@
             if (item.focus) item.focus();
             pressKey(item, "Enter");
           }
+          // v3.18: still open -> a real mouse press through Chrome (background.js trusted-click)
+          if (!(await panelOpened(since, 1000)) && item.isConnected && visible(item)) {
+            const tc = await trustedClick(item);
+            if (tc && tc.ok && (await panelOpened(since, 2500)) === true) { openHow = "context"; return { ok: true }; }
+            try { live("info", `real-mouse click on Add shift ${tc && tc.ok ? "didn't open it" : "not possible: " + ((tc && tc.why) || "?")}`); } catch (er) { /* optional */ }
+          }
           // v3.8 (Zack 10-10, 3.7 still couldn't press it): the menu is open, so let Zack press "Add shift" himself
           // and carry on by ourselves as soon as the panel shows (no Try again / I did it needed)
           if (!(await panelOpened(since, 2000)) && item.isConnected && visible(item)) {
@@ -621,6 +627,19 @@
   async function pickMenuItem(item) {
     const r = item.getBoundingClientRect();
     await mouseAt(item, r.left + r.width / 2, r.top + r.height / 2, "click");
+  }
+  // press an element with Chrome's own mouse (the debugger), in top-page coordinates
+  async function trustedClick(el) {
+    const r = el.getBoundingClientRect();
+    let x = r.left + r.width / 2, y = r.top + r.height / 2;
+    try {
+      for (let w = window; w !== w.top && w.frameElement; w = w.parent) {
+        const f = w.frameElement.getBoundingClientRect(), cs = w.parent.getComputedStyle(w.frameElement);
+        x += f.left + parseFloat(cs.borderLeftWidth || 0) + parseFloat(cs.paddingLeft || 0);
+        y += f.top + parseFloat(cs.borderTopWidth || 0) + parseFloat(cs.paddingTop || 0);
+      }
+    } catch (e) { /* a frame we can't see into: use what we have */ }
+    try { return await chrome.runtime.sendMessage({ type: "trusted-click", x, y }); } catch (e) { return { ok: false, why: e.message }; }
   }
   // the "Add Shift" entry of the right-click menu
   async function waitAddShiftItem(ms) {
@@ -1381,6 +1400,10 @@
   async function runAll() {
     running = true; stopAsked = false;
     const { confirm, pace } = settings();
+    // right-click > Add shift needs Chrome's real mouse: put Chrome's debugging bar up now, before any menu is open
+    if (openHow === "context" || (recipe && recipe.steps.some((x) => x.how === "context"))) {
+      try { await chrome.runtime.sendMessage({ type: "trusted-click", prepare: true }); } catch (e) { /* manual fallback stays */ }
+    }
     try {
       for (const grp of autoGroups()) {
         const day = grp.label, byPerson = settings().order !== "day";

@@ -22,6 +22,9 @@ chrome.storage.onChanged.addListener(async (c) => {
   } catch (e) { /* offline: no replies this time */ }
 });
 
+const attached = new Set(), detachTimer = {};
+chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));   // closed bar / tab / timer
+
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (m && m.type === "live-poll") {
     chrome.storage.local.get("sh_live").then(async ({ sh_live: l }) => {
@@ -34,6 +37,33 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       } catch (e) { reply(null); }
     });
     return true;   // answer comes later
+  }
+  // v3.18 (Zack 10-11: "have it click Add shift itself"): Kronos ignores clicks a page script makes on its
+  // right-click menu, so press it like a real mouse through Chrome's debugger, then let go at once.
+  // Chrome shows a "started debugging this browser" bar while attached; it stays for the run (attaching each
+  // time would resize the page and close Kronos's menu) and goes 5 minutes after the last click.
+  if (m && m.type === "trusted-click" && sender.tab) {
+    const t = { tabId: sender.tab.id };
+    const send = (method, params) => chrome.debugger.sendCommand(t, method, params);
+    (async () => {
+      try {
+        if (!attached.has(t.tabId)) {
+          await chrome.debugger.attach(t, "1.3"); attached.add(t.tabId);
+          await new Promise((r) => setTimeout(r, 400));   // let the page settle under Chrome's bar
+        }
+        clearTimeout(detachTimer[t.tabId]);
+        detachTimer[t.tabId] = setTimeout(() => chrome.debugger.detach(t).catch(() => {}), 5 * 60000);
+        if (m.prepare) return reply({ ok: true });       // just put the bar up before the run starts
+        const at = { x: m.x, y: m.y };
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });
+        await new Promise((r) => setTimeout(r, 80));
+        await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...at });
+        await new Promise((r) => setTimeout(r, 60));
+        await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...at });
+        reply({ ok: true });
+      } catch (e) { reply({ ok: false, why: String(e && e.message || e) }); }
+    })();
+    return true;
   }
   if (!m || m.type !== "live") return;
   const t = new Date().toTimeString().slice(0, 8);
