@@ -704,9 +704,33 @@
     // Kronos only takes a typed time/date when you leave the box (the bar and end date
     // update then), so leave it like Zack moving on to the next box
     await sleep(150);
-    if (document.activeElement === el) el.blur();
-    else { el.dispatchEvent(new FocusEvent("blur")); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); }
+    const leave = () => {
+      if (document.activeElement === el) el.blur();
+      else { el.dispatchEvent(new FocusEvent("blur")); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); }
+    };
+    leave();
     await sleep(350);
+    // v3.22 (Zack 10-11: "it keeps typing some shifts with the wrong time"): Kronos's time box can jump on a
+    // half-typed time -> read it back; if it isn't the time we meant, put the whole time in at once, up to twice
+    const asMin = (v) => {
+      const m = /(\d{1,2})(?::(\d{2}))?\s*([ap])?/i.exec(String(v || ""));
+      if (!m) return null;
+      let h = Number(m[1]) % (m[3] ? 12 : 24);
+      if (m[3] && /p/i.test(m[3])) h += 12;
+      return h * 60 + Number(m[2] || 0);
+    };
+    if (/^\s*\d{1,2}:\d{2}\s*[ap]\.?m?\.?\s*$/i.test(text)) {
+      for (let k = 0; k < 2 && el.isConnected && asMin(el.value) !== asMin(text); k++) {
+        try { live("info", `the time box shows "${el.value}" instead of ${text}; putting it in again`); } catch (e) { /* optional */ }
+        el.focus();
+        setVal(el, text);
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(200);
+        leave();
+        await sleep(600);
+      }
+    }
   }
   function selectOption(el, text) {
     const opt = [...el.options].find((o) => norm(o.text) === norm(text)) || [...el.options].find((o) => norm(o.value) === norm(text));
