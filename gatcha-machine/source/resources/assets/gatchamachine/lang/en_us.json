@@ -5,6 +5,7 @@
   "gatchamachine.unlocked": "Gatcha Machine unlocked! You now earn 5 points every 5 seconds, plus bonuses for new Pokedex entries.",
   "gatchamachine.dex.species": "+%s Gatcha points (new Pokemon!)",
   "gatchamachine.dex.palette": "+%s Gatcha points (new palette!)",
+  "gatchamachine.shiny": "+%s Gatcha points for catching a shiny!",
   "gatchamachine.dex.form": "+%s Gatcha points (new form!)",
   "gatchamachine.locked": "You need the Gatcha Machine achievement first.",
   "gatchamachine.busy": "Your last boss is still on its way!",

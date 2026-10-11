@@ -5,7 +5,7 @@ A Pixelmon add-on mod: earn points and spend them on a case-opening spin that sp
 **For:** Minecraft 1.21.1, NeoForge, Pixelmon 1.21.1-9.4.1 (or newer 9.4.x). Singleplayer or LAN.
 
 ## Install
-1. Download `gatchamachine-1.0.0.jar` from the release `gatcha-machine-v1`.
+1. Download `gatchamachine-1.1.0.jar` from the release `gatcha-machine-v1.1`.
 2. Put it in your instance's `mods` folder, next to the Pixelmon jar.
 3. On LAN, everyone joining needs it too.
 
@@ -13,6 +13,7 @@ A Pixelmon add-on mod: earn points and spend them on a case-opening spin that sp
 - **Craft the Gatcha Machine:** glass across the top, glass / Poke Ball / glass in the middle, iron ingot / gold ingot / iron ingot on the bottom.
 - Having it in your inventory earns the **Insert Coin** achievement. Your points only start counting after that.
 - **Points:** +5 every 5 seconds. For a new Pokedex entry: +200 for a new Pokemon, +100 for a new palette, +50 for a new form (one reward per entry, whichever is biggest).
+- **Shiny catches:** +500 for every shiny you catch, even repeats of a species. Stacks with the Pokedex reward.
 - **Right-click the machine** to open it. Pick a tab and press **Open**:
   - Rare 2250, Epic 4500, Legendary 6750, Ultimate 9000.
   - Ultimates are always a Mega or Primal form.

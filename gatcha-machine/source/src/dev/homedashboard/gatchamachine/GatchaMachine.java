@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.attachment.AttachmentType;
@@ -54,6 +55,7 @@ public class GatchaMachine {
             }
         });
         Pixelmon.EVENT_BUS.addListener(PokedexPoints::onPokedex);
+        Pixelmon.EVENT_BUS.addListener(EventPriority.LOWEST, PokedexPoints::onCapture); // after anything that might cancel the catch
         if (Boolean.getBoolean("gatchamachine.selftest")) NeoForge.EVENT_BUS.addListener(SelfTest::run);
     }
 
