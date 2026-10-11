@@ -1467,6 +1467,7 @@
   }
   async function runAll() {
     running = true; stopAsked = false;
+    const maybeThere = [];
     const { confirm, pace } = settings();
     // right-click > Add shift needs Chrome's real mouse: put Chrome's debugging bar up now, before any menu is open
     if (openHow === "context" || (recipe && recipe.steps.some((x) => x.how === "context"))) {
@@ -1485,6 +1486,14 @@
         const flagged = new Set(checkReplies.flagged);
         checkReplies = null;
         if (stopAsked) break;
+        // v3.29 (Zack 10-11: "run through any ticked shifts automatically instead of asking me after each server"):
+        // only "ask before every shift" still stops here; otherwise go straight on, leaving out shifts that look
+        // like they're already on the schedule (listed at the end)
+        if (confirm !== "shift") {
+          const keep = todo.filter((s) => !flagged.has(s.id));
+          for (const s of todo.filter((x) => flagged.has(x.id))) { maybeThere.push(s); live("info", `left out (looks already on the schedule): ${s.kronosName} ${s.date}`); }
+          todo = keep;
+        } else {
         const ans = await ask(`<p><b>${esc(day)}${byPerson ? "" : ` ${esc(todo[0].date)}`}</b> &mdash; untick anything you don't want added:</p>
           <ol class="sh-list">${todo.map((s, i) => `<li class="${flagged.has(s.id) ? "sh-flag" : ""}"><input type="checkbox" data-pick="${i}" ${flagged.has(s.id) ? "" : "checked"}><span>${esc(s.day)}</span><span>${shiftLine(s)}</span>${flagged.has(s.id) ? '<span title="Looks like this is already on the schedule">&#9888; already there?</span>' : ""}</li>`).join("")}</ol>`,
           [["go", "Add the ticked shifts", "sh-primary"], ["skip", byPerson ? "Skip this person" : "Skip this day"]]);
@@ -1492,6 +1501,7 @@
         if (ans === "skip") continue;
         const ticks = [...$("#auto").querySelectorAll("[data-pick]")];
         todo = todo.filter((_, i) => ticks[i] ? ticks[i].checked : true);
+        }
         for (let i = 0; i < todo.length; i++) {
           if (stopAsked) break;
           const s = todo[i];
@@ -1505,7 +1515,7 @@
     } finally {
       running = false;
       await loadAll();
-      $("#auto").innerHTML = `<p>${stopAsked ? "Stopped." : "All done for this week."} Shifts I saved are ticked off in the Copy tab.</p><div class="sh-row"><button id="again">OK</button></div>`;
+      $("#auto").innerHTML = `<p>${stopAsked ? "Stopped." : "All done for this week."} Shifts I saved are ticked off in the Copy tab.</p>${maybeThere.length ? `<p>I left these out because they look like they're already on the schedule. Check them and add any that are missing by hand:</p><ul class="sh-list">${maybeThere.map((s) => `<li>${esc(s.day)} ${shiftLine(s)}</li>`).join("")}</ul>` : ""}<div class="sh-row"><button id="again">OK</button></div>`;
       $("#again").onclick = renderAuto;
     }
   }
