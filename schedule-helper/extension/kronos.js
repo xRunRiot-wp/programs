@@ -1007,6 +1007,7 @@
       post(window.top, { type: "result", reqId: m.reqId, ...res });
     }
     if (m.type === "there" && m.frameKey === FRAME_KEY) post(window.top, { type: "result", reqId: m.reqId, ...(await stillThere(m)) });
+    if (m.type === "closeform") closeOpenForm();   // v3.33: the Add Shift form lives in Kronos's inner frame
     if (m.type === "check") post(window.top, { type: "check-result", reqId: m.reqId, flagged: checkExisting(m.shifts) });
     if (m.type === "snap") { let snap; try { snap = snapshot(); } catch (err) { snap = { frame: location.pathname, error: String(err) }; } post(window.top, { type: "snap-result", reqId: m.reqId, snap }); }
     if (!IS_TOP) return;
@@ -1531,10 +1532,10 @@
           if (r === "already") { maybeThere.push(s); done = await S.markDone(s.id, true); await loadAll(); continue; }
           // v3.32 (looking ahead): a shift skipped on a stuck card can leave Kronos's Add Shift form open, and the
           // next right-click then lands under it -> close it before going on
-          if (r === "skipped" && !skipAsked) { await closeOpenForm(); continue; }
+          if (r === "skipped" && !skipAsked) { await closeFormEverywhere(); continue; }
           if (skipAsked) {   // skipped from the progress card: close a half-filled Kronos form, then go on
             live("info", `Zack skipped ${skipAsked === "person" ? "the rest of this person" : "this shift"}: ${s.kronosName} ${s.date}`);
-            await closeOpenForm();
+            await closeFormEverywhere();
             const who = skipAsked; skipAsked = null;
             if (who === "person") break;
             continue;
@@ -1550,6 +1551,13 @@
       $("#auto").innerHTML = `<p>${stopAsked ? "Stopped." : "All done for this week."} Shifts I saved are ticked off in the Copy tab.</p>${maybeThere.length ? `<p>I left these out because they look like they're already on the schedule. Check them and add any that are missing by hand:</p><ul class="sh-list">${maybeThere.map((s) => `<li>${esc(s.day)} ${shiftLine(s)}</li>`).join("")}</ul>` : ""}<div class="sh-row"><button id="again">OK</button></div>`;
       $("#again").onclick = renderAuto;
     }
+  }
+
+  // v3.33 (looking ahead): 3.32 only looked on the outer page, but Kronos opens Add Shift inside its own
+  // inner frame -> every frame closes its own open form, then wait for them to finish
+  async function closeFormEverywhere() {
+    broadcast({ type: "closeform" });
+    await sleep(3200);
   }
 
   // a half-filled Add Shift form (or Transfer window) is closed with its Cancel / Close button, else Escape
