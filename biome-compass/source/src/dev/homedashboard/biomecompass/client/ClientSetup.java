@@ -63,10 +63,6 @@ public final class ClientSetup {
                     double dx = pos.pos().getX() + 0.5 - mc.player.getX(), dz = pos.pos().getZ() + 0.5 - mc.player.getZ();
                     lines.add(Component.translatable("biomecompass.hud.coords", pos.pos().getX(), pos.pos().getZ()));
                     lines.add(Component.translatable("biomecompass.hud.distance", (int) Math.sqrt(dx * dx + dz * dz)));
-                    // which way to turn: Minecraft yaw grows to the right, facing = (-sin, cos)
-                    double targetYaw = Math.toDegrees(Math.atan2(-dx, dz));
-                    int sector = Math.floorMod(Math.round((float) (net.minecraft.util.Mth.wrapDegrees(targetYaw - mc.player.getYRot()) / 45.0)), 8);
-                    lines.add(Component.translatable("biomecompass.hud.direction", Component.translatable("biomecompass.dir." + sector)));
                 }
             }
             default -> { return; }
