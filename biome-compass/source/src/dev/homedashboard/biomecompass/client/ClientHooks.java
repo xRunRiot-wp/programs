@@ -10,4 +10,8 @@ public final class ClientHooks {
     public static void onOpen(Network.Open p) {
         Minecraft.getInstance().setScreen(new CompassScreen(p));
     }
+
+    public static void onAbsorb(Network.Absorb p) {
+        AbsorbEffect.start(p.entityId(), p.biome());
+    }
 }

@@ -40,6 +40,7 @@ public final class ClientSetup {
         modBus.addListener((RegisterGuiLayersEvent e) ->
                 e.registerAboveAll(ResourceLocation.fromNamespaceAndPath(BiomeCompass.MODID, "hud"), ClientSetup::renderHud));
         NeoForge.EVENT_BUS.addListener(ClientSetup::onScreenInit);
+        NeoForge.EVENT_BUS.addListener(AbsorbEffect::tick);
     }
 
     private static void renderHud(GuiGraphics g, DeltaTracker delta) {

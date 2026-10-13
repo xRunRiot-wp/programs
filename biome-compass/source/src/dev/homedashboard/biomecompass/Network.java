@@ -42,6 +42,14 @@ public final class Network {
         @Override public Type<Open> type() { return TYPE; }
     }
 
+    /** Plays the "absorbing nature essence" effect on a player (sent to them and everyone who can see them). */
+    public record Absorb(int entityId, String biome) implements CustomPacketPayload {
+        public static final Type<Absorb> TYPE = typeOf("absorb");
+        public static final StreamCodec<ByteBuf, Absorb> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, Absorb::entityId, ByteBufCodecs.STRING_UTF8, Absorb::biome, Absorb::new);
+        @Override public Type<Absorb> type() { return TYPE; }
+    }
+
     /** action: "open", "search", "teleport", "invite", "leave"; arg = biome id or player name. */
     public record Action(String action, String arg) implements CustomPacketPayload {
         public static final Type<Action> TYPE = typeOf("action");
@@ -53,6 +61,7 @@ public final class Network {
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar r = event.registrar("1");
         r.playToClient(Open.TYPE, Open.CODEC, (p, ctx) -> dev.homedashboard.biomecompass.client.ClientHooks.onOpen(p));
+        r.playToClient(Absorb.TYPE, Absorb.CODEC, (p, ctx) -> dev.homedashboard.biomecompass.client.ClientHooks.onAbsorb(p));
         r.playToServer(Action.TYPE, Action.CODEC, Network::onAction);
     }
 
