@@ -1573,9 +1573,15 @@
 
   // a half-filled Add Shift form (or Transfer window) is closed with its Cancel / Close button, else Escape
   async function closeOpenForm() {
-    for (let k = 0; k < 3; k++) {
-      const btn = [...document.querySelectorAll("[role=dialog] button,[aria-modal=true] button,krn-slide-out-container button,[role=dialog] [role=button]")].filter((b) => visible(b) && notPanel(b))
-        .find((b) => /^(cancel|close|discard|discard changes|don't save|do not save)$/i.test((b.innerText || b.getAttribute("aria-label") || b.title || "").trim()));
+    // v3.36 (looking ahead): a "discard your changes?" question has its own Cancel (= keep editing),
+    // so its discard/yes answer is picked first, else Cancel would loop on the question
+    const label = (b) => (b.innerText || b.getAttribute("aria-label") || b.title || "").trim();
+    for (let k = 0; k < 4; k++) {
+      const btns = [...document.querySelectorAll("[role=dialog] button,[aria-modal=true] button,[role=alertdialog] button,krn-slide-out-container button,[role=dialog] [role=button]")].filter((b) => visible(b) && notPanel(b));
+      const asking = (b) => /unsaved|discard|lose (your |the |any )?changes|are you sure/i.test(b.closest("[role=dialog],[role=alertdialog],[aria-modal=true]")?.innerText || "");
+      const btn = btns.find((b) => /^(discard|discard changes|don't save|do not save|leave|leave without saving)$/i.test(label(b)))
+        || btns.find((b) => asking(b) && /^(yes|ok)$/i.test(label(b)))
+        || btns.find((b) => /^(cancel|close)$/i.test(label(b)));
       if (!btn) break;
       btn.click();
       await sleep(800);
