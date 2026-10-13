@@ -31,6 +31,8 @@ import java.util.UUID;
 public class BiomeCompass {
     public static final String MODID = "biomecompass";
     public static final int UNLOCK_SECONDS = 10;
+    /** Compass target meaning "nearest biome you haven't unlocked"; its name is "Undiscovered biome" (lang file). */
+    public static final ResourceLocation UNDISCOVERED = ResourceLocation.fromNamespaceAndPath(MODID, "undiscovered");
 
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MODID);
     public static final DeferredItem<Item> COMPASS = ITEMS.registerItem("biome_compass", CompassItem::new, new Item.Properties().stacksTo(1));

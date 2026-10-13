@@ -22,7 +22,7 @@ import java.util.Set;
 
 /** Biome list (only unlocked biomes of this dimension) with search box, plus a Group page for invites. */
 public class CompassScreen extends Screen {
-    private static final int W = 250, H = 248, ROW = 12, ROWS = 10;
+    private static final int W = 250, H = 270, ROW = 12, ROWS = 10;
     private static final int BG = 0xE0101418, BORDER = 0xFF4E7A3A, SELECTED = 0x804E7A3A, HOVER = 0x40FFFFFF;
 
     private final Network.Open data;
@@ -72,6 +72,10 @@ public class CompassScreen extends Screen {
             nextButton.setTooltip(Tooltip.create(Component.translatable("biomecompass.gui.next_tip")));
             clearButton = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.clear"), b -> Network.sendAction("clear", ""))
                     .bounds(x + 126, y + H - 48, 116, 20).build());
+            Button undiscovered = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.undiscovered"), b -> Network.sendAction("undiscovered", ""))
+                    .bounds(x + 8, y + H - 70, W - 16, 20).build());
+            undiscovered.active = unlocked.size() < possibleCount;
+            undiscovered.setTooltip(Tooltip.create(Component.translatable("biomecompass.gui.undiscovered_tip")));
             tick();
         } else {
             int row = y + 46 + Math.max(1, data.group().size()) * ROW + 20;
@@ -156,7 +160,7 @@ public class CompassScreen extends Screen {
             int locked = possibleCount - unlocked.size();
             if (locked > 0)
                 g.drawCenteredString(font, Component.translatable("biomecompass.gui.locked", locked, BiomeCompass.UNLOCK_SECONDS), x + W / 2, listTop + ROWS * ROW + 6, 0xFF8FB86F);
-            if (tracked != null) g.drawCenteredString(font, status(t, tracked), x + W / 2, y + H - 62, 0xFFE8D27A);
+            if (tracked != null) g.drawCenteredString(font, status(t, tracked), x + W / 2, y + H - 84, 0xFFE8D27A);
         } else {
             g.drawCenteredString(font, Component.translatable("biomecompass.gui.group_title"), x + W / 2, y + 18, 0xFFAAAAAA);
             int row = y + 34;

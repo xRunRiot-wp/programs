@@ -30,7 +30,10 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
 
     private final ServerPlayer player;
     private final ServerLevel level;
-    private final ResourceKey<Biome> target;
+    /** Biomes that count as a hit (one biome, or every still-locked biome for "Find Undiscovered"). */
+    private final Set<ResourceKey<Biome>> targets;
+    /** What to call it in messages: the biome, or biomecompass:undiscovered. */
+    private final net.minecraft.resources.ResourceLocation label;
     private final int searchId, gcx, gcz, cx, cz, maxRing;
     private final BiomeSource source;
     private final Climate.Sampler sampler;
@@ -39,6 +42,7 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
     /** Grid cells (packed x/z) belonging to already-found patches. */
     private final Set<Long> skipped = new HashSet<>();
     private final ArrayDeque<long[]> flood = new ArrayDeque<>(); // {cellX, cellZ, y}
+    private ResourceKey<Biome> floodBiome; // the biome of the patch being traced
     private int floodIndex, floodCount;
     private int ring, index;
     private BlockPos best;
@@ -46,9 +50,14 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
     private boolean finished;
 
     public BiomeSearch(ServerPlayer player, ResourceKey<Biome> target, int searchId, List<BlockPos> skip) {
+        this(player, Set.of(target), target.location(), searchId, skip);
+    }
+
+    public BiomeSearch(ServerPlayer player, Set<ResourceKey<Biome>> targets, net.minecraft.resources.ResourceLocation label, int searchId, List<BlockPos> skip) {
         this.player = player;
         this.level = player.serverLevel();
-        this.target = target;
+        this.targets = targets;
+        this.label = label;
         this.searchId = searchId;
         this.skip = skip;
         this.cx = player.getBlockX();
@@ -73,9 +82,13 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
         return ((long) x << 32) | (z & 0xFFFFFFFFL);
     }
 
-    private boolean isTarget(int gx, int y, int gz) {
+    private ResourceKey<Biome> biomeAt(int gx, int y, int gz) {
         int x = gx * STEP + STEP / 2, z = gz * STEP + STEP / 2;
-        return source.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), sampler).is(target);
+        return source.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), sampler).unwrapKey().orElse(null);
+    }
+
+    private boolean isTarget(int gx, int y, int gz) {
+        return targets.contains(biomeAt(gx, y, gz));
     }
 
     @Override
@@ -97,7 +110,8 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
             BlockPos p = skip.get(floodIndex++);
             int gx = Math.floorDiv(p.getX(), STEP), gz = Math.floorDiv(p.getZ(), STEP);
             floodCount = 0;
-            if (skipped.add(key(gx, gz))) flood.add(new long[]{gx, gz, p.getY()});
+            floodBiome = biomeAt(gx, p.getY(), gz);
+            if (skipped.add(key(gx, gz)) && floodBiome != null) flood.add(new long[]{gx, gz, p.getY()});
             return true;
         }
         for (int n = 0; n < FLOOD_PER_CALL && !flood.isEmpty(); n++) {
@@ -107,7 +121,7 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
             for (int[] d : around) {
                 int nx = (int) c[0] + d[0], nz = (int) c[1] + d[1];
                 if (Math.abs(nx - gcx) > maxRing + 1 || Math.abs(nz - gcz) > maxRing + 1) continue;
-                if (!skipped.contains(key(nx, nz)) && isTarget(nx, (int) c[2], nz)) {
+                if (!skipped.contains(key(nx, nz)) && floodBiome.equals(biomeAt(nx, (int) c[2], nz))) {
                     skipped.add(key(nx, nz));
                     flood.add(new long[]{nx, nz, c[2]});
                 }
@@ -156,7 +170,7 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
         ItemStack stack = CompassFinder.findBySearch(player, searchId);
         if (stack.isEmpty()) return;
         CompassTarget old = CompassItem.target(stack);
-        Component name = BiomeCompass.biomeName(target.location());
+        Component name = BiomeCompass.biomeName(label);
         if (best != null) {
             stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.FOUND, Optional.of(GlobalPos.of(level.dimension(), best)), searchId, old.skip()));
             player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.found" : "biomecompass.found_next", name, (int) Math.sqrt(bestDist)), true);

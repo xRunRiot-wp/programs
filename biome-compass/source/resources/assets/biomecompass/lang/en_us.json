@@ -46,5 +46,9 @@
  "biomecompass.gui.next_tip": "Skip the patch you're pointed at and find the next-nearest one of the same biome",
  "biomecompass.gui.clear": "Stop Tracking",
  "biomecompass.gui.tracking": "Tracking %s",
- "biomecompass.gui.tracking_dist": "Tracking %s: %s blocks away"
+ "biomecompass.gui.tracking_dist": "Tracking %s: %s blocks away",
+ "biome.biomecompass.undiscovered": "Undiscovered biome",
+ "biomecompass.all_unlocked": "You've unlocked every biome in this dimension!",
+ "biomecompass.gui.undiscovered": "Find Undiscovered",
+ "biomecompass.gui.undiscovered_tip": "Point to the nearest biome you haven't unlocked yet"
 }
