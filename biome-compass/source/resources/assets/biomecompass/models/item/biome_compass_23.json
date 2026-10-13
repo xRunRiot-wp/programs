@@ -1,0 +1,7 @@
+{
+ "parent": "minecraft:item/generated",
+ "textures": {
+  "layer0": "minecraft:item/compass_23",
+  "layer1": "biomecompass:item/biome_compass_leaf"
+ }
+}

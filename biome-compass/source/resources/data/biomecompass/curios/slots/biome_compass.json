@@ -1,0 +1,6 @@
+{
+  "order": 250,
+  "size": 1,
+  "icon": "biomecompass:slot/empty_biome_compass_slot",
+  "validators": ["curios:tag"]
+}

@@ -1,0 +1,207 @@
+{
+ "parent": "minecraft:item/generated",
+ "textures": {
+  "layer0": "minecraft:item/compass_16",
+  "layer1": "biomecompass:item/biome_compass_leaf"
+ },
+ "overrides": [
+  {
+   "predicate": {
+    "biomecompass:angle": 0.0
+   },
+   "model": "biomecompass:item/biome_compass_16"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.015625
+   },
+   "model": "biomecompass:item/biome_compass_17"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.046875
+   },
+   "model": "biomecompass:item/biome_compass_18"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.078125
+   },
+   "model": "biomecompass:item/biome_compass_19"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.109375
+   },
+   "model": "biomecompass:item/biome_compass_20"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.140625
+   },
+   "model": "biomecompass:item/biome_compass_21"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.171875
+   },
+   "model": "biomecompass:item/biome_compass_22"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.203125
+   },
+   "model": "biomecompass:item/biome_compass_23"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.234375
+   },
+   "model": "biomecompass:item/biome_compass_24"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.265625
+   },
+   "model": "biomecompass:item/biome_compass_25"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.296875
+   },
+   "model": "biomecompass:item/biome_compass_26"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.328125
+   },
+   "model": "biomecompass:item/biome_compass_27"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.359375
+   },
+   "model": "biomecompass:item/biome_compass_28"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.390625
+   },
+   "model": "biomecompass:item/biome_compass_29"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.421875
+   },
+   "model": "biomecompass:item/biome_compass_30"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.453125
+   },
+   "model": "biomecompass:item/biome_compass_31"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.484375
+   },
+   "model": "biomecompass:item/biome_compass_00"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.515625
+   },
+   "model": "biomecompass:item/biome_compass_01"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.546875
+   },
+   "model": "biomecompass:item/biome_compass_02"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.578125
+   },
+   "model": "biomecompass:item/biome_compass_03"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.609375
+   },
+   "model": "biomecompass:item/biome_compass_04"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.640625
+   },
+   "model": "biomecompass:item/biome_compass_05"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.671875
+   },
+   "model": "biomecompass:item/biome_compass_06"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.703125
+   },
+   "model": "biomecompass:item/biome_compass_07"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.734375
+   },
+   "model": "biomecompass:item/biome_compass_08"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.765625
+   },
+   "model": "biomecompass:item/biome_compass_09"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.796875
+   },
+   "model": "biomecompass:item/biome_compass_10"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.828125
+   },
+   "model": "biomecompass:item/biome_compass_11"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.859375
+   },
+   "model": "biomecompass:item/biome_compass_12"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.890625
+   },
+   "model": "biomecompass:item/biome_compass_13"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.921875
+   },
+   "model": "biomecompass:item/biome_compass_14"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.953125
+   },
+   "model": "biomecompass:item/biome_compass_15"
+  },
+  {
+   "predicate": {
+    "biomecompass:angle": 0.984375
+   },
+   "model": "biomecompass:item/biome_compass_16"
+  }
+ ]
+}

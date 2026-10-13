@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": ["SLS", "LCL", "SLS"],
+  "key": {
+    "S": {"tag": "minecraft:saplings"},
+    "L": {"tag": "minecraft:logs"},
+    "C": {"item": "minecraft:compass"}
+  },
+  "result": {"id": "biomecompass:biome_compass", "count": 1}
+}
