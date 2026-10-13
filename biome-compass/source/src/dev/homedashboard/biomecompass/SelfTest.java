@@ -49,29 +49,36 @@ final class SelfTest {
             var spawn = level.getSharedSpawnPos();
             a.moveTo(spawn.getX(), 100, spawn.getZ());
             ItemStack compass = new ItemStack(BiomeCompass.COMPASS.get());
-            compass.set(BiomeCompass.TARGET.get(), new CompassTarget("minecraft:plains", CompassTarget.SEARCHING, Optional.empty(), 42));
             a.setItemInHand(InteractionHand.MAIN_HAND, compass);
-            long t0 = System.nanoTime();
-            BiomeSearch s = new BiomeSearch(a, Biomes.PLAINS, 42);
-            int calls = 0;
-            while (s.hasWork() && calls < 5_000_000) { s.doWork(); calls++; }
-            CompassTarget result = CompassItem.target(a.getMainHandItem());
-            System.out.println(tag + "search plains: state=" + result.state() + " pos=" + result.pos().map(p -> p.pos().toShortString()).orElse("-")
-                    + " in " + (System.nanoTime() - t0) / 1_000_000 + " ms, " + calls + " calls");
-            t0 = System.nanoTime();
-            compass.set(BiomeCompass.TARGET.get(), new CompassTarget("minecraft:lush_caves", CompassTarget.SEARCHING, Optional.empty(), 43));
-            s = new BiomeSearch(a, Biomes.LUSH_CAVES, 43);
-            calls = 0;
-            while (s.hasWork() && calls < 5_000_000) { s.doWork(); calls++; }
-            result = CompassItem.target(a.getMainHandItem());
-            System.out.println(tag + "search lush caves: state=" + result.state() + " pos=" + result.pos().map(p -> p.pos().toShortString()).orElse("-")
-                    + " in " + (System.nanoTime() - t0) / 1_000_000 + " ms");
+            CompassTarget plains1 = search(a, Biomes.PLAINS, java.util.List.of(), tag + "search plains");
+            var p1 = plains1.pos().map(gp -> gp.pos()).orElse(null);
+            CompassTarget plains2 = p1 == null ? CompassTarget.NONE : search(a, Biomes.PLAINS, java.util.List.of(p1), tag + "find next plains");
+            var p2 = plains2.pos().map(gp -> gp.pos()).orElse(null);
+            CompassTarget plains3 = p2 == null ? CompassTarget.NONE : search(a, Biomes.PLAINS, java.util.List.of(p1, p2), tag + "find next again");
+            boolean nextOk = p2 != null && !p2.equals(p1) && plains3.pos().isPresent() && !plains3.pos().get().pos().equals(p2) && !plains3.pos().get().pos().equals(p1);
+            CompassTarget result = search(a, Biomes.LUSH_CAVES, java.util.List.of(), tag + "search lush caves");
             if (CompassFinder.curiosLoaded()) System.out.println(tag + "curios: " + CuriosCompat.check(a));
-            boolean ok = separate && shared && keepsOwn && result.state() == CompassTarget.FOUND;
+            boolean ok = separate && shared && keepsOwn && nextOk && result.state() == CompassTarget.FOUND;
+            System.out.println(tag + "findNext gives a different patch each time: " + nextOk);
             System.out.println(tag + (ok ? "PASS" : "FAIL"));
         } catch (Throwable t) {
             System.out.println(tag + "FAIL " + t);
             t.printStackTrace(System.out);
         }
+    }
+
+    private static int nextId = 100;
+
+    private static CompassTarget search(FakePlayer a, net.minecraft.resources.ResourceKey<net.minecraft.world.level.biome.Biome> biome, java.util.List<net.minecraft.core.BlockPos> skip, String label) {
+        int id = nextId++;
+        a.getMainHandItem().set(BiomeCompass.TARGET.get(), new CompassTarget(biome.location().toString(), CompassTarget.SEARCHING, Optional.empty(), id, skip));
+        long t0 = System.nanoTime();
+        BiomeSearch s = new BiomeSearch(a, biome, id, skip);
+        int calls = 0;
+        while (s.hasWork() && calls < 5_000_000) { s.doWork(); calls++; }
+        CompassTarget r = CompassItem.target(a.getMainHandItem());
+        System.out.println(label + ": state=" + r.state() + " pos=" + r.pos().map(p -> p.pos().toShortString()).orElse("-")
+                + " in " + (System.nanoTime() - t0) / 1_000_000 + " ms, " + calls + " calls");
+        return r;
     }
 }

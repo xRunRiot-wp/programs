@@ -40,5 +40,10 @@
  "biomecompass.hud.biome": "Biome: %s",
  "biomecompass.hud.other_dimension": "In another dimension",
  "biomecompass.hud.coords": "X: %s  Z: %s",
- "biomecompass.hud.distance": "Distance: %s blocks"
+ "biomecompass.hud.distance": "Distance: %s blocks",
+ "biomecompass.found_next": "Next %s found, %s blocks away",
+ "biomecompass.no_other": "No other %s within %s blocks",
+ "biomecompass.gui.next": "Find Next",
+ "biomecompass.gui.next_tip": "Skip the patch you're pointed at and find the next-nearest one of the same biome",
+ "biomecompass.gui.clear": "Stop Tracking"
 }

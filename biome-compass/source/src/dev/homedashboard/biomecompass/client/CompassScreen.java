@@ -1,10 +1,14 @@
 package dev.homedashboard.biomecompass.client;
 
 import dev.homedashboard.biomecompass.BiomeCompass;
+import dev.homedashboard.biomecompass.CompassFinder;
+import dev.homedashboard.biomecompass.CompassItem;
+import dev.homedashboard.biomecompass.CompassTarget;
 import dev.homedashboard.biomecompass.Network;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -18,7 +22,7 @@ import java.util.Set;
 
 /** Biome list (only unlocked biomes of this dimension) with search box, plus a Group page for invites. */
 public class CompassScreen extends Screen {
-    private static final int W = 250, H = 214, ROW = 12, ROWS = 11;
+    private static final int W = 250, H = 236, ROW = 12, ROWS = 10;
     private static final int BG = 0xE0101418, BORDER = 0xFF4E7A3A, SELECTED = 0x804E7A3A, HOVER = 0x40FFFFFF;
 
     private final Network.Open data;
@@ -66,6 +70,14 @@ public class CompassScreen extends Screen {
                         .bounds(x + 87, y + H - 26, 76, 20).build());
             addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.group"), b -> { groupPage = true; init(); })
                     .bounds(x + (data.canTeleport() ? 166 : 126), y + H - 26, data.canTeleport() ? 76 : 116, 20).build());
+            CompassTarget current = current();
+            Button next = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.next"), b -> { Network.sendAction("next", ""); onClose(); })
+                    .bounds(x + 8, y + H - 48, 116, 20).build());
+            next.active = current.state() == CompassTarget.FOUND;
+            next.setTooltip(Tooltip.create(Component.translatable("biomecompass.gui.next_tip")));
+            Button clear = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.clear"), b -> { Network.sendAction("clear", ""); onClose(); })
+                    .bounds(x + 126, y + H - 48, 116, 20).build());
+            clear.active = !current.biome().isEmpty();
         } else {
             int row = y + 46 + Math.max(1, data.group().size()) * ROW + 20;
             for (String name : data.online()) {
@@ -83,6 +95,13 @@ public class CompassScreen extends Screen {
             addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.back"), b -> { groupPage = false; init(); })
                     .bounds(x + 126, y + H - 26, 116, 20).build());
         }
+    }
+
+    /** What the compass the server would use (hand, Curios slot, then inventory) is tracking. */
+    private static CompassTarget current() {
+        var player = net.minecraft.client.Minecraft.getInstance().player;
+        if (player == null) return CompassTarget.NONE;
+        return CompassItem.target(CompassFinder.find(player, s -> true));
     }
 
     private void applyFilter() {

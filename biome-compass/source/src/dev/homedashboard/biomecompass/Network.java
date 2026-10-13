@@ -80,6 +80,11 @@ public final class Network {
         switch (a.action()) {
             case "open" -> { if (!CompassFinder.find(p, s -> true).isEmpty()) sendOpen(p); }
             case "search" -> search(p, u, a.arg());
+            case "next" -> next(p);
+            case "clear" -> {
+                ItemStack stack = CompassFinder.find(p, s -> !CompassItem.target(s).biome().isEmpty());
+                if (!stack.isEmpty()) stack.set(BiomeCompass.TARGET.get(), CompassTarget.NONE);
+            }
             case "teleport" -> teleport(p);
             case "invite" -> u.invite(p, a.arg());
             case "leave" -> { u.leave(p); sendOpen(p); }
@@ -95,8 +100,24 @@ public final class Network {
         if (stack.isEmpty()) return;
         var key = net.minecraft.resources.ResourceKey.create(Registries.BIOME, id);
         int searchId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-        stack.set(BiomeCompass.TARGET.get(), new CompassTarget(biome, CompassTarget.SEARCHING, Optional.empty(), searchId));
-        WorldWorkerManager.addWorker(new BiomeSearch(p, key, searchId));
+        stack.set(BiomeCompass.TARGET.get(), new CompassTarget(biome, CompassTarget.SEARCHING, Optional.empty(), searchId, List.of()));
+        WorldWorkerManager.addWorker(new BiomeSearch(p, key, searchId, List.of()));
+    }
+
+    /** Find Next: skip every patch found so far for this biome and look again from where the player stands. */
+    private static void next(ServerPlayer p) {
+        ItemStack stack = CompassFinder.find(p, s -> CompassItem.target(s).state() == CompassTarget.FOUND);
+        if (stack.isEmpty()) return;
+        CompassTarget t = CompassItem.target(stack);
+        var pos = t.pos().orElse(null);
+        ResourceLocation id = ResourceLocation.tryParse(t.biome());
+        if (pos == null || id == null || !pos.dimension().equals(p.level().dimension())) return;
+        List<net.minecraft.core.BlockPos> skip = new ArrayList<>(t.skip());
+        skip.add(pos.pos());
+        while (skip.size() > CompassTarget.MAX_SKIPS) skip.remove(0);
+        int searchId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+        stack.set(BiomeCompass.TARGET.get(), new CompassTarget(t.biome(), CompassTarget.SEARCHING, Optional.empty(), searchId, List.copyOf(skip)));
+        WorldWorkerManager.addWorker(new BiomeSearch(p, net.minecraft.resources.ResourceKey.create(Registries.BIOME, id), searchId, List.copyOf(skip)));
     }
 
     private static void teleport(ServerPlayer p) {

@@ -13,35 +13,48 @@ import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
 import net.neoforged.neoforge.common.WorldWorkerManager;
 
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
- * Finds the nearest biome in square rings around the player, 32 blocks apart, checking every 64 blocks of height
+ * Finds the nearest biome in square rings around the player on a 32-block grid, checking every 64 blocks of height
  * (so cave biomes are found too). Runs in the spare time of each server tick, so the game never freezes.
+ * For "Find Next", it first flood-fills each already-found patch on the grid and skips those cells.
  */
 public class BiomeSearch implements WorldWorkerManager.IWorker {
     public static final int RADIUS = 10000, STEP = 32, Y_STEP = 64;
-    private static final int POINTS_PER_CALL = 16;
+    private static final int POINTS_PER_CALL = 16, FLOOD_PER_CALL = 64, MAX_PATCH_CELLS = 40000;
 
     private final ServerPlayer player;
     private final ServerLevel level;
     private final ResourceKey<Biome> target;
-    private final int searchId, cx, cz, maxRing;
+    private final int searchId, gcx, gcz, cx, cz, maxRing;
     private final BiomeSource source;
     private final Climate.Sampler sampler;
     private final int[] ys;
+    private final List<BlockPos> skip;
+    /** Grid cells (packed x/z) belonging to already-found patches. */
+    private final Set<Long> skipped = new HashSet<>();
+    private final ArrayDeque<long[]> flood = new ArrayDeque<>(); // {cellX, cellZ, y}
+    private int floodIndex, floodCount;
     private int ring, index;
     private BlockPos best;
     private long bestDist = Long.MAX_VALUE;
     private boolean finished;
 
-    public BiomeSearch(ServerPlayer player, ResourceKey<Biome> target, int searchId) {
+    public BiomeSearch(ServerPlayer player, ResourceKey<Biome> target, int searchId, List<BlockPos> skip) {
         this.player = player;
         this.level = player.serverLevel();
         this.target = target;
         this.searchId = searchId;
+        this.skip = skip;
         this.cx = player.getBlockX();
         this.cz = player.getBlockZ();
+        this.gcx = Math.floorDiv(cx, STEP);
+        this.gcz = Math.floorDiv(cz, STEP);
         this.maxRing = RADIUS / STEP;
         this.source = level.getChunkSource().getGenerator().getBiomeSource();
         this.sampler = level.getChunkSource().randomState().sampler();
@@ -49,6 +62,20 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
         int n = Math.max(1, (max - min) / Y_STEP);
         ys = new int[n];
         for (int i = 0; i < n; i++) ys[i] = min + Y_STEP / 2 + i * Y_STEP;
+        // check near sea level first, so surface biomes are found (and their patch traced) at the surface, not deep underground
+        int sea = level.getSeaLevel();
+        Integer[] boxed = java.util.Arrays.stream(ys).boxed().toArray(Integer[]::new);
+        java.util.Arrays.sort(boxed, java.util.Comparator.comparingInt(y -> Math.abs(y - sea)));
+        for (int i = 0; i < n; i++) ys[i] = boxed[i];
+    }
+
+    private static long key(int x, int z) {
+        return ((long) x << 32) | (z & 0xFFFFFFFFL);
+    }
+
+    private boolean isTarget(int gx, int y, int gz) {
+        int x = gx * STEP + STEP / 2, z = gz * STEP + STEP / 2;
+        return source.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), sampler).is(target);
     }
 
     @Override
@@ -60,6 +87,36 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
     public boolean doWork() {
         if (finished) return false;
         if (player.isRemoved() || player.level() != level) { finished = true; return false; }
+        return floodStep() || searchStep();
+    }
+
+    /** Marks the patches already found (one at a time); true while there is still flooding to do. */
+    private boolean floodStep() {
+        if (flood.isEmpty()) {
+            if (floodIndex >= skip.size()) return false;
+            BlockPos p = skip.get(floodIndex++);
+            int gx = Math.floorDiv(p.getX(), STEP), gz = Math.floorDiv(p.getZ(), STEP);
+            floodCount = 0;
+            if (skipped.add(key(gx, gz))) flood.add(new long[]{gx, gz, p.getY()});
+            return true;
+        }
+        for (int n = 0; n < FLOOD_PER_CALL && !flood.isEmpty(); n++) {
+            long[] c = flood.poll();
+            if (++floodCount > MAX_PATCH_CELLS) { flood.clear(); break; } // huge patch (an ocean): skip what we have
+            int[][] around = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+            for (int[] d : around) {
+                int nx = (int) c[0] + d[0], nz = (int) c[1] + d[1];
+                if (Math.abs(nx - gcx) > maxRing + 1 || Math.abs(nz - gcz) > maxRing + 1) continue;
+                if (!skipped.contains(key(nx, nz)) && isTarget(nx, (int) c[2], nz)) {
+                    skipped.add(key(nx, nz));
+                    flood.add(new long[]{nx, nz, c[2]});
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean searchStep() {
         for (int n = 0; n < POINTS_PER_CALL; n++) {
             int len = ring == 0 ? 1 : 8 * ring;
             if (index >= len) {
@@ -80,9 +137,11 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
                 }
             }
             index++;
-            int x = cx + dx * STEP, z = cz + dz * STEP;
+            int gx = gcx + dx, gz = gcz + dz;
+            if (skipped.contains(key(gx, gz))) continue;
             for (int y : ys) {
-                if (source.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y), QuartPos.fromBlock(z), sampler).is(target)) {
+                if (isTarget(gx, y, gz)) {
+                    int x = gx * STEP + STEP / 2, z = gz * STEP + STEP / 2;
                     long d = (long) (x - cx) * (x - cx) + (long) (z - cz) * (z - cz);
                     if (d < bestDist) { bestDist = d; best = new BlockPos(x, y, z); }
                     break;
@@ -97,12 +156,18 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
         ItemStack stack = CompassFinder.findBySearch(player, searchId);
         if (stack.isEmpty()) return;
         CompassTarget old = CompassItem.target(stack);
+        Component name = BiomeCompass.biomeName(target.location());
         if (best != null) {
-            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.FOUND, Optional.of(GlobalPos.of(level.dimension(), best)), searchId));
-            player.displayClientMessage(Component.translatable("biomecompass.found", BiomeCompass.biomeName(target.location()), (int) Math.sqrt(bestDist)), true);
+            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.FOUND, Optional.of(GlobalPos.of(level.dimension(), best)), searchId, old.skip()));
+            player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.found" : "biomecompass.found_next", name, (int) Math.sqrt(bestDist)), true);
         } else {
-            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.NOT_FOUND, Optional.empty(), searchId));
-            player.displayClientMessage(Component.translatable("biomecompass.not_found", BiomeCompass.biomeName(target.location()), RADIUS), true);
+            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.NOT_FOUND, Optional.empty(), searchId, old.skip()));
+            player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.not_found" : "biomecompass.no_other", name, RADIUS), true);
         }
+    }
+
+    /** For the self-test: the result without needing a compass. */
+    BlockPos best() {
+        return best;
     }
 }
