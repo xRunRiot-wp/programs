@@ -24,6 +24,10 @@ import java.util.List;
 public final class AbsorbEffect {
     private static final int MOTES = 14, DURATION = 28;
     private static final List<Mote> motes = new ArrayList<>();
+    /** The same essence on the top-left compass icon: ticks since it started (-1 = off) and the biome colour. */
+    private static int hudAge = -1, hudColor;
+    private static final int HUD_DURATION = DURATION + 10, HUD_MOTES = 10;
+    private static final float[] hudAngle = new float[HUD_MOTES], hudDelay = new float[HUD_MOTES];
 
     private record Mote(int entityId, Vec3 start, float swirl, int delay, DustParticleOptions dust, int[] age) {}
 
@@ -45,6 +49,46 @@ public final class AbsorbEffect {
                     new DustParticleOptions(c, 0.7f + r.nextFloat() * 0.4f), new int[1]));
         }
         mc.level.playLocalSound(e.getX(), e.getY(), e.getZ(), SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.PLAYERS, 0.6f, 1.6f, false);
+        if (mc.player != null && entityId == mc.player.getId()) {
+            hudAge = 0;
+            hudColor = rgb;
+            for (int i = 0; i < HUD_MOTES; i++) {
+                hudAngle[i] = (float) (i * Math.PI * 2 / HUD_MOTES + r.nextFloat() * 0.5);
+                hudDelay[i] = r.nextInt(8);
+            }
+        }
+    }
+
+    public static boolean hudActive() {
+        return hudAge >= 0;
+    }
+
+    /** Motes spiral into the icon (centre cx, cy), then the icon glows briefly in the biome's colour. */
+    public static void renderHud(net.minecraft.client.gui.GuiGraphics g, int cx, int cy, float partial) {
+        float age = hudAge + partial;
+        int base = 0xFFFFFF & brighten(hudColor, 0.35f);
+        for (int i = 0; i < HUD_MOTES; i++) {
+            float t = (age - hudDelay[i]) / DURATION;
+            if (t < 0 || t > 1) continue;
+            float pull = t * t, radius = 26 * (1 - pull);
+            double a = hudAngle[i] + t * Math.PI * 0.9;
+            int x = cx + (int) Math.round(Math.cos(a) * radius), y = cy + (int) Math.round(Math.sin(a) * radius);
+            int alpha = (int) (255 * Math.min(1, t * 4));
+            g.fill(x - 1, y - 1, x + 1, y + 1, (alpha << 24) | base);
+        }
+        float glow = (age - DURATION + 4) / 14f; // swells as the last motes land, then fades
+        if (glow > 0 && glow < 1) {
+            int alpha = (int) (110 * Math.sin(glow * Math.PI));
+            int s = 15 + (int) (glow * 4);
+            g.fill(cx - s, cy - s, cx + s, cy + s, (alpha << 24) | base);
+        }
+    }
+
+    private static int brighten(int rgb, float k) {
+        int r = (int) (((rgb >> 16) & 255) + (255 - ((rgb >> 16) & 255)) * k);
+        int gr = (int) (((rgb >> 8) & 255) + (255 - ((rgb >> 8) & 255)) * k);
+        int b = (int) ((rgb & 255) + (255 - (rgb & 255)) * k);
+        return (r << 16) | (gr << 8) | b;
     }
 
     private static float mix(int channel, float toWhite) {
@@ -53,6 +97,7 @@ public final class AbsorbEffect {
 
     public static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
+        if (hudAge >= 0 && !mc.isPaused() && ++hudAge > HUD_DURATION) hudAge = -1;
         if (motes.isEmpty()) return;
         if (mc.level == null || mc.isPaused()) { if (mc.level == null) motes.clear(); return; }
         Iterator<Mote> it = motes.iterator();

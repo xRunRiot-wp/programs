@@ -13,6 +13,6 @@ of this repo.
 | [Schedule Helper](schedule-helper/) | Chrome extension: HotSchedules Weekly Roster into Kronos/UKG Schedule Planner (copy mode or auto-fill with approval) | Release `schedule-helper-v3.3` |
 | [Card Art Pack](sts2-card-art/) | Slay the Spire 2: 180 custom card pictures (all Defect + Necrobinder cards) for the Card Art Editor mod | Release `sts2-card-art-v1` |
 | [Gatcha Machine](gatcha-machine/) | Pixelmon add-on mod: earn points, case-opening spin for Rare/Epic/Legendary/Ultimate bosses | Release `gatcha-machine-v1.2` |
-| [Biome Compass](biome-compass/) | Minecraft mod: Nature's Compass-style biome finder where you unlock biomes by visiting them, with shared compass groups and a Curios slot | Release `biome-compass-v1.6` |
+| [Biome Compass](biome-compass/) | Minecraft mod: Nature's Compass-style biome finder where you unlock biomes by visiting them, with shared compass groups and a Curios slot | Release `biome-compass-v1.6.1` |
 
 The first four are Windows programs; Schedule Helper is a Chrome/Edge extension (no install, no .exe).
