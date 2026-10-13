@@ -42,7 +42,7 @@ public final class Network {
         @Override public Type<Open> type() { return TYPE; }
     }
 
-    /** Plays the "absorbing nature essence" effect on a player (sent to them and everyone who can see them). */
+    /** Plays the "absorbing nature essence" effect on the player's top-left compass icon. */
     public record Absorb(int entityId, String biome) implements CustomPacketPayload {
         public static final Type<Absorb> TYPE = typeOf("absorb");
         public static final StreamCodec<ByteBuf, Absorb> CODEC = StreamCodec.composite(

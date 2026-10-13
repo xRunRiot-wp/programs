@@ -84,8 +84,8 @@ public class Unlocks extends SavedData {
         if (!newForGroup) return; // the group already had it; now it's also the player's own find (kept if they leave)
         Component name = BiomeCompass.biomeName(biome).copy().withStyle(ChatFormatting.YELLOW);
         p.sendSystemMessage(Component.translatable("biomecompass.unlocked", name).withStyle(ChatFormatting.GREEN));
-        if (!CompassFinder.find(p, s -> true).isEmpty()) // carrying a compass: it "absorbs" the biome (effect plays its own sound)
-            net.neoforged.neoforge.network.PacketDistributor.sendToPlayersTrackingEntityAndSelf(p, new Network.Absorb(p.getId(), key));
+        if (!CompassFinder.find(p, s -> true).isEmpty()) // carrying a compass: its top-left icon "absorbs" the biome (own sound)
+            net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new Network.Absorb(p.getId(), key));
         else
             p.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.5f, 1.4f);
         for (UUID m : groupMembers(p.getUUID())) {

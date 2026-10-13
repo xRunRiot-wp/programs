@@ -1,86 +1,68 @@
 package dev.homedashboard.biomecompass.client;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
-import org.joml.Vector3f;
-
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
 
 /**
- * "Absorbing nature essence" when a biome unlocks: a few motes in the biome's leaf colour start around the player,
- * curve inward and get pulled into them, then a small sparkle. Small on purpose.
+ * "Absorbing nature essence" when a biome unlocks, drawn on the top-left compass icon only (Adam: nothing around the
+ * player): motes in the biome's leaf colour spiral into the icon, it glows, and a small sparkle flashes. Small on purpose.
  */
 public final class AbsorbEffect {
-    private static final int MOTES = 14, DURATION = 28;
-    private static final List<Mote> motes = new ArrayList<>();
-    /** The same essence on the top-left compass icon: ticks since it started (-1 = off) and the biome colour. */
-    private static int hudAge = -1, hudColor;
-    private static final int HUD_DURATION = DURATION + 10, HUD_MOTES = 10;
-    private static final float[] hudAngle = new float[HUD_MOTES], hudDelay = new float[HUD_MOTES];
-
-    private record Mote(int entityId, Vec3 start, float swirl, int delay, DustParticleOptions dust, int[] age) {}
+    private static final int DURATION = 28, TOTAL = DURATION + 14, MOTES = 14;
+    private static final float[] angle = new float[MOTES], delay = new float[MOTES], radius = new float[MOTES];
+    /** Ticks since it started (-1 = off) and the biome colour. */
+    private static int age = -1, color;
 
     private AbsorbEffect() {}
 
     public static void start(int entityId, String biome) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || !(mc.level.getEntity(entityId) instanceof Entity e)) return;
+        if (mc.level == null || mc.player == null || entityId != mc.player.getId()) return;
         int rgb = mc.level.registryAccess().registryOrThrow(Registries.BIOME).getOptional(ResourceLocation.tryParse(biome))
                 .map(b -> b.getFoliageColor()).orElse(0x59AE30);
         RandomSource r = mc.level.random;
+        age = 0;
+        color = brighten(rgb, 0.35f);
         for (int i = 0; i < MOTES; i++) {
-            // brighten the leaf colour a little so it reads as glowing, and vary each mote slightly
-            float k = 0.25f + r.nextFloat() * 0.2f;
-            Vector3f c = new Vector3f(mix((rgb >> 16) & 255, k), mix((rgb >> 8) & 255, k), mix(rgb & 255, k));
-            double ang = r.nextDouble() * Math.PI * 2, dist = 2.2 + r.nextDouble() * 1.3;
-            Vec3 start = new Vec3(Math.cos(ang) * dist, 0.2 + r.nextDouble() * 1.8, Math.sin(ang) * dist);
-            motes.add(new Mote(entityId, start, (r.nextBoolean() ? 1 : -1) * (0.6f + r.nextFloat() * 0.6f), r.nextInt(10),
-                    new DustParticleOptions(c, 0.7f + r.nextFloat() * 0.4f), new int[1]));
+            angle[i] = (float) (i * Math.PI * 2 / MOTES + r.nextFloat() * 0.4);
+            delay[i] = r.nextInt(8);
+            radius[i] = 22 + r.nextFloat() * 10;
         }
-        mc.level.playLocalSound(e.getX(), e.getY(), e.getZ(), SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.PLAYERS, 0.6f, 1.6f, false);
-        if (mc.player != null && entityId == mc.player.getId()) {
-            hudAge = 0;
-            hudColor = rgb;
-            for (int i = 0; i < HUD_MOTES; i++) {
-                hudAngle[i] = (float) (i * Math.PI * 2 / HUD_MOTES + r.nextFloat() * 0.5);
-                hudDelay[i] = r.nextInt(8);
-            }
-        }
+        mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.AMETHYST_BLOCK_RESONATE, 1.6f, 0.6f));
     }
 
-    public static boolean hudActive() {
-        return hudAge >= 0;
+    public static boolean active() {
+        return age >= 0;
     }
 
-    /** Motes spiral into the icon (centre cx, cy), then the icon glows briefly in the biome's colour. */
-    public static void renderHud(net.minecraft.client.gui.GuiGraphics g, int cx, int cy, float partial) {
-        float age = hudAge + partial;
-        int base = 0xFFFFFF & brighten(hudColor, 0.35f);
-        for (int i = 0; i < HUD_MOTES; i++) {
-            float t = (age - hudDelay[i]) / DURATION;
+    /** Draws around the icon centred on (cx, cy). */
+    public static void render(GuiGraphics g, int cx, int cy, float partial) {
+        float now = age + partial;
+        for (int i = 0; i < MOTES; i++) {
+            float t = (now - delay[i]) / DURATION;
             if (t < 0 || t > 1) continue;
-            float pull = t * t, radius = 26 * (1 - pull);
-            double a = hudAngle[i] + t * Math.PI * 0.9;
-            int x = cx + (int) Math.round(Math.cos(a) * radius), y = cy + (int) Math.round(Math.sin(a) * radius);
+            float pull = t * t, r = radius[i] * (1 - pull); // starts slow, then gets pulled in
+            double a = angle[i] + t * Math.PI * 0.9;         // a gentle spiral on the way in
+            int x = cx + Math.round((float) Math.cos(a) * r), y = cy + Math.round((float) Math.sin(a) * r);
             int alpha = (int) (255 * Math.min(1, t * 4));
-            g.fill(x - 1, y - 1, x + 1, y + 1, (alpha << 24) | base);
+            g.fill(x - 1, y - 1, x + 2, y + 2, (alpha / 2 << 24) | color);              // soft 3x3 glow
+            g.fill(x, y, x + 1, y + 1, (alpha << 24) | brighten(color, 0.6f));        // bright core
         }
-        float glow = (age - DURATION + 4) / 14f; // swells as the last motes land, then fades
+        float glow = (now - DURATION + 4) / 14f; // the icon swells with colour as the last motes land, then fades
         if (glow > 0 && glow < 1) {
-            int alpha = (int) (110 * Math.sin(glow * Math.PI));
-            int s = 15 + (int) (glow * 4);
-            g.fill(cx - s, cy - s, cx + s, cy + s, (alpha << 24) | base);
+            int alpha = (int) (120 * Math.sin(glow * Math.PI));
+            int s = 15 + Math.round(glow * 4);
+            g.fill(cx - s, cy - s, cx + s, cy + s, (alpha << 24) | color);
+            int len = Math.round(6 + glow * 10), sa = (int) (220 * (1 - glow)); // little four-point sparkle
+            int c = (sa << 24) | brighten(color, 0.7f);
+            g.fill(cx - len, cy, cx + len + 1, cy + 1, c);
+            g.fill(cx, cy - len, cx + 1, cy + len + 1, c);
         }
     }
 
@@ -91,36 +73,7 @@ public final class AbsorbEffect {
         return (r << 16) | (gr << 8) | b;
     }
 
-    private static float mix(int channel, float toWhite) {
-        return (channel + (255 - channel) * toWhite) / 255f;
-    }
-
     public static void tick(ClientTickEvent.Post event) {
-        Minecraft mc = Minecraft.getInstance();
-        if (hudAge >= 0 && !mc.isPaused() && ++hudAge > HUD_DURATION) hudAge = -1;
-        if (motes.isEmpty()) return;
-        if (mc.level == null || mc.isPaused()) { if (mc.level == null) motes.clear(); return; }
-        Iterator<Mote> it = motes.iterator();
-        while (it.hasNext()) {
-            Mote m = it.next();
-            Entity e = mc.level.getEntity(m.entityId());
-            int age = ++m.age()[0] - m.delay();
-            if (e == null) { it.remove(); continue; }
-            if (age < 0) continue;
-            Vec3 centre = e.position().add(0, e.getBbHeight() * 0.55, 0);
-            if (age >= DURATION) {
-                mc.level.addParticle(ParticleTypes.HAPPY_VILLAGER, centre.x + (mc.level.random.nextDouble() - 0.5) * 0.6,
-                        centre.y + (mc.level.random.nextDouble() - 0.5) * 0.6, centre.z + (mc.level.random.nextDouble() - 0.5) * 0.6, 0, 0, 0);
-                it.remove();
-                continue;
-            }
-            double t = (double) age / DURATION, pull = t * t; // starts slow, then gets pulled in
-            double turn = m.swirl() * t * Math.PI * 0.8;     // a gentle spiral on the way in
-            double cos = Math.cos(turn), sin = Math.sin(turn);
-            Vec3 s = m.start();
-            Vec3 off = new Vec3(s.x * cos - s.z * sin, s.y - 0.9, s.x * sin + s.z * cos).scale(1 - pull);
-            Vec3 p = centre.add(off);
-            mc.level.addParticle(m.dust(), p.x, p.y, p.z, 0, 0, 0);
-        }
+        if (age >= 0 && !Minecraft.getInstance().isPaused() && ++age > TOTAL) age = -1;
     }
 }

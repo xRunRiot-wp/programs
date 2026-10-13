@@ -49,7 +49,7 @@ public final class ClientSetup {
         ItemStack stack = CompassFinder.active(mc.player);
         if (stack.isEmpty()) return;
         CompassTarget t = CompassItem.target(stack);
-        boolean absorbing = AbsorbEffect.hudActive();
+        boolean absorbing = AbsorbEffect.active();
         List<Component> lines = new ArrayList<>();
         Component biome = t.biome().isEmpty() ? Component.empty() : BiomeCompass.biomeName(ResourceLocation.parse(t.biome()));
         if (!t.biome().isEmpty()) switch (t.state()) {
@@ -72,16 +72,16 @@ public final class ClientSetup {
         }
         if (lines.isEmpty() && !absorbing) return;
         // In the Curios slot you can't see the needle, so draw the compass itself (needle and all) at double size.
-        // It also shows while a biome is being absorbed, with the essence flowing into it.
+        // It also shows (even with the compass in hand) while a biome is being absorbed, with the essence flowing into it.
         boolean inHand = mc.player.getMainHandItem() == stack || mc.player.getOffhandItem() == stack;
         int textX = 5;
-        if (!inHand) {
+        if (!inHand || absorbing) {
             g.pose().pushPose();
             g.pose().translate(4, 4, 0);
             g.pose().scale(2, 2, 1);
             g.renderItem(mc.player, stack, 0, 0, 0);
             g.pose().popPose();
-            if (absorbing) AbsorbEffect.renderHud(g, 20, 20, delta.getGameTimeDeltaPartialTick(false));
+            if (absorbing) AbsorbEffect.render(g, 20, 20, delta.getGameTimeDeltaPartialTick(false));
             textX = 42;
         }
         int y = 5;
