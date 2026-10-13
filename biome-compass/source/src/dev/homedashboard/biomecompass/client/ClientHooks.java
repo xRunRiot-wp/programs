@@ -14,4 +14,8 @@ public final class ClientHooks {
     public static void onAbsorb(Network.Absorb p) {
         AbsorbEffect.start(p.entityId(), p.biome());
     }
+
+    public static void onProgress(Network.Progress p) {
+        AbsorbEffect.progress(p.biome(), p.seconds());
+    }
 }

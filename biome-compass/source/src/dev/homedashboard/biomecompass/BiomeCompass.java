@@ -77,6 +77,10 @@ public class BiomeCompass {
             int secs = key.equals(standingIn.get(id)) ? standingSeconds.getOrDefault(id, 0) + 1 : 1;
             standingIn.put(id, key);
             standingSeconds.put(id, secs);
+            // While a biome that's new to the player (and their group) is unlocking, their compass icon shows it filling up.
+            boolean isNew = !unlocks.visibleTo(id).contains(key.location().toString());
+            if (isNew && secs < UNLOCK_SECONDS && !CompassFinder.find(p, s -> true).isEmpty())
+                net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new Network.Progress(key.location().toString(), secs));
             if (secs >= UNLOCK_SECONDS) unlocks.unlock(p, key.location());
         }
     }

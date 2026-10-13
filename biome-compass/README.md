@@ -5,13 +5,13 @@ A Nature's Compass-style biome finder, except biomes start locked: you have to v
 **For:** Minecraft 1.21.1, NeoForge. Singleplayer or LAN. Curios is optional (adds a Compass slot).
 
 ## Install
-1. Download `biomecompass-1.7.0.jar` from the release `biome-compass-v1.7`.
+1. Download `biomecompass-1.8.0.jar` from the release `biome-compass-v1.8`.
 2. Put it in your instance's `mods` folder.
 3. On LAN, everyone joining needs it too.
 
 ## How it works
 - **Craft it:** saplings in the corners, logs on the sides, a compass in the middle (any sapling or log).
-- **Unlocking:** stand in a biome for 10 seconds and it's unlocked ("Biome unlocked: Cherry Grove" in chat). Cave biomes count too. If you're carrying the compass, it "absorbs" the biome: the compass icon in the top-left of the screen pops up, motes in the biome's leaf colour spiral into it, it glows and sparkles briefly, with a soft chime. Nothing shows around your character.
+- **Unlocking:** stand in a biome for 10 seconds and it's unlocked ("Biome unlocked: Cherry Grove" in chat). Cave biomes count too. If you're carrying the compass, it "absorbs" the biome: during the 10 seconds the compass icon in the top-left shows motes in the biome's leaf colour spiralling into it (more as it fills) and a bar filling up under it; on unlock it glows and sparkles, with a soft chime. Nothing shows around your character.
 - **Right-click** to open the list of unlocked biomes for the dimension you're in. Type to filter, then click a biome once to search for it. The screen stays open and shows the result under the list. Press **E** (or Esc) to go straight back to the game.
 - The search runs in the background without lagging the game. When it's found, the needle points there and the top-left of the screen shows the biome, coordinates and distance. Search radius: 10,000 blocks.
 - **Find Next:** skips the patch you're pointed at (the whole connected area of that biome) and finds the next-nearest one. Press it again to keep stepping further out.

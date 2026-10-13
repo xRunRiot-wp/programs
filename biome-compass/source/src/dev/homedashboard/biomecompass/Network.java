@@ -50,6 +50,14 @@ public final class Network {
         @Override public Type<Absorb> type() { return TYPE; }
     }
 
+    /** Seconds stood so far in a biome that is still unlocking (sent once a second while it lasts). */
+    public record Progress(String biome, int seconds) implements CustomPacketPayload {
+        public static final Type<Progress> TYPE = typeOf("progress");
+        public static final StreamCodec<ByteBuf, Progress> CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, Progress::biome, ByteBufCodecs.VAR_INT, Progress::seconds, Progress::new);
+        @Override public Type<Progress> type() { return TYPE; }
+    }
+
     /** action: "open", "search", "teleport", "invite", "leave"; arg = biome id or player name. */
     public record Action(String action, String arg) implements CustomPacketPayload {
         public static final Type<Action> TYPE = typeOf("action");
@@ -62,6 +70,7 @@ public final class Network {
         PayloadRegistrar r = event.registrar("1");
         r.playToClient(Open.TYPE, Open.CODEC, (p, ctx) -> dev.homedashboard.biomecompass.client.ClientHooks.onOpen(p));
         r.playToClient(Absorb.TYPE, Absorb.CODEC, (p, ctx) -> dev.homedashboard.biomecompass.client.ClientHooks.onAbsorb(p));
+        r.playToClient(Progress.TYPE, Progress.CODEC, (p, ctx) -> dev.homedashboard.biomecompass.client.ClientHooks.onProgress(p));
         r.playToServer(Action.TYPE, Action.CODEC, Network::onAction);
     }
 
