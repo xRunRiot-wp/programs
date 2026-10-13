@@ -791,6 +791,15 @@
     if (d.pidx != null && d.pidx >= 0) bits.push(`item ${d.pidx + 1} in the open panel`);
     return `a ${/^(input|select|textarea)$/.test(d.tag) ? "box" : d.tag === "button" ? "button" : "thing"} with ${bits.join(", ") || "no name"}`;
   }
+  // v3.35 (looking ahead): Kronos can sign Zack out mid-run (session timeout). Every step then "can't find"
+  // its box, which reads like a helper bug -> each frame says whether it looks like a sign-in or timeout screen
+  function looksSignedOut() {
+    try {
+      if ([...document.querySelectorAll("input[type=password]")].some(visible)) return true;
+      const t = String((document.body && document.body.innerText) || "").slice(0, 20000);
+      return /session (has )?(expired|timed out)|(signed|logged) (you )?out|(sign|log) ?in again|your session|inactivity/i.test(t);
+    } catch (e) { return false; }
+  }
   function describeForPeople(d, wantText) {
     return `"${wantText || d.label || d["aria-label"] || d.placeholder || d.text || d.name || d.title || d.tag}"`;
   }
@@ -980,7 +989,7 @@
   // ---------------- messages ----------------
   const pending = {}, acked = new Set(), handled = new Set();
   let teaching = false, recSteps = [], example = null, patternSeen = false;
-  let onRecStep = null, checkReplies = null, snapReplies = null, onPointPick = null;
+  let onRecStep = null, checkReplies = null, snapReplies = null, authReplies = null, onPointPick = null;
   window.addEventListener("message", async (e) => {
     let m = e.data;
     if (!m || m.__sh !== 1) return;
@@ -1009,6 +1018,7 @@
     if (m.type === "there" && m.frameKey === FRAME_KEY) post(window.top, { type: "result", reqId: m.reqId, ...(await stillThere(m)) });
     if (m.type === "closeform") closeOpenForm();   // v3.33: the Add Shift form lives in Kronos's inner frame
     if (m.type === "check") post(window.top, { type: "check-result", reqId: m.reqId, flagged: checkExisting(m.shifts) });
+    if (m.type === "auth") post(window.top, { type: "auth-result", reqId: m.reqId, out: looksSignedOut() });
     if (m.type === "snap") { let snap; try { snap = snapshot(); } catch (err) { snap = { frame: location.pathname, error: String(err) }; } post(window.top, { type: "snap-result", reqId: m.reqId, snap }); }
     if (!IS_TOP) return;
     // a frame that just opened (e.g. the add-shift form) asks whether we're watching
@@ -1020,6 +1030,7 @@
     if (m.type === "result" && pending[m.reqId]) { pending[m.reqId](m); delete pending[m.reqId]; }
     if (m.type === "snap-result" && snapReplies && snapReplies.reqId === m.reqId) snapReplies.list.push(m.snap);
     if (m.type === "check-result" && checkReplies && checkReplies.reqId === m.reqId) checkReplies.flagged.push(...m.flagged);
+    if (m.type === "auth-result" && authReplies && authReplies.reqId === m.reqId && m.out) authReplies.out = true;
   });
 
   if (!IS_TOP) { post(window.top, { type: "hello" }); return; }
@@ -1614,6 +1625,17 @@
       if (res.ok) {   // only slow steps are worth a line (each step's start is already sent)
         if (Date.now() - t0 > 4000) live("ok", `done, but it took ${((Date.now() - t0) / 1000).toFixed(1)} s`);
         return "ok";
+      }
+      {   // signed out? say so plainly instead of "I couldn't find ..."
+        const reqId = `a${++reqN}`;
+        authReplies = { reqId, out: false };
+        broadcast({ type: "auth", reqId });
+        await sleep(800);
+        const out = authReplies && authReplies.out; authReplies = null;
+        if (out) {
+          live("stuck", "Kronos is showing a sign-in or session message");
+          res = { ok: false, why: "Kronos is showing a sign-in or session message. Sign back in (or press Continue on its message) and go back to the schedule, then press Try again. If the helper started over, press Start again: shifts already saved stay ticked off." };
+        }
       }
       if (liveOn) {   // stuck: send the screen description straight away (what "Save debug file" would hold)
         const reqId = `s${++reqN}`;
