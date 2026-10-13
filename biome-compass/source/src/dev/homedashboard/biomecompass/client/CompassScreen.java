@@ -22,17 +22,17 @@ import java.util.Set;
 
 /** Biome list (only unlocked biomes of this dimension) with search box, plus a Group page for invites. */
 public class CompassScreen extends Screen {
-    private static final int W = 250, H = 236, ROW = 12, ROWS = 10;
+    private static final int W = 250, H = 248, ROW = 12, ROWS = 10;
     private static final int BG = 0xE0101418, BORDER = 0xFF4E7A3A, SELECTED = 0x804E7A3A, HOVER = 0x40FFFFFF;
 
     private final Network.Open data;
     private final List<ResourceLocation> unlocked = new ArrayList<>();
     private final int possibleCount;
     private List<ResourceLocation> shown = new ArrayList<>();
-    private ResourceLocation selected;
     private int scroll;
     private boolean groupPage;
     private EditBox filter;
+    private Button nextButton, clearButton;
 
     public CompassScreen(Network.Open data) {
         super(Component.translatable("item.biomecompass.biome_compass"));
@@ -61,23 +61,18 @@ public class CompassScreen extends Screen {
             filter.setValue(old);
             filter.setResponder(s -> applyFilter());
             applyFilter();
-            Button search = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.search"), b -> {
-                if (selected != null) { Network.sendAction("search", selected.toString()); onClose(); }
-            }).bounds(x + 8, y + H - 26, data.canTeleport() ? 76 : 116, 20).build());
-            search.active = selected != null;
+            int bottomW = data.canTeleport() ? 116 : W - 16;
             if (data.canTeleport())
                 addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.teleport"), b -> { Network.sendAction("teleport", ""); onClose(); })
-                        .bounds(x + 87, y + H - 26, 76, 20).build());
+                        .bounds(x + 8, y + H - 26, 116, 20).build());
             addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.group"), b -> { groupPage = true; init(); })
-                    .bounds(x + (data.canTeleport() ? 166 : 126), y + H - 26, data.canTeleport() ? 76 : 116, 20).build());
-            CompassTarget current = current();
-            Button next = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.next"), b -> { Network.sendAction("next", ""); onClose(); })
+                    .bounds(x + W - 8 - bottomW, y + H - 26, bottomW, 20).build());
+            nextButton = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.next"), b -> Network.sendAction("next", ""))
                     .bounds(x + 8, y + H - 48, 116, 20).build());
-            next.active = current.state() == CompassTarget.FOUND;
-            next.setTooltip(Tooltip.create(Component.translatable("biomecompass.gui.next_tip")));
-            Button clear = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.clear"), b -> { Network.sendAction("clear", ""); onClose(); })
+            nextButton.setTooltip(Tooltip.create(Component.translatable("biomecompass.gui.next_tip")));
+            clearButton = addRenderableWidget(Button.builder(Component.translatable("biomecompass.gui.clear"), b -> Network.sendAction("clear", ""))
                     .bounds(x + 126, y + H - 48, 116, 20).build());
-            clear.active = !current.biome().isEmpty();
+            tick();
         } else {
             int row = y + 46 + Math.max(1, data.group().size()) * ROW + 20;
             for (String name : data.online()) {
@@ -104,6 +99,25 @@ public class CompassScreen extends Screen {
         return CompassItem.target(CompassFinder.find(player, s -> true));
     }
 
+    /** The compass's state changes while the screen stays open (search finishing), so keep the buttons in step. */
+    @Override
+    public void tick() {
+        if (groupPage || nextButton == null) return;
+        CompassTarget t = current();
+        nextButton.active = t.state() == CompassTarget.FOUND;
+        clearButton.active = !t.biome().isEmpty();
+    }
+
+    /** E (the inventory key) closes straight back to the game, unless you're typing in the filter box. */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if ((groupPage || filter == null || !filter.isFocused()) && minecraft.options.keyInventory.matches(keyCode, scanCode)) {
+            onClose();
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     private void applyFilter() {
         String f = filter.getValue().toLowerCase(Locale.ROOT).trim();
         shown = new ArrayList<>();
@@ -125,10 +139,12 @@ public class CompassScreen extends Screen {
                         : Component.translatable("biomecompass.gui.no_match");
                 g.drawWordWrap(font, msg, x + 14, listTop + 6, W - 28, 0xFFAAAAAA);
             }
+            CompassTarget t = current();
+            ResourceLocation tracked = t.biome().isEmpty() ? null : ResourceLocation.tryParse(t.biome());
             for (int i = 0; i < ROWS && i + scroll < shown.size(); i++) {
                 ResourceLocation id = shown.get(i + scroll);
                 int ry = listTop + 1 + i * ROW;
-                if (id.equals(selected)) g.fill(x + 9, ry, x + W - 9, ry + ROW, SELECTED);
+                if (id.equals(tracked)) g.fill(x + 9, ry, x + W - 9, ry + ROW, SELECTED);
                 else if (mouseX >= x + 9 && mouseX < x + W - 9 && mouseY >= ry && mouseY < ry + ROW) g.fill(x + 9, ry, x + W - 9, ry + ROW, HOVER);
                 g.drawString(font, BiomeCompass.biomeName(id), x + 13, ry + 2, 0xFFFFFFFF);
             }
@@ -140,6 +156,7 @@ public class CompassScreen extends Screen {
             int locked = possibleCount - unlocked.size();
             if (locked > 0)
                 g.drawCenteredString(font, Component.translatable("biomecompass.gui.locked", locked, BiomeCompass.UNLOCK_SECONDS), x + W / 2, listTop + ROWS * ROW + 6, 0xFF8FB86F);
+            if (tracked != null) g.drawCenteredString(font, status(t, tracked), x + W / 2, y + H - 62, 0xFFE8D27A);
         } else {
             g.drawCenteredString(font, Component.translatable("biomecompass.gui.group_title"), x + W / 2, y + 18, 0xFFAAAAAA);
             int row = y + 34;
@@ -149,6 +166,23 @@ public class CompassScreen extends Screen {
             g.drawString(font, Component.translatable(data.online().isEmpty() ? "biomecompass.gui.nobody_online" : "biomecompass.gui.invite_title"), x + 12, row, 0xFFE8D27A);
             g.drawWordWrap(font, Component.translatable("biomecompass.gui.group_help"), x + 12, y + H - 50, W - 24, 0xFF888888);
         }
+    }
+
+    private Component status(CompassTarget t, ResourceLocation tracked) {
+        Component name = BiomeCompass.biomeName(tracked);
+        return switch (t.state()) {
+            case CompassTarget.SEARCHING -> Component.translatable("biomecompass.hud.searching", name);
+            case CompassTarget.NOT_FOUND -> Component.translatable("biomecompass.hud.not_found", name);
+            case CompassTarget.FOUND -> {
+                var pos = t.pos().orElse(null);
+                var player = minecraft.player;
+                if (pos == null || player == null || !pos.dimension().equals(player.level().dimension()))
+                    yield Component.translatable("biomecompass.gui.tracking", name);
+                double dx = pos.pos().getX() + 0.5 - player.getX(), dz = pos.pos().getZ() + 0.5 - player.getZ();
+                yield Component.translatable("biomecompass.gui.tracking_dist", name, (int) Math.sqrt(dx * dx + dz * dz));
+            }
+            default -> Component.empty();
+        };
     }
 
     @Override
@@ -166,11 +200,9 @@ public class CompassScreen extends Screen {
             if (mx >= x + 9 && mx < x + W - 9 && my >= listTop + 1 && my < listTop + 1 + ROWS * ROW) {
                 int i = (int) ((my - listTop - 1) / ROW) + scroll;
                 if (i < shown.size()) {
-                    ResourceLocation id = shown.get(i);
-                    boolean twice = id.equals(selected);
-                    selected = id;
-                    if (twice) { Network.sendAction("search", id.toString()); onClose(); return true; } // double-click = search
-                    init();
+                    // one click starts the search; the screen stays open and shows the result below the list
+                    Network.sendAction("search", shown.get(i).toString());
+                    minecraft.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK, 1.0f));
                     return true;
                 }
             }

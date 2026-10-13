@@ -18,7 +18,6 @@
  "biomecompass.not_found": "No %s within %s blocks",
  "biomecompass.teleported": "Teleported",
  "biomecompass.gui.filter": "Filter biomes...",
- "biomecompass.gui.search": "Search",
  "biomecompass.gui.teleport": "Teleport",
  "biomecompass.gui.group": "Group",
  "biomecompass.gui.invite": "Invite %s",
@@ -45,5 +44,7 @@
  "biomecompass.no_other": "No other %s within %s blocks",
  "biomecompass.gui.next": "Find Next",
  "biomecompass.gui.next_tip": "Skip the patch you're pointed at and find the next-nearest one of the same biome",
- "biomecompass.gui.clear": "Stop Tracking"
+ "biomecompass.gui.clear": "Stop Tracking",
+ "biomecompass.gui.tracking": "Tracking %s",
+ "biomecompass.gui.tracking_dist": "Tracking %s: %s blocks away"
 }
