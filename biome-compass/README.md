@@ -5,7 +5,7 @@ A Nature's Compass-style biome finder, except biomes start locked: you have to v
 **For:** Minecraft 1.21.1, NeoForge. Singleplayer or LAN. Curios is optional (adds a Compass slot).
 
 ## Install
-1. Download `biomecompass-1.1.0.jar` from the release `biome-compass-v1.1`.
+1. Download `biomecompass-1.2.0.jar` from the release `biome-compass-v1.2`.
 2. Put it in your instance's `mods` folder.
 3. On LAN, everyone joining needs it too.
 
@@ -27,7 +27,7 @@ A Nature's Compass-style biome finder, except biomes start locked: you have to v
 
 ## Curios
 With Curios installed there's a **Compass** slot that only takes the Biome Compass. While it's in there:
-- the distance text still shows on screen
+- the top-left of the screen shows a double-size compass with a working needle, plus the distance and which way to turn (Ahead, Left, Behind-Right...)
 - a small compass button appears in the top-right corner of your inventory to open the biome list. It sits inside the inventory frame, so it doesn't cover JEI or the recipe book button.
 
 ## Saves

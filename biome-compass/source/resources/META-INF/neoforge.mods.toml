@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="biomecompass"
-version="1.1.0"
+version="1.2.0"
 displayName="Biome Compass"
 authors="xRunRiot"
 description='''A compass that finds biomes, but only ones you've unlocked: stand in a biome for 10 seconds to add it. Invite friends to a compass group to share what you've all found. Comes with its own Curios "Compass" slot and an inventory button. Needs to be on the host and every player joining (LAN).'''

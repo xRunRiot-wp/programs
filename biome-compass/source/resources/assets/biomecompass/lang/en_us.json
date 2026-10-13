@@ -45,5 +45,14 @@
  "biomecompass.no_other": "No other %s within %s blocks",
  "biomecompass.gui.next": "Find Next",
  "biomecompass.gui.next_tip": "Skip the patch you're pointed at and find the next-nearest one of the same biome",
- "biomecompass.gui.clear": "Stop Tracking"
+ "biomecompass.gui.clear": "Stop Tracking",
+ "biomecompass.hud.direction": "Direction: %s",
+ "biomecompass.dir.0": "Ahead",
+ "biomecompass.dir.1": "Ahead-Right",
+ "biomecompass.dir.2": "Right",
+ "biomecompass.dir.3": "Behind-Right",
+ "biomecompass.dir.4": "Behind",
+ "biomecompass.dir.5": "Behind-Left",
+ "biomecompass.dir.6": "Left",
+ "biomecompass.dir.7": "Ahead-Left"
 }

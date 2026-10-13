@@ -63,13 +63,28 @@ public final class ClientSetup {
                     double dx = pos.pos().getX() + 0.5 - mc.player.getX(), dz = pos.pos().getZ() + 0.5 - mc.player.getZ();
                     lines.add(Component.translatable("biomecompass.hud.coords", pos.pos().getX(), pos.pos().getZ()));
                     lines.add(Component.translatable("biomecompass.hud.distance", (int) Math.sqrt(dx * dx + dz * dz)));
+                    // which way to turn: Minecraft yaw grows to the right, facing = (-sin, cos)
+                    double targetYaw = Math.toDegrees(Math.atan2(-dx, dz));
+                    int sector = Math.floorMod(Math.round((float) (net.minecraft.util.Mth.wrapDegrees(targetYaw - mc.player.getYRot()) / 45.0)), 8);
+                    lines.add(Component.translatable("biomecompass.hud.direction", Component.translatable("biomecompass.dir." + sector)));
                 }
             }
             default -> { return; }
         }
+        // In the Curios slot you can't see the needle, so draw the compass itself (needle and all) at double size.
+        boolean inHand = mc.player.getMainHandItem() == stack || mc.player.getOffhandItem() == stack;
+        int textX = 5;
+        if (!inHand) {
+            g.pose().pushPose();
+            g.pose().translate(4, 4, 0);
+            g.pose().scale(2, 2, 1);
+            g.renderItem(mc.player, stack, 0, 0, 0);
+            g.pose().popPose();
+            textX = 42;
+        }
         int y = 5;
         for (Component line : lines) {
-            g.drawString(mc.font, line, 5, y, 0xFFFFFFFF, true);
+            g.drawString(mc.font, line, textX, y, 0xFFFFFFFF, true);
             y += 10;
         }
     }
