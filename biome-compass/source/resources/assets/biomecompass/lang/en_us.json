@@ -50,5 +50,6 @@
  "biome.biomecompass.undiscovered": "Undiscovered biome",
  "biomecompass.all_unlocked": "You've unlocked every biome in this dimension!",
  "biomecompass.gui.undiscovered": "Find Undiscovered",
- "biomecompass.gui.undiscovered_tip": "Point to the nearest biome you haven't unlocked yet"
+ "biomecompass.gui.undiscovered_tip": "Point to the nearest biome you haven't unlocked yet",
+ "biomecompass.hud.coords3": "X: %s  Y: %s  Z: %s"
 }

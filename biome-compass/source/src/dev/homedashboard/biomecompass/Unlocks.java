@@ -86,9 +86,10 @@ public class Unlocks extends SavedData {
         p.sendSystemMessage(Component.translatable("biomecompass.unlocked", name).withStyle(ChatFormatting.GREEN));
         p.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.5f, 1.4f);
         for (UUID m : groupMembers(p.getUUID())) {
-            ServerPlayer other = p.server.getPlayerList().getPlayer(m);
+            ServerPlayer other = m.equals(p.getUUID()) ? p : p.server.getPlayerList().getPlayer(m);
             if (other != null && other != p)
                 other.sendSystemMessage(Component.translatable("biomecompass.unlocked_by", p.getDisplayName(), name).withStyle(ChatFormatting.GREEN));
+            if (other != null) Network.autoUndiscovered(other);
         }
     }
 

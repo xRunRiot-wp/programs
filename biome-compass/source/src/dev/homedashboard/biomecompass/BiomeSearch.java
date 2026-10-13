@@ -46,6 +46,7 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
     private int floodIndex, floodCount;
     private int ring, index;
     private BlockPos best;
+    private ResourceKey<Biome> bestBiome;
     private long bestDist = Long.MAX_VALUE;
     private boolean finished;
 
@@ -157,7 +158,7 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
                 if (isTarget(gx, y, gz)) {
                     int x = gx * STEP + STEP / 2, z = gz * STEP + STEP / 2;
                     long d = (long) (x - cx) * (x - cx) + (long) (z - cz) * (z - cz);
-                    if (d < bestDist) { bestDist = d; best = new BlockPos(x, y, z); }
+                    if (d < bestDist) { bestDist = d; best = new BlockPos(x, y, z); bestBiome = biomeAt(gx, y, gz); }
                     break;
                 }
             }
@@ -172,12 +173,32 @@ public class BiomeSearch implements WorldWorkerManager.IWorker {
         CompassTarget old = CompassItem.target(stack);
         Component name = BiomeCompass.biomeName(label);
         if (best != null) {
-            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.FOUND, Optional.of(GlobalPos.of(level.dimension(), best)), searchId, old.skip()));
-            player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.found" : "biomecompass.found_next", name, (int) Math.sqrt(bestDist)), true);
+            boolean cave = isCave(bestBiome);
+            if (cave) best = closestHeight(best);
+            double dist = Math.sqrt(bestDist + (cave ? Math.pow(best.getY() - player.getBlockY(), 2) : 0));
+            stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.FOUND, Optional.of(GlobalPos.of(level.dimension(), best)), searchId, old.skip(), cave));
+            player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.found" : "biomecompass.found_next", name, (int) dist), true);
         } else {
             stack.set(BiomeCompass.TARGET.get(), new CompassTarget(old.biome(), CompassTarget.NOT_FOUND, Optional.empty(), searchId, old.skip()));
             player.displayClientMessage(Component.translatable(skip.isEmpty() ? "biomecompass.not_found" : "biomecompass.no_other", name, RADIUS), true);
         }
+    }
+
+    private boolean isCave(ResourceKey<Biome> key) {
+        if (key == null) return false;
+        if (key.equals(net.minecraft.world.level.biome.Biomes.LUSH_CAVES) || key.equals(net.minecraft.world.level.biome.Biomes.DRIPSTONE_CAVES)
+                || key.equals(net.minecraft.world.level.biome.Biomes.DEEP_DARK)) return true;
+        return level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.BIOME).getHolder(key)
+                .map(h -> h.is(net.neoforged.neoforge.common.Tags.Biomes.IS_CAVE)).orElse(false);
+    }
+
+    /** For a cave biome: of the heights (every 8 blocks) where it is at this spot, the one closest to the player's height. */
+    private BlockPos closestHeight(BlockPos at) {
+        int gx = Math.floorDiv(at.getX(), STEP), gz = Math.floorDiv(at.getZ(), STEP);
+        int bestY = at.getY(), py = player.getBlockY();
+        for (int y = level.getMinBuildHeight(); y < level.getMaxBuildHeight(); y += 8)
+            if (bestBiome.equals(biomeAt(gx, y, gz)) && Math.abs(y - py) < Math.abs(bestY - py)) bestY = y;
+        return new BlockPos(at.getX(), bestY, at.getZ());
     }
 
     /** For the self-test: the result without needing a compass. */

@@ -61,8 +61,10 @@ public final class ClientSetup {
                     lines.add(Component.translatable("biomecompass.hud.other_dimension"));
                 } else {
                     double dx = pos.pos().getX() + 0.5 - mc.player.getX(), dz = pos.pos().getZ() + 0.5 - mc.player.getZ();
-                    lines.add(Component.translatable("biomecompass.hud.coords", pos.pos().getX(), pos.pos().getZ()));
-                    lines.add(Component.translatable("biomecompass.hud.distance", (int) Math.sqrt(dx * dx + dz * dz)));
+                    double dy = t.cave() ? pos.pos().getY() - mc.player.getY() : 0; // cave biomes: height counts
+                    lines.add(t.cave() ? Component.translatable("biomecompass.hud.coords3", pos.pos().getX(), pos.pos().getY(), pos.pos().getZ())
+                            : Component.translatable("biomecompass.hud.coords", pos.pos().getX(), pos.pos().getZ()));
+                    lines.add(Component.translatable("biomecompass.hud.distance", (int) Math.sqrt(dx * dx + dy * dy + dz * dz)));
                 }
             }
             default -> { return; }

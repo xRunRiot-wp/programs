@@ -108,6 +108,7 @@ public final class Network {
         if (id.equals(BiomeCompass.UNDISCOVERED)) {
             var targets = locked(p, u);
             if (targets.isEmpty()) {
+                stack.set(BiomeCompass.TARGET.get(), CompassTarget.NONE);
                 p.displayClientMessage(Component.translatable("biomecompass.all_unlocked"), true);
                 return;
             }
@@ -117,6 +118,13 @@ public final class Network {
             stack.set(BiomeCompass.TARGET.get(), new CompassTarget(biome, CompassTarget.SEARCHING, Optional.empty(), searchId, skip));
             WorldWorkerManager.addWorker(new BiomeSearch(p, net.minecraft.resources.ResourceKey.create(Registries.BIOME, id), searchId, skip));
         }
+    }
+
+    /** After a new unlock: a compass on "Find Undiscovered" moves on to the next-nearest undiscovered biome by itself. */
+    public static void autoUndiscovered(ServerPlayer p) {
+        ItemStack stack = CompassFinder.find(p, s -> BiomeCompass.UNDISCOVERED.toString().equals(CompassItem.target(s).biome()));
+        if (stack.isEmpty() || CompassItem.target(stack).state() == CompassTarget.SEARCHING) return;
+        startSearch(p, Unlocks.get(p.server), stack, BiomeCompass.UNDISCOVERED.toString(), List.of());
     }
 
     private static void search(ServerPlayer p, Unlocks u, String biome) {

@@ -183,7 +183,8 @@ public class CompassScreen extends Screen {
                 if (pos == null || player == null || !pos.dimension().equals(player.level().dimension()))
                     yield Component.translatable("biomecompass.gui.tracking", name);
                 double dx = pos.pos().getX() + 0.5 - player.getX(), dz = pos.pos().getZ() + 0.5 - player.getZ();
-                yield Component.translatable("biomecompass.gui.tracking_dist", name, (int) Math.sqrt(dx * dx + dz * dz));
+                double dy = t.cave() ? pos.pos().getY() - player.getY() : 0;
+                yield Component.translatable("biomecompass.gui.tracking_dist", name, (int) Math.sqrt(dx * dx + dy * dy + dz * dz));
             }
             default -> Component.empty();
         };

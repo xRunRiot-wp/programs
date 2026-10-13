@@ -57,6 +57,8 @@ final class SelfTest {
             CompassTarget plains3 = p2 == null ? CompassTarget.NONE : search(a, Biomes.PLAINS, java.util.List.of(p1, p2), tag + "find next again");
             boolean nextOk = p2 != null && !p2.equals(p1) && plains3.pos().isPresent() && !plains3.pos().get().pos().equals(p2) && !plains3.pos().get().pos().equals(p1);
             CompassTarget result = search(a, Biomes.LUSH_CAVES, java.util.List.of(), tag + "search lush caves");
+            boolean caveOk = result.cave() && !plains1.cave();
+            System.out.println(tag + "lush caves marked as cave (height counts): " + result.cave() + ", plains not: " + !plains1.cave());
             // Find Undiscovered: a only has plains unlocked, so the hit must be some other biome
             java.util.Set<net.minecraft.resources.ResourceKey<net.minecraft.world.level.biome.Biome>> lockedSet = new java.util.HashSet<>();
             for (var h : level.getChunkSource().getGenerator().getBiomeSource().possibleBiomes())
@@ -69,9 +71,14 @@ final class SelfTest {
                     net.minecraft.core.QuartPos.fromBlock(gp.pos().getX()), net.minecraft.core.QuartPos.fromBlock(gp.pos().getY()), net.minecraft.core.QuartPos.fromBlock(gp.pos().getZ()),
                     level.getChunkSource().randomState().sampler()).unwrapKey().map(k -> k.location().toString()).orElse("?")).orElse("-");
             boolean undOk = und.state() == CompassTarget.FOUND && !u.visibleTo(a.getUUID()).contains(ub);
+            // unlocking the biome it pointed at makes the compass look for the next undiscovered one by itself
+            if (undOk) u.unlock(a, net.minecraft.resources.ResourceLocation.parse(ub));
+            boolean autoOk = CompassItem.target(a.getMainHandItem()).state() == CompassTarget.SEARCHING;
+            System.out.println(tag + "auto re-search after unlocking it: " + autoOk);
+            undOk = undOk && autoOk;
             System.out.println(tag + "find undiscovered: state=" + und.state() + " pos=" + und.pos().map(gp -> gp.pos().toShortString()).orElse("-") + " biome=" + ub + " ok=" + undOk);
             if (CompassFinder.curiosLoaded()) System.out.println(tag + "curios: " + CuriosCompat.check(a));
-            boolean ok = separate && shared && keepsOwn && nextOk && undOk && result.state() == CompassTarget.FOUND;
+            boolean ok = separate && shared && keepsOwn && nextOk && undOk && caveOk && result.state() == CompassTarget.FOUND;
             System.out.println(tag + "findNext gives a different patch each time: " + nextOk);
             System.out.println(tag + (ok ? "PASS" : "FAIL"));
         } catch (Throwable t) {
