@@ -218,7 +218,7 @@
     const [a, b] = [s.start, s.end].map((t) => { const [H, M] = t.split(":").map(Number); return H * 60 + M; });
     return ((b - a + 1440) % 1440 || 1440) / 60;
   }
-  function usualJobs(shifts, overrides = {}) {
+  function usualJobs(shifts, overrides = {}, opts = {}) {
     const per = {};
     shifts.forEach((s) => {
       if (!s.kronosJob) return;
@@ -230,7 +230,7 @@
     // So the usual job is the most-worked job that ISN'T a transfer job; someone who only
     // works Bar is a Server in Kronos (settings: transferJobs / transferHome).
     const D = globalThis.SH_DEFAULTS || {};
-    const transfer = new Set((D.transferJobs || ["Bar"]).map(norm)), home = D.transferHome || "Server";
+    const transfer = new Set((D.transferJobs || ["Bar"]).map(norm)), home = opts.home || D.transferHome || "Server";
     const out = {};
     for (const [emp, jobs] of Object.entries(per)) {
       const ranked = Object.entries(jobs).sort((a, b) => b[1].n - a[1].n || b[1].h - a[1].h || a[0].localeCompare(b[0]));
@@ -244,8 +244,8 @@
     return out;
   }
   // adds usualJob + jobChange to every shift; returns how many need a job change
-  function markJobChanges(shifts, overrides = {}) {
-    const usual = usualJobs(shifts, overrides);
+  function markJobChanges(shifts, overrides = {}, opts = {}) {
+    const usual = usualJobs(shifts, overrides, opts);
     let n = 0;
     shifts.forEach((s) => {
       s.usualJob = usual[s.employee] ? usual[s.employee].job : "";

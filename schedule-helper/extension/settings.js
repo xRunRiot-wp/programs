@@ -25,6 +25,13 @@ globalThis.SH_DEFAULTS = {
     Cocktail: "Server",
   },
 
+  // Job names that are different at one location (Zack 10-14: at Grotto a server is
+  // "Restaurant Server" in Kronos; Landry's stays Server). Matched on the location name
+  // picked on the review screen ("The Grotto" also counts as Grotto).
+  locationJobs: {
+    grotto: { Server: "Restaurant Server" },
+  },
+
   // Jobs that are always a TRANSFER in Kronos (changed on that one shift), never someone's
   // main job, and the main job of someone who only works those (Zack: Bar shifts are the
   // job change, Server is the main job).

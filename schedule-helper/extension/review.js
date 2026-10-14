@@ -19,7 +19,7 @@
     const k = Object.keys(prefs.locations).find((x) => locKey(x) === locKey(l));
     $("#xferall").checked = !!(k && prefs.locations[k].transferAll);
     noXfer = new Set((k && prefs.locations[k].noTransfer) || []);
-    if (shifts.length) render();
+    if (raw) build();
   }
   showLocs(); pickLoc(prefs.location || "");
   $("#loc").addEventListener("change", () => pickLoc($("#loc").value.trim()));
@@ -49,8 +49,12 @@
       if (wd !== 1) res.problems.unshift("The week start isn't a Monday - the roster's first column is Monday, so the dates may be off.");
     }
     shifts = res.shifts;
-    shifts.forEach((s) => { if (jobEdits[s.id]) s.kronosJob = jobEdits[s.id]; });
-    usual = R.markJobChanges(shifts, prefs.usualJob).usual;
+    // this location's own job names (settings: locationJobs), e.g. Grotto: Server -> Restaurant Server
+    const lk = locKey($("#loc").value), rename = {};
+    for (const [l, m] of Object.entries(D.locationJobs || {})) if (lk && lk.includes(locKey(l))) for (const [a, b] of Object.entries(m)) rename[a.toLowerCase()] = b;
+    const job = (j) => rename[String(j || "").trim().toLowerCase()] || j;
+    shifts.forEach((s) => { s.kronosJob = job(s.kronosJob); if (jobEdits[s.id]) s.kronosJob = jobEdits[s.id]; });
+    usual = R.markJobChanges(shifts, prefs.usualJob, { home: job(D.transferHome || "Server") }).usual;
     $("#problems").innerHTML = res.problems.map((p) => `<div class="sh-warn">${esc(p)}</div>`).join("");
     $("#step2").hidden = $("#step3").hidden = !shifts.length;
     render();
