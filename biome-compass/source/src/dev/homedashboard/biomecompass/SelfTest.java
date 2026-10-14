@@ -78,13 +78,30 @@ final class SelfTest {
             undOk = undOk && autoOk;
             System.out.println(tag + "find undiscovered: state=" + und.state() + " pos=" + und.pos().map(gp -> gp.pos().toShortString()).orElse("-") + " biome=" + ub + " ok=" + undOk);
             if (CompassFinder.curiosLoaded()) System.out.println(tag + "curios: " + CuriosCompat.check(a));
-            boolean ok = separate && shared && keepsOwn && nextOk && undOk && caveOk && result.state() == CompassTarget.FOUND;
+            // Teleport landing: far, never-loaded chunks must land on solid ground, not below bedrock.
+            boolean landOk = true;
+            int[][] spots = {{4000, 64, 4000}, {-6000, 64, 2500}};
+            for (int[] sp : spots) landOk &= landing(level, sp[0], sp[1], sp[2], false, tag + "teleport surface " + sp[0] + "," + sp[2]);
+            if (p1 != null) landOk &= landing(level, p1.getX(), p1.getY(), p1.getZ(), false, tag + "teleport plains");
+            result.pos().ifPresent(gp -> System.out.println(tag + "lush caves found at y=" + gp.pos().getY()));
+            if (result.pos().isPresent()) landOk &= landing(level, result.pos().get().pos().getX(), result.pos().get().pos().getY(), result.pos().get().pos().getZ(), true, tag + "teleport lush caves");
+            boolean ok = separate && shared && keepsOwn && nextOk && undOk && caveOk && landOk && result.state() == CompassTarget.FOUND;
             System.out.println(tag + "findNext gives a different patch each time: " + nextOk);
             System.out.println(tag + (ok ? "PASS" : "FAIL"));
+            if (Boolean.getBoolean("biomecompass.selftest.halt")) e.getServer().halt(false);
         } catch (Throwable t) {
             System.out.println(tag + "FAIL " + t);
             t.printStackTrace(System.out);
         }
+    }
+
+    private static boolean landing(ServerLevel level, int x, int foundY, int z, boolean cave, String label) {
+        boolean loadedBefore = level.hasChunk(x >> 4, z >> 4);
+        int y = Network.landingY(level, x, foundY, z, cave);
+        var floor = level.getBlockState(new net.minecraft.core.BlockPos(x, y - 1, z));
+        boolean ok = y > level.getMinBuildHeight() + 1 && (floor.blocksMotion() || !floor.getFluidState().isEmpty());
+        System.out.println(label + ": chunk loaded before=" + loadedBefore + " y=" + y + " floor=" + floor.getBlock() + " ok=" + ok);
+        return ok;
     }
 
     private static int nextId = 100;

@@ -5,7 +5,7 @@ A Nature's Compass-style biome finder, except biomes start locked: you have to v
 **For:** Minecraft 1.21.1, NeoForge. Singleplayer or LAN. Curios is optional (adds a Compass slot).
 
 ## Install
-1. Download `biomecompass-1.8.0.jar` from the release `biome-compass-v1.8`.
+1. Download `biomecompass-1.8.1.jar` from the release `biome-compass-v1.8.1`.
 2. Put it in your instance's `mods` folder.
 3. On LAN, everyone joining needs it too.
 
@@ -18,7 +18,7 @@ A Nature's Compass-style biome finder, except biomes start locked: you have to v
 - **Find Undiscovered:** points to the nearest biome you haven't unlocked yet. It's called "Undiscovered biome" until you've stood in it for 10 seconds. Find Next works with it too. Once you unlock a biome, it automatically moves on to the next-nearest undiscovered one.
 - **Cave biomes** (Lush Caves, Dripstone Caves, Deep Dark, modded cave biomes): the compass picks the height closest to you, shows the Y coordinate, and the distance includes how far up or down it is.
 - **Stop Tracking** clears the biome the compass is tracking.
-- **Teleport** button for players with cheats/op.
+- **Teleport** button for players with cheats/op. It lands you on the ground (or, for cave biomes and the Nether, the nearest safe open spot to the found height), even far away where nothing is loaded yet.
 - Its own look: wooden rim, parchment face and a leaf needle.
 
 ## Compass groups

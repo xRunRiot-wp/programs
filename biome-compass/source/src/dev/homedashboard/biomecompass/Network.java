@@ -180,8 +180,41 @@ public final class Network {
         var pos = CompassItem.target(stack).pos().orElse(null);
         if (pos == null || !pos.dimension().equals(p.level().dimension())) return;
         int x = pos.pos().getX(), z = pos.pos().getZ();
-        int y = p.serverLevel().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        p.teleportTo(p.serverLevel(), x + 0.5, y, z + 0.5, p.getYRot(), p.getXRot());
+        var level = p.serverLevel();
+        int y = landingY(level, x, pos.pos().getY(), z, CompassItem.target(stack).cave());
+        if (y <= level.getMinBuildHeight()) {
+            p.displayClientMessage(Component.translatable("biomecompass.no_safe_spot"), true);
+            return;
+        }
+        p.teleportTo(level, x + 0.5, y, z + 0.5, p.getYRot(), p.getXRot());
         p.displayClientMessage(Component.translatable("biomecompass.teleported"), true);
+    }
+
+    /** Where to stand at x/z: the surface, or for caves and the Nether the nearest safe spot to the found height. */
+    static int landingY(net.minecraft.server.level.ServerLevel level, int x, int foundY, int z, boolean cave) {
+        // Far-away targets aren't loaded yet; an unloaded chunk's heightmap says "bottom of the world" (below bedrock),
+        // so load/generate the chunk first.
+        level.getChunk(x >> 4, z >> 4);
+        boolean underground = cave || level.dimensionType().hasCeiling(); // caves, Nether roof
+        int y = underground ? safeY(level, x, foundY, z) : level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        return y > level.getMinBuildHeight() ? y : safeY(level, x, level.getMaxBuildHeight() - 2, z);
+    }
+
+    /** Nearest height to startY (up or down) with solid ground and two free blocks above it; min build height if none. */
+    private static int safeY(net.minecraft.server.level.ServerLevel level, int x, int startY, int z) {
+        int min = level.getMinBuildHeight() + 1, max = level.getMaxBuildHeight() - 2;
+        var m = new net.minecraft.core.BlockPos.MutableBlockPos();
+        for (int d = 0; d <= max - min; d++) {
+            for (int y : new int[]{startY + d, startY - d}) {
+                if (y < min || y > max) continue;
+                var floor = level.getBlockState(m.set(x, y - 1, z));
+                var feet = level.getBlockState(m.set(x, y, z));
+                var head = level.getBlockState(m.set(x, y + 1, z));
+                if (floor.blocksMotion() && !floor.is(net.minecraft.world.level.block.Blocks.BEDROCK) && floor.getFluidState().isEmpty()
+                        && !feet.blocksMotion() && feet.getFluidState().isEmpty() && !head.blocksMotion() && head.getFluidState().isEmpty())
+                    return y;
+            }
+        }
+        return level.getMinBuildHeight();
     }
 }
