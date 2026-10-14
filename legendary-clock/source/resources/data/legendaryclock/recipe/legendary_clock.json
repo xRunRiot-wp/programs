@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": ["GAG", "ACA", "GAG"],
+  "key": {
+    "G": {"item": "minecraft:gold_ingot"},
+    "A": {"item": "minecraft:amethyst_shard"},
+    "C": {"item": "minecraft:clock"}
+  },
+  "result": {"id": "legendaryclock:legendary_clock", "count": 1}
+}

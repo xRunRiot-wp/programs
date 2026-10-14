@@ -1,0 +1,21 @@
+{
+ "item.legendaryclock.legendary_clock": "Legendary Clock",
+ "curios.identifier.legendary_clock": "Clock",
+ "curios.modifiers.legendary_clock": "When in clock slot:",
+ "legendaryclock.gui.open": "Open Legendary Clock",
+ "legendaryclock.gui.waiting": "Waiting for the server's timers...",
+ "legendaryclock.gui.legendary": "Legendary Pokémon",
+ "legendaryclock.gui.boss": "Mega Boss",
+ "legendaryclock.gui.off": "Spawning is turned off in this world",
+ "legendaryclock.gui.next": "Next spawn try in: %s",
+ "legendaryclock.gui.time_then": "Time of day then: %s",
+ "legendaryclock.gui.time_now": "Time of day now: %s",
+ "legendaryclock.gui.chance": "Chance the try spawns one: %s",
+ "legendaryclock.gui.now": "Right now: %s",
+ "legendaryclock.gui.no_cycle": "The daylight cycle is off, so the time of day won't change.",
+ "legendaryclock.gui.hud_on": "Timer on screen: ON",
+ "legendaryclock.gui.hud_off": "Timer on screen: OFF",
+ "legendaryclock.gui.move": "Move Timer",
+ "legendaryclock.gui.move_help": "Drag the timer where you want it, then press Done",
+ "legendaryclock.gui.reset": "Reset"
+}
