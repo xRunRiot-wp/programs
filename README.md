@@ -14,6 +14,6 @@ of this repo.
 | [Card Art Pack](sts2-card-art/) | Slay the Spire 2: 180 custom card pictures (all Defect + Necrobinder cards) for the Card Art Editor mod | Release `sts2-card-art-v1` |
 | [Gatcha Machine](gatcha-machine/) | Pixelmon add-on mod: earn points, case-opening spin for Rare/Epic/Legendary/Ultimate bosses | Release `gatcha-machine-v1.2` |
 | [Biome Compass](biome-compass/) | Minecraft mod: Nature's Compass-style biome finder where you unlock biomes by visiting them, with shared compass groups and a Curios slot | Release `biome-compass-v1.8` |
-| [Legendary Clock](legendary-clock/) | Pixelmon add-on mod: countdown to the next legendary and mega boss spawn try, the time of day it will be then, movable on-screen timer and a Curios slot | Release `legendary-clock-v1` |
+| [Legendary Clock](legendary-clock/) | Pixelmon add-on mod: countdown to the next legendary and mega boss spawn try, the time of day it will be then, movable on-screen timer and a Curios slot | Release `legendary-clock-v1.1` |
 
 The first four are Windows programs; Schedule Helper is a Chrome/Edge extension (no install, no .exe).

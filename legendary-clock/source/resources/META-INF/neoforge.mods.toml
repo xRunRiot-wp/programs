@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="legendaryclock"
-version="1.0.0"
+version="1.1.0"
 displayName="Legendary Clock"
 authors="xRunRiot"
 description='''A clock for Pixelmon: shows how long until the next legendary and mega boss spawn try, and the time of day it will be then (Night, Midnight...). Has its own Curios "Clock" slot, an inventory button, and an on-screen timer you can move or hide. Needs to be on the host and every player joining (LAN).'''

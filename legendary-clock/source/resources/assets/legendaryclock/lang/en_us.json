@@ -16,6 +16,9 @@
  "legendaryclock.gui.hud_on": "Timer on screen: ON",
  "legendaryclock.gui.hud_off": "Timer on screen: OFF",
  "legendaryclock.gui.move": "Move Timer",
- "legendaryclock.gui.move_help": "Drag the timer where you want it, then press Done",
- "legendaryclock.gui.reset": "Reset"
+ "legendaryclock.gui.move_help": "Drag the timer where you want it, scroll to resize, then press Done",
+ "legendaryclock.gui.reset": "Reset",
+ "legendaryclock.gui.size": "Timer size: %s%%",
+ "legendaryclock.gui.under_always": "Show timer: always",
+ "legendaryclock.gui.under": "Show when under %s min"
 }

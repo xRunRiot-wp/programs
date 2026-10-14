@@ -2,6 +2,7 @@ package dev.homedashboard.legendaryclock.client;
 
 import dev.homedashboard.legendaryclock.Network;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -10,7 +11,10 @@ import java.util.Locale;
 
 /** The clock's screen: both timers in full, the time of day now and at each try, and the on-screen timer settings. */
 public class ClockScreen extends Screen {
-    private static final int W = 260, H = 196;
+    private static final int W = 260, H = 222;
+    public static final float MIN_SCALE = 0.5f, MAX_SCALE = 3f;
+    /** "Show when under" choices in minutes; 0 = always. */
+    private static final int[] UNDER = {0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60};
     private static final int BG = 0xE0101418, BORDER = 0xFFC9A227;
 
     public ClockScreen() {
@@ -24,6 +28,31 @@ public class ClockScreen extends Screen {
     protected void init() {
         HudConfig.load();
         int x = left(), y = top() + H - 28;
+        addRenderableWidget(new Slider(x + 8, y - 24, 120, (HudConfig.scale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)) {
+            @Override protected void updateMessage() {
+                setMessage(Component.translatable("legendaryclock.gui.size", Math.round(scale() * 100)));
+            }
+            @Override protected void applyValue() {
+                HudConfig.scale = scale();
+                HudConfig.save();
+            }
+            private float scale() {
+                return Math.round((MIN_SCALE + (float) value * (MAX_SCALE - MIN_SCALE)) * 4) / 4f; // 25% steps
+            }
+        });
+        addRenderableWidget(new Slider(x + 132, y - 24, 120, indexOf(HudConfig.showUnder) / (double) (UNDER.length - 1)) {
+            @Override protected void updateMessage() {
+                int m = minutes();
+                setMessage(m == 0 ? Component.translatable("legendaryclock.gui.under_always") : Component.translatable("legendaryclock.gui.under", m));
+            }
+            @Override protected void applyValue() {
+                HudConfig.showUnder = minutes();
+                HudConfig.save();
+            }
+            private int minutes() {
+                return UNDER[(int) Math.round(value * (UNDER.length - 1))];
+            }
+        });
         addRenderableWidget(Button.builder(toggleLabel(), b -> {
             HudConfig.shown = !HudConfig.shown;
             HudConfig.save();
@@ -32,6 +61,19 @@ public class ClockScreen extends Screen {
         addRenderableWidget(Button.builder(Component.translatable("legendaryclock.gui.move"), b -> minecraft.setScreen(new MoveHudScreen(this)))
                 .bounds(x + 112, y, 80, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> onClose()).bounds(x + 196, y, 56, 20).build());
+    }
+
+    private static int indexOf(int minutes) {
+        for (int i = 0; i < UNDER.length; i++) if (UNDER[i] >= minutes) return i;
+        return UNDER.length - 1;
+    }
+
+    /** A 0-1 slider whose subclasses turn the value into a setting. */
+    private abstract static class Slider extends AbstractSliderButton {
+        Slider(int x, int y, int w, double value) {
+            super(x, y, w, 20, Component.empty(), Math.max(0, Math.min(1, value)));
+            updateMessage();
+        }
     }
 
     private static Component toggleLabel() {

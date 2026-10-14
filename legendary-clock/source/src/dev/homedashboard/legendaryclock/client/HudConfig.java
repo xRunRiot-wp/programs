@@ -7,7 +7,7 @@ import net.neoforged.fml.loading.FMLPaths;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** The on-screen timer's settings (per computer, not per world): shown or not, and where. Saved in config/legendaryclock-client.json. */
+/** The on-screen timer's settings (per computer, not per world): shown or not, where, how big, and from how many minutes out. Saved in config/legendaryclock-client.json. */
 public final class HudConfig {
     private HudConfig() {}
 
@@ -15,6 +15,10 @@ public final class HudConfig {
     public static boolean shown = true;
     /** Top-left corner of the timer box, in GUI pixels. */
     public static int x = 4, y = 44;            // just under the Biome Compass icon
+    /** Size of the timer box: 1 = normal. */
+    public static float scale = 1f;
+    /** Only show a timer line once it's this many minutes or less from the try; 0 = always show. */
+    public static int showUnder;
     private static boolean loaded;
 
     public static void load() {
@@ -26,6 +30,8 @@ public final class HudConfig {
             if (o.has("shown")) shown = o.get("shown").getAsBoolean();
             if (o.has("x")) x = o.get("x").getAsInt();
             if (o.has("y")) y = o.get("y").getAsInt();
+            if (o.has("scale")) scale = o.get("scale").getAsFloat();
+            if (o.has("showUnder")) showUnder = o.get("showUnder").getAsInt();
         } catch (Exception ignored) {
             // A broken file just means default settings.
         }
@@ -36,6 +42,8 @@ public final class HudConfig {
         o.addProperty("shown", shown);
         o.addProperty("x", x);
         o.addProperty("y", y);
+        o.addProperty("scale", scale);
+        o.addProperty("showUnder", showUnder);
         try {
             Files.writeString(FILE, o.toString());
         } catch (Exception ignored) {

@@ -20,6 +20,9 @@ import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** The movable on-screen timer and the inventory button. */
 public final class ClientSetup {
     private ClientSetup() {}
@@ -39,9 +42,27 @@ public final class ClientSetup {
         if (ClockFinder.find(mc.player).isEmpty()) return;
         Network.Status s = ClientHooks.status();
         if (s == null) return;
-        int[] size = hudSize(mc.font, s);
+        List<Row> rows = rows(s, false);
+        if (rows.isEmpty()) return; // both timers still further out than "show when under"
+        int[] size = hudSize(mc.font, rows, HudConfig.scale);
         int x = Mth.clamp(HudConfig.x, 0, Math.max(0, g.guiWidth() - size[0])), y = Mth.clamp(HudConfig.y, 0, Math.max(0, g.guiHeight() - size[1]));
-        drawHud(g, mc.font, s, x, y);
+        drawHud(g, mc.font, rows, x, y, HudConfig.scale);
+    }
+
+    public record Row(String text, int colour) {}
+
+    /** The timer lines to show; with all = false, only timers within the "show when under" minutes. */
+    public static List<Row> rows(Network.Status s, boolean all) {
+        List<Row> rows = new ArrayList<>();
+        if (all || within(s.legendary())) rows.add(new Row(line("Legendary", s.legendary()), LEGENDARY));
+        if (all || within(s.boss())) rows.add(new Row(line("Mega Boss", s.boss()), BOSS));
+        return rows;
+    }
+
+    private static boolean within(Network.Timer t) {
+        if (HudConfig.showUnder <= 0) return true;
+        long ms = ClientHooks.msLeft(t);
+        return ms != Network.OFF && ms <= HudConfig.showUnder * 60_000L;
     }
 
     private static String line(String label, Network.Timer t) {
@@ -49,19 +70,27 @@ public final class ClientSetup {
         return t.msLeft() == Network.OFF ? label + "  " + time : label + "  " + time + "  " + ClientHooks.times(t.times());
     }
 
-    /** Width and height of the timer box. */
-    public static int[] hudSize(Font font, Network.Status s) {
-        int w = Math.max(font.width(line("Legendary", s.legendary())), font.width(line("Mega Boss", s.boss())));
-        return new int[]{w + 26, 24};
+    /** Width and height of the timer box on screen, after scaling. */
+    public static int[] hudSize(Font font, List<Row> rows, float scale) {
+        int w = 0;
+        for (Row r : rows) w = Math.max(w, font.width(r.text()));
+        return new int[]{Math.round((w + 26) * scale), Math.round(Math.max(24, rows.size() * 10 + 4) * scale)};
     }
 
-    /** The timer box: clock icon, then one line each for the legendary and the mega boss. */
-    public static void drawHud(GuiGraphics g, Font font, Network.Status s, int x, int y) {
-        int[] size = hudSize(font, s);
-        g.fill(x, y, x + size[0], y + size[1], 0x90000000);
-        g.renderItem(new ItemStack(LegendaryClock.CLOCK.get()), x + 3, y + 4);
-        g.drawString(font, line("Legendary", s.legendary()), x + 22, y + 3, LEGENDARY, true);
-        g.drawString(font, line("Mega Boss", s.boss()), x + 22, y + 13, BOSS, true);
+    /** The timer box: clock icon, then one line per timer, drawn at the chosen size. */
+    public static void drawHud(GuiGraphics g, Font font, List<Row> rows, int x, int y, float scale) {
+        int[] size = hudSize(font, rows, 1);
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(scale, scale, 1);
+        g.fill(0, 0, size[0], size[1], 0x90000000);
+        g.renderItem(new ItemStack(LegendaryClock.CLOCK.get()), 3, (size[1] - 16) / 2);
+        int ty = (size[1] - rows.size() * 10) / 2 + 1;
+        for (Row r : rows) {
+            g.drawString(font, r.text(), 22, ty, r.colour(), true);
+            ty += 10;
+        }
+        g.pose().popPose();
     }
 
     /** Small clock button in the inventory, inside the inventory's own frame (under the crafting result), clear of JEI and the compass button. */
