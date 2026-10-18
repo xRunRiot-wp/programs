@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="foragestation"
+version="1.0.0"
+displayName="Forage Station"
+authors="xRunRiot"
+description='''Put a Pokemon from your party or PC into a Forage Station and it forages the biome on its own, using Pixelmon's Forage item list. Faster Pokemon find things more often. Finds go into the station (27 slots, hoppers can pull them out). Needs to be on the host and every player joining (LAN).'''
+
+[[dependencies.foragestation]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.foragestation]]
+modId="pixelmon"
+type="required"
+versionRange="[9.4,)"
+ordering="AFTER"
+side="BOTH"

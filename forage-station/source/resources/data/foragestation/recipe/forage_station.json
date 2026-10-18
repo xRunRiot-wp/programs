@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": ["WCW", "LPL", "LLL"],
+  "key": {
+    "W": {"item": "minecraft:wheat"},
+    "C": {"item": "minecraft:chest"},
+    "P": {"item": "pixelmon:poke_ball"},
+    "L": {"tag": "minecraft:logs"}
+  },
+  "result": {"id": "foragestation:forage_station", "count": 1}
+}

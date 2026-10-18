@@ -1,0 +1,19 @@
+{
+  "block.foragestation.forage_station": "Forage Station",
+  "foragestation.not_owner": "Only %s can do that with this station",
+  "foragestation.no_room": "No room in your party or PC",
+  "foragestation.returned.party": "%s is back in your party",
+  "foragestation.returned.pc": "%s was sent to your PC",
+  "foragestation.returned.broken": "%s came home to your PC (its Forage Station was broken)",
+  "foragestation.return_waiting": "%s from a broken Forage Station is waiting: make room in your PC",
+  "foragestation.title": "%s - next find in %ss",
+  "foragestation.title_full": "%s - storage full!",
+  "foragestation.picker": "Forage Station",
+  "foragestation.party": "Party",
+  "foragestation.box": "PC Box %s / %s",
+  "foragestation.picker_hint": "Click a Pokemon to send it foraging. Shift + right-click the station to take it back.",
+  "foragestation.tip": "Lv %s  Speed %s  (a try every %ss)",
+  "foragestation.moved": "That Pokemon moved - open the station again",
+  "foragestation.last": "You can't send away your last party Pokemon",
+  "foragestation.inserted": "%s is foraging!"
+}

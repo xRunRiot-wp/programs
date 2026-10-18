@@ -15,5 +15,6 @@ of this repo.
 | [Gatcha Machine](gatcha-machine/) | Pixelmon add-on mod: earn points, case-opening spin for Rare/Epic/Legendary/Ultimate bosses | Release `gatcha-machine-v1.2` |
 | [Biome Compass](biome-compass/) | Minecraft mod: Nature's Compass-style biome finder where you unlock biomes by visiting them, with shared compass groups and a Curios slot | Release `biome-compass-v1.8.1` |
 | [Legendary Clock](legendary-clock/) | Pixelmon add-on mod: countdown to the next legendary and mega boss spawn try, the time of day it will be then, movable on-screen timer and a Curios slot | Release `legendary-clock-v1.1` |
+| [Forage Station](forage-station/) | Pixelmon add-on mod: a block that holds a Pokémon from your party or PC and forages the biome on its own (Pixelmon's Forage items, faster with Speed), hopper-friendly storage | Release `forage-station-v1` |
 
 The first four are Windows programs; Schedule Helper is a Chrome/Edge extension (no install, no .exe).
