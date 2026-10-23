@@ -6,7 +6,7 @@
   const DAYNAME = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
 
   const prefs = { nameOverrides: { ...D.nameOverrides }, jobMap: { ...D.jobMap }, usualJob: {}, confirm: D.confirm, paceName: "normal", ...((await S.get("sh_prefs")) || {}) };
-  let raw = "", filename = "", shifts = [], off = new Set(), jobEdits = {}, usual = {};
+  let raw = "", filename = "", shifts = [], off = new Set(), jobEdits = {}, usual = {}, keepOn = new Set(), autoOff = new Set(), leftOut = 0;
   prefs.usualJob = prefs.usualJob || {};
 
   // one roster per location (Zack 10-10: two locations, each uploaded separately); settings remembered per location
@@ -37,7 +37,7 @@
     $("#week").value = R.weekFromFilename(filename) || $("#week").value;
     const named = Object.keys(prefs.locations).find((l) => locKey(l) && locKey(filename).includes(locKey(l)));
     if (named) pickLoc(named);
-    off = new Set(); jobEdits = {};
+    off = new Set(); jobEdits = {}; keepOn = new Set(); autoOff = new Set();
     build();
   }
 
@@ -55,6 +55,13 @@
     const job = (j) => rename[String(j || "").trim().toLowerCase()] || j;
     shifts.forEach((s) => { s.kronosJob = job(s.kronosJob); if (jobEdits[s.id]) s.kronosJob = jobEdits[s.id]; });
     usual = R.markJobChanges(shifts, prefs.usualJob, { home: job(D.transferHome || "Server") }).usual;
+    // only this location's jobs (settings: locationOnlyJobs, Zack 10-23): kitchen etc. start unticked, unless ticked by hand
+    const only = Object.entries(D.locationOnlyJobs || {}).find(([l]) => lk && lk.includes(locKey(l)));
+    const okJob = only ? new Set(only[1].map((j) => j.trim().toLowerCase())) : null;
+    autoOff.forEach((id) => off.delete(id)); autoOff = new Set(); leftOut = 0;   // location changed: work it out again
+    shifts.forEach((s) => {
+      if (okJob && !okJob.has(String(s.kronosJob || "").trim().toLowerCase()) && !keepOn.has(s.id) && !off.has(s.id)) { off.add(s.id); autoOff.add(s.id); leftOut++; }
+    });
     $("#problems").innerHTML = res.problems.map((p) => `<div class="sh-warn">${esc(p)}</div>`).join("");
     $("#step2").hidden = $("#step3").hidden = !shifts.length;
     render();
@@ -68,6 +75,7 @@
     shifts.forEach((s) => { const k = s.employee + s.date; if (seen[k]) doubles.add(k); seen[k] = 1; });
     const changes = kept.filter((s) => s.jobChange).length;
     $("#summary").innerHTML = `<b>${kept.length}</b> shifts for <b>${people.length}</b> people, week of <b>${esc($("#week").value)}</b>. Untick anything that shouldn't go into Kronos.`
+      + (leftOut ? `<br>${leftOut} shift${leftOut > 1 ? "s" : ""} in other jobs (kitchen and so on) start unticked for ${esc($("#loc").value)}. Tick one to keep it.` : "")
       + (changes ? `<br><span class="tag job">${changes} job-change shift${changes > 1 ? "s" : ""}</span> Kronos puts in each person's usual job, so these shifts need the job changed for that one shift (for example a server working Bar).` : "");
     const allJobs = [...new Set(shifts.map((s) => s.kronosJob).filter(Boolean))].sort();
     $("#names").innerHTML = people.map((p) => {
@@ -102,7 +110,7 @@
   $("#week").addEventListener("change", () => { if (raw) build(); });
   document.addEventListener("change", (e) => {
     const t = e.target;
-    if (t.dataset.on) { if (t.checked) off.delete(t.dataset.on); else off.add(t.dataset.on); render(); }
+    if (t.dataset.on) { if (t.checked) { off.delete(t.dataset.on); autoOff.delete(t.dataset.on); keepOn.add(t.dataset.on); } else { off.add(t.dataset.on); keepOn.delete(t.dataset.on); } render(); }
     if (t.dataset.name) {
       const auto = R.kronosNameFor(t.dataset.name, {});
       if (t.value.trim() && t.value.trim() !== auto) prefs.nameOverrides[t.dataset.name] = t.value.trim();

@@ -32,6 +32,14 @@ globalThis.SH_DEFAULTS = {
     grotto: { Server: "Restaurant Server" },
   },
 
+  // Which jobs this location's helper takes (Zack 10-23: the roster sometimes has the kitchen
+  // staff too). Shifts in any other job start unticked on the review screen; tick one to keep it.
+  // Matched on the Kronos job, after the renames above. A location not listed takes everything.
+  locationOnlyJobs: {
+    grotto: ["Restaurant Server", "Bar"],
+    landrys: ["Bus", "Busser", "Bar", "Bartender", "Server", "Host"],
+  },
+
   // Jobs that are always a TRANSFER in Kronos (changed on that one shift), never someone's
   // main job, and the main job of someone who only works those (Zack: Bar shifts are the
   // job change, Server is the main job).
