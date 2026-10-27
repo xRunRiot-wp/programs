@@ -1,6 +1,7 @@
 // Dungeon rules helpers (PokéRole-style grid play): what blocks movement and sight, which ground is slow,
 // how far a mini can go this turn, line of sight and distance in squares.
-// A "world" is { onBoard(i, j), tile(i, j), occupied(i, j) } for grid squares i, j.
+// A "world" is { onBoard(i, j), tile(i, j), occupied(i, j), wall(i, j, ni, nj) } for grid squares i, j
+// (wall = a wall on the line between two neighbouring squares, like a board's edge wall).
 
 export const BLOCKS_MOVE = new Set(['wall', 'low', 'thin', 'hedge', 'fence', 'rock', 'tree', 'pit', 'event',
   'chest', 'chestOpen', 'camp', 'guild', 'campfire', 'clue', 'goal']);
@@ -26,6 +27,7 @@ export function cellsOf(x, z, w = 1, d = 1) {
 // 'alt' (1, 2, 1, 2...), 'none' (no diagonal steps). Returns Map "x,z" (middle) -> movement spent.
 export function reachable(world, sx, sz, w, d, budget, diag = 'one') {
   const ok = (x, z) => cellsOf(x, z, w, d).every(([i, j]) => world.onBoard(i, j) && !BLOCKS_MOVE.has(world.tile(i, j)));
+  const cross = (x, z, dx, dz) => !world.wall || !cellsOf(x, z, w, d).some(([i, j]) => world.wall(i, j, i + dx, j + dz));
   const cost = (x, z) => (cellsOf(x, z, w, d).some(([i, j]) => DIFFICULT.has(world.tile(i, j))) ? 2 : 1);
   const steps = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   if (diag !== 'none') steps.push([1, 1], [1, -1], [-1, 1], [-1, -1]);
@@ -40,6 +42,8 @@ export function reachable(world, sx, sz, w, d, budget, diag = 'one') {
       const nx = x + dx, nz = z + dz, diagonal = dx && dz;
       if (!ok(nx, nz)) continue;
       if (diagonal && (!ok(x + dx, z) || !ok(x, z + dz))) continue;     // no squeezing past corners
+      if (!diagonal && !cross(x, z, dx, dz)) continue;
+      if (diagonal && !(cross(x, z, dx, 0) && cross(x + dx, z, 0, dz) && cross(x, z, 0, dz) && cross(x, z + dz, dx, 0))) continue;
       let step = cost(nx, nz), np = par;
       if (diagonal && diag === 'alt') { step += par; np = 1 - par; }
       const nc = c + step;
@@ -62,8 +66,16 @@ export function reachable(world, sx, sz, w, d, budget, diag = 'one') {
 export function lineOfSight(world, ax, az, bx, bz) {
   const n = Math.ceil(Math.hypot(bx - ax, bz - az) * 8);
   const a = `${Math.floor(ax)},${Math.floor(az)}`, b = `${Math.floor(bx)},${Math.floor(bz)}`;
-  for (let s = 1; s < n; s++) {
+  const W = world.wall || (() => false);
+  let pi = Math.floor(ax), pj = Math.floor(az);
+  for (let s = 1; s <= n; s++) {
     const t = s / n, i = Math.floor(ax + (bx - ax) * t), j = Math.floor(az + (bz - az) * t);
+    if (i !== pi || j !== pj) {                 // crossing into the next square: a wall on that line blocks the view
+      const viaX = !W(pi, pj, i, pj) && !W(i, pj, i, j), viaZ = !W(pi, pj, pi, j) && !W(pi, j, i, j);
+      if (!(i !== pi && j !== pj ? viaX || viaZ : i !== pi ? !W(pi, pj, i, pj) : !W(pi, pj, pi, j))) return false;
+      pi = i; pj = j;
+    }
+    if (s === n) break;
     const k = `${i},${j}`;
     if (k === a || k === b) continue;
     if (BLOCKS_SIGHT.has(world.tile(i, j))) return false;

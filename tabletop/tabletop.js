@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=27';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=27';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=28';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=28';
 
-const VERSION = 27;                              // raised by bump.py on every publish
+const VERSION = 28;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -304,7 +304,7 @@ function onClientData(msg) {
     case 'paused': state.paused = msg.on; renderPause(); break;
     case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); break;
     case 'party': state.party = msg.party; renderParty(); break;
-    case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); break;
+    case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); buildBoard(); break;
     case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
   }
   figsVersion++;
@@ -505,6 +505,7 @@ function handle(msg, from) {
       if (!gm) return;
       if (msg.limit != null) state.rules.limit = !!msg.limit;
       if (msg.autoReveal != null) state.rules.autoReveal = !!msg.autoReveal;
+      if (msg.edgeWalls != null) { state.rules.edgeWalls = !!msg.edgeWalls; buildBoard(); }
       pushRules();
       break;
     }
@@ -859,7 +860,8 @@ function note(to, text) {
   else sendAll({ t: 'note', text }, cid => cid === to);
 }
 const ownMove = f => (f.st?.status || []).includes('Immobilized') ? 0 : (f.st?.move ?? (2 + (f.st?.dex || 0)));
-// minis attached to each other (riders, what they ride, and so on) all move at the slowest one's speed; 0s don't count
+// minis attached to each other (riders, what they ride, and so on) all move at the slowest one's speed;
+// minis with 0 movement or no speed set (no Dexterity or Move) don't count
 function attachedGroup(f) {
   const ids = new Set([f.id]);
   for (let changed = true; changed;) {
@@ -872,7 +874,7 @@ function attachedGroup(f) {
   return [...ids].map(id => state.figures[id]);
 }
 function moveBudget(f) {
-  const speeds = attachedGroup(f).map(ownMove).filter(v => v > 0);
+  const speeds = attachedGroup(f).filter(o => o.st?.move != null || o.st?.dex != null).map(ownMove).filter(v => v > 0);
   return speeds.length ? Math.min(...speeds) : ownMove(f);
 }
 // the grid as one mini sees it: other minis' squares are taken (not its own, nor pieces riding on it)
@@ -897,7 +899,7 @@ function worldFor(f) {
   const mine = isSmall(f);
   const occupied = (i, j) => { const k = i + ',' + j; return full.has(k) || (smalls.get(k) || 0) >= (mine ? 2 : 1); };
   const seen = f.owner ? state.boards.filter(b => !b.hidden) : state.boards;   // allies' paths stay on what they can see
-  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied };
+  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied, wall: edgeWall };
 }
 function pushParty() { renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
 function pushCombat() { renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
@@ -920,7 +922,7 @@ function revealNextTo(f) {
   for (const [i, j] of cellsOf(f.x, f.z, w, d)) {
     for (const [a, c] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
       const b = boardAt(a + 0.5, c + 0.5);
-      if (b?.hidden && !BLOCKS_MOVE.has(state.tiles[a + ',' + c])) revealBoard(b);
+      if (b?.hidden && !BLOCKS_MOVE.has(state.tiles[a + ',' + c]) && !edgeWall(i, j, a, c)) revealBoard(b);
     }
   }
 }
@@ -986,6 +988,38 @@ function save() {
 // Board maths (positions are board units: one square = 1)
 // =====================================================================
 const boardAt = (x, z, boards = state.boards) => boards.find(b => x >= b.x && x <= b.x + b.cols && z >= b.z && z <= b.z + b.rows);
+// ---------- low walls round each board's edge ----------
+// Where two boards join, the wall has a one-square gap at the middle of the shared edge.
+const edgeWallsOn = () => state.rules.edgeWalls !== false;
+const edgeKey = (i, j, ni, nj) => (i < ni || (i === ni && j < nj)) ? `${i},${j}|${ni},${nj}` : `${ni},${nj}|${i},${j}`;
+// host: work out each board's gaps (the players' copy of a board carries them, even towards areas they can't see yet)
+function computeGaps() {
+  for (const b of state.boards) b.gaps = [];
+  const B = state.boards;
+  for (let p = 0; p < B.length; p++) for (let q = p + 1; q < B.length; q++) {
+    const a = B[p], b = B[q];
+    let k = null;
+    for (const [l, r] of [[a, b], [b, a]]) {
+      if (l.x + l.cols === r.x) {                 // side by side: shared edge runs along z
+        const lo = Math.max(l.z, r.z), hi = Math.min(l.z + l.rows, r.z + r.rows), j = lo + Math.floor((hi - lo - 1) / 2);
+        if (hi > lo) k = edgeKey(r.x - 1, j, r.x, j);
+      }
+      if (l.z + l.rows === r.z) {                 // one above the other: shared edge runs along x
+        const lo = Math.max(l.x, r.x), hi = Math.min(l.x + l.cols, r.x + r.cols), i = lo + Math.floor((hi - lo - 1) / 2);
+        if (hi > lo) k = edgeKey(i, r.z - 1, i, r.z);
+      }
+    }
+    if (k) { a.gaps.push(k); b.gaps.push(k); }
+  }
+}
+// is there a board-edge wall between neighbouring squares i,j and ni,nj?
+function edgeWall(i, j, ni, nj) {
+  if (!edgeWallsOn()) return false;
+  const a = boardAt(i + 0.5, j + 0.5), b = boardAt(ni + 0.5, nj + 0.5);
+  if (a === b || (!a && !b)) return false;
+  const k = edgeKey(i, j, ni, nj);
+  return !(a?.gaps || []).includes(k) && !(b?.gaps || []).includes(k);
+}
 function boardsBox() {
   const B = state.boards;
   return { x0: Math.min(...B.map(b => b.x)), z0: Math.min(...B.map(b => b.z)), x1: Math.max(...B.map(b => b.x + b.cols)), z1: Math.max(...B.map(b => b.z + b.rows)) };
@@ -1086,7 +1120,9 @@ function resize() {
 
 const mapTextures = new Map();                  // board id -> texture of its map picture
 function buildBoard() {
+  if (isHost) computeGaps();
   if (!boardGroup) return;
+  figsVersion++;
   for (const o of boardGroup.children) { o.geometry?.dispose(); if (o.material && !o.material.map) o.material.dispose(); }
   boardGroup.clear();
   const slabMat = new THREE.MeshStandardMaterial({ color: '#3b2a1c', roughness: 0.8 });
@@ -1129,6 +1165,27 @@ function buildBoard() {
       const o = frame(cols + 0.3, rows + 0.3, 0.12, '#e0a64b', 0.9);
       o.position.set(cx, 0.006, cz);
       boardGroup.add(o);
+    }
+  }
+  if (edgeWallsOn()) {                          // the low edge walls: one short block per square of edge
+    const segs = new Map();
+    for (const b of state.boards) {
+      if (b.hidden && isHost && !gmView()) continue;
+      const add = (i, j, ni, nj, x, z, along) => { if (edgeWall(i, j, ni, nj)) segs.set(edgeKey(i, j, ni, nj), { x, z, along }); };
+      for (let i = b.x; i < b.x + b.cols; i++) { add(i, b.z - 1, i, b.z, i + 0.5, b.z, 'x'); add(i, b.z + b.rows - 1, i, b.z + b.rows, i + 0.5, b.z + b.rows, 'x'); }
+      for (let j = b.z; j < b.z + b.rows; j++) { add(b.x - 1, j, b.x, j, b.x, j + 0.5, 'z'); add(b.x + b.cols - 1, j, b.x + b.cols, j, b.x + b.cols, j + 0.5, 'z'); }
+    }
+    if (segs.size) {
+      const H = 0.45, T = 0.14;
+      const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, H, T), new THREE.MeshStandardMaterial({ color: '#7a756e', roughness: 0.9 }), segs.size);
+      const o = new THREE.Object3D();
+      let n = 0;
+      for (const s of segs.values()) {
+        o.position.set(s.x, H / 2, s.z); o.rotation.set(0, s.along === 'z' ? Math.PI / 2 : 0, 0); o.updateMatrix();
+        m.setMatrixAt(n++, o.matrix);
+      }
+      m.castShadow = m.receiveShadow = true;
+      boardGroup.add(m);
     }
   }
   for (const id of [...mapTextures.keys()]) if (!state.maps[id]) { mapTextures.get(id).dispose(); mapTextures.delete(id); }
@@ -2020,6 +2077,7 @@ function renderRules() {
   if (!isHost) return;
   $('ruleLimit').checked = state.rules.limit;
   $('ruleReveal').checked = state.rules.autoReveal;
+  $('ruleEdgeWalls').checked = state.rules.edgeWalls !== false;
   $('explored').textContent = state.explored;
   const b = curBoard();
   $('hideBoard').textContent = b?.hidden ? 'Show to players' : 'Hide from players';
@@ -2211,6 +2269,7 @@ function wirePanel() {
   $('combatStart').onclick = () => act({ t: 'combatStart' });
   $('combatEndBtn').onclick = () => { if (confirm('End combat?')) act({ t: 'combatEnd' }); };
   $('ruleLimit').onchange = () => act({ t: 'rules', limit: $('ruleLimit').checked });
+  $('ruleEdgeWalls').onchange = () => act({ t: 'rules', edgeWalls: $('ruleEdgeWalls').checked });
   $('ruleReveal').onchange = () => act({ t: 'rules', autoReveal: $('ruleReveal').checked });
   $('eventRoll').onclick = () => { const t = controls.target; act({ t: 'dungeonEvent', at: { x: t.x, z: t.z } }); };
   $('wallBoard').onclick = () => { const b = curBoard(); if (b) act({ t: 'boardWalls', id: b.id }); };

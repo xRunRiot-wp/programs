@@ -103,7 +103,7 @@ Each event card also has a **Place ...** button that picks the matching piece so
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
 (nor anything on it). Players can never walk onto a square they can't see: an area is revealed when an ally stands
-right next to one of its open squares (not diagonally, and not a wall). **Wall the edges** rings the picked board
+right next to one of its open squares (not diagonally, and not through a wall). **Wall the edges** rings the picked board
 with walls; paint a **Door** (or erase a wall) on one edge square and that's the room's only way in, so a 7x7 room
 can have a one-square entrance. The GM can also **Roll dungeon event** by hand.
 
@@ -112,6 +112,9 @@ can have a one-square entrance. The GM can also **Roll dungeon event** by hand.
 The table can have several boards, each with its own size, map picture and grid. **+ Add board** puts a new one
 next to the others. Turn on **Move boards** and drag a board: it snaps to whole squares, so boards join edge to edge,
 and the minis and terrain on it move along. Minis can walk from one board onto the next.
+**Edge walls** (Rules & Dungeon, on by default): every board has a low wall all round its edge. Where two boards
+join, the wall has a one-square gap at the middle of the shared edge: the only way through. These walls block
+movement and line of sight like real walls, and a hidden area is revealed only through its gap.
 Click a board's name to pick it for editing (it gets an outline).
 
 ## Terrain
@@ -129,7 +132,7 @@ square with the chosen tile, **Clear** removes all terrain. Turn **Paint** off t
 
 Select a piece, click **Attach to…**, then click the piece it belongs on (a rider on a horse, a turret on a wagon).
 When the main piece moves or turns, everything attached comes along, and attached minis all move at the slowest one's speed
-(minis with 0 movement don't count). **Detach** separates them again.
+(minis with 0 movement, or with no speed set, don't count). **Detach** separates them again.
 
 ## Dice
 

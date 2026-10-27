@@ -272,6 +272,7 @@
         <button id="combatEndBtn" class="danger" style="display:none">End combat</button>
       </div>
       <label style="color:var(--text);margin-top:8px"><input id="ruleLimit" type="checkbox" checked> Limit moves to each turn's range (combat and party turns)</label>
+      <label style="color:var(--text)"><input id="ruleEdgeWalls" type="checkbox" checked> Low walls round every board's edge (a one-square gap in the middle where two boards join)</label>
       <label style="color:var(--text)"><input id="ruleReveal" type="checkbox" checked> Reveal a hidden area when a player stands at its open edge</label>
       <div class="row" style="margin-top:8px">
         <span>Areas explored: <b id="explored">0</b></span>
@@ -358,6 +359,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=27"></script>
+<script type="module" src="tabletop.js?v=28"></script>
 </body>
 </html>
