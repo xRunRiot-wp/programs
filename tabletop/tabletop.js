@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=13';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=13';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=14';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=14';
 
-const VERSION = 13;                              // raised by bump.py on every publish
+const VERSION = 14;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -336,15 +336,6 @@ function handle(msg, from) {
         }
       }
       if (msg.done) delete f._from;
-      if (msg.done && f.owner) {                  // an ally on a ? : the dungeon event happens
-        const hit = cellsOf(f.x, f.z, w, d).map(([i, j]) => i + ',' + j).find(k => state.tiles[k] === 'event');
-        if (hit) {
-          delete state.tiles[hit]; tilesChanged(); sendTiles({ [hit]: null });
-          const r = rollDie(6);
-          addLog({ kind: 'sys', text: `${f.name} found a ? - something happens...` });
-          addLog({ kind: 'roll', from: state.gm, text: `rolled the dungeon event for ${f.name}'s ?: ${r} = ${DUNGEON_EVENTS[r]}`, to: state.gm });
-        }
-      }
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
       if (msg.done) save();
@@ -418,6 +409,17 @@ function handle(msg, from) {
       addLog({ kind: 'sys', text: 'Combat is over.' });
       state.party = { turn: state.party.turn + 1, from: {}, dash: {} };
       pushCombat(); pushParty();
+      break;
+    }
+    case 'interact': {
+      if (!mayMove || !f.owner || state.tiles[msg.key] !== 'event') return;
+      if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (!nextToCell(f, msg.key)) { note(from, `${f.name} has to stand next to the ? first.`); return; }
+      delete state.tiles[msg.key]; tilesChanged(); sendTiles({ [msg.key]: null });
+      const r = rollDie(6);
+      addLog({ kind: 'sys', text: `${f.name} checks the ? - something happens...` });
+      addLog({ kind: 'roll', from: state.gm, text: `rolled the dungeon event for ${f.name}'s ?: ${r} = ${DUNGEON_EVENTS[r]}`, to: state.gm });
+      save();
       break;
     }
     case 'partyNext': {
@@ -720,6 +722,13 @@ function boardsChanged(refit) {
 }
 
 // ---------- rules helpers (host) ----------
+// is this mini standing next to square "i,j" (sides or corners), not on it?
+function nextToCell(f, key) {
+  const [ci, cj] = key.split(',').map(Number), c = fp(f);
+  const cells = cellsOf(f.x, f.z, c.w, c.d);
+  if (cells.some(([i, j]) => i === ci && j === cj)) return false;
+  return cells.some(([i, j]) => Math.abs(i - ci) <= 1 && Math.abs(j - cj) <= 1);
+}
 // in a fight: every player's mini, and GM minis once they have a Dexterity
 const fights = x => !!x.owner || (x.st && x.st.dex != null);
 function rollInit(x) {
@@ -1059,8 +1068,8 @@ function qMat() {
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(30,22,0,0.75)'; g.beginPath(); g.arc(64, 64, 58, 0, 7); g.fill();
   g.strokeStyle = '#ffd23f'; g.lineWidth = 6; g.stroke();
-  g.fillStyle = '#ffd23f'; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('?', 64, 70);
+  g.fillStyle = '#ff2b2b'; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('?', 64, 70);                      // the ? itself is red
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return (qMatCache = new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
 }
@@ -1390,8 +1399,37 @@ const rangeGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 const losGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
 const rangeMat = new THREE.MeshBasicMaterial({ color: '#4b9be0', transparent: true, opacity: 0.32, depthWrite: false });
 
+// an "Interact" button over each ? that one of your minis (or, for the GM, the picked ally) stands next to
+function updatePrompts() {
+  const box = $('prompts'), seen = new Set();
+  const mine = gmView() ? [state.figures[selectedId]].filter(f => f?.owner) : Object.values(state.figures).filter(f => f.owner && f.owner === viewerId());
+  const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
+  for (const [k, t] of Object.entries(state.tiles)) {
+    if (t !== 'event') continue;
+    const who = mine.find(f => nextToCell(f, k));
+    if (!who) continue;
+    seen.add(k);
+    let b = box.querySelector(`[data-key="${k}"]`);
+    if (!b) {
+      b = document.createElement('button'); b.className = 'prompt'; b.dataset.key = k;
+      b.textContent = '❔ Interact';
+      b.onclick = () => act({ t: 'interact', id: b.dataset.who, key: k });
+      box.appendChild(b);
+    }
+    b.dataset.who = who.id;
+    b.disabled = !!preview;
+    const [i, j] = k.split(',').map(Number);
+    v.set(i + 0.5, 1.15, j + 0.5).project(camera);
+    b.style.left = (r.width * (v.x + 1) / 2) + 'px';
+    b.style.top = (r.height * (1 - v.y) / 2) + 'px';
+    b.style.display = v.z < 1 ? '' : 'none';
+  }
+  for (const b of [...box.children]) if (!seen.has(b.dataset.key)) b.remove();
+}
+
 function tick() {
   animateDice(performance.now());
+  updatePrompts();
   if (tileGroup) { const y = 0.75 + Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = y; }
   updateOverlays();
   // a bobbing marker over whoever's turn it is

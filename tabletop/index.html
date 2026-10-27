@@ -76,6 +76,11 @@
   #tileTypes button.on, #paintBtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
   #updateBar { display: none; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); z-index: 5;
     background: #14261a; border: 1px solid #5cb85c; border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center; }
+  #prompts { position: absolute; left: 0; top: 0; right: 300px; bottom: 0; pointer-events: none; overflow: hidden; }
+  #prompts .prompt { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; background: #3a2f0a;
+    border: 1px solid #ffd23f; color: #ffe9a6; font-weight: 600; padding: 4px 10px; border-radius: 14px; white-space: nowrap; }
+  #prompts .prompt:hover { background: #57460f; }
+  @media (max-width: 700px) { #prompts { right: 0; } }
   #previewBar { display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4;
     background: #2a2414; border: 1px solid var(--accent); border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center;
     flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
@@ -114,6 +119,7 @@
 <div id="game">
   <div id="view"></div>
   <div id="status"></div>
+  <div id="prompts"></div>
   <div id="hint">Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom</div>
   <button id="toggleSide">Menu</button>
   <div id="updateBar">
@@ -210,7 +216,7 @@
 
     <section id="partySec" style="display:none">
       <h3>Exploring <span id="partyTurn" style="color:var(--text);float:right;text-transform:none;letter-spacing:0"></span></h3>
-      <div style="color:var(--dim);font-size:12px">All allies move and act in the same turn, each up to their range. Step on a <b style="color:#ffd23f">?</b> to trigger a dungeon event.</div>
+      <div style="color:var(--dim);font-size:12px">All allies move and act in the same turn, each up to their range. Stand next to a <b style="color:#ff2b2b">?</b> and click <b>Interact</b> to see what it is (free: it doesn't use your action).</div>
       <div class="row" style="margin-top:6px">
         <button id="partyDash" title="Spend this turn's action on extra movement (press again to undo while within a normal move)">Dash</button>
         <button id="partyNext" class="primary" style="display:none" title="Everyone has moved: start the next party turn">Next party turn</button>
@@ -239,7 +245,7 @@
         <span>Areas explored: <b id="explored">0</b></span>
         <button id="eventRoll" class="fit" title="1d6: trap/hazard, enemy team, treasure, guild challenge, safe passage, mission clue">Roll dungeon event</button>
       </div>
-      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Props): when an ally steps on one, the event is rolled and only you see the result.</div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ff2b2b">? Event</b> markers (Terrain &gt; Props): when an ally next to one clicks Interact, the event is rolled and only you see the result.</div>
     </section>
 
     <section class="gm-only">
@@ -317,6 +323,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=13"></script>
+<script type="module" src="tabletop.js?v=14"></script>
 </body>
 </html>

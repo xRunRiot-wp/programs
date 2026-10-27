@@ -2,7 +2,7 @@
 // how far a mini can go this turn, line of sight and distance in squares.
 // A "world" is { onBoard(i, j), tile(i, j), occupied(i, j) } for grid squares i, j.
 
-export const BLOCKS_MOVE = new Set(['wall', 'low', 'thin', 'hedge', 'fence', 'rock', 'tree', 'pit']);
+export const BLOCKS_MOVE = new Set(['wall', 'low', 'thin', 'hedge', 'fence', 'rock', 'tree', 'pit', 'event']);
 export const BLOCKS_SIGHT = new Set(['wall', 'thin', 'hedge', 'door', 'tree']);
 export const DIFFICULT = new Set(['swamp', 'water', 'river', 'snow']);   // each square costs 2 movement
 

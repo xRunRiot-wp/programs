@@ -77,9 +77,10 @@ only within range; a move that's too far snaps back.
 **Exploring = party turns.** Out of combat, all allies move and act in the same turn, each up to their range
 (and once each: **Dash** / **Undo dash**). When everyone is done the GM clicks **Next party turn**.
 
-**? markers.** The GM places **? Event** markers (Terrain > Props). When an ally steps on one, the dungeon event
-(1d6: trap or hazard, enemy team, treasure, guild challenge, safe passage, mission clue) is rolled, only the GM
-sees the result, and the marker disappears.
+**? markers.** The GM places **? Event** markers (Terrain > Props). A ? sits on its square like an object. When an
+ally stands next to it (sides or corners), an **Interact** button appears over it; clicking it is free (not an action;
+in combat only on that mini's turn). Then the dungeon event (1d6: trap or hazard, enemy team, treasure, guild
+challenge, safe passage, mission clue) is rolled, only the GM sees the result, and the marker disappears.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
 (nor anything on it). When a player steps onto it, it's revealed. The GM can also **Roll dungeon event** by hand.
