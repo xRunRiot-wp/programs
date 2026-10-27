@@ -24,17 +24,30 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | Paint terrain tiles (grass, stone, wood, water, lava, walls...) | | yes |
 | Add / delete minis, give a mini to a player | | yes |
 | Hide a mini from players | | yes |
-| Board size, map picture, grid lines | | yes |
+| Boards: add more, size, map picture, grid lines, drag them together | | yes |
 | 3D models (.glb) for minis | | yes |
 | Physics dice (d4 to d100, "only me" rolls) and chat | yes | yes |
 
 ## Controls
 
 - Drag a mini to move it (it snaps to the squares; turn **Snap to squares** off for free placement).
-- Drag empty space to rotate the view, right-drag to pan, scroll to zoom.
+- Right-click a mini to turn it.
+- Right-drag to rotate the view, drag empty space to pan, scroll to zoom.
 - GM: select a mini and press **Delete** to remove it.
 
+## Boards
+
+The table can have several boards, each with its own size, map picture and grid. **+ Add board** puts a new one
+next to the others. Turn on **Move boards** and drag a board: it snaps to whole squares, so boards join edge to edge,
+and the minis and terrain on it move along. Minis can walk from one board onto the next.
+Click a board's name to pick it for editing (it gets an outline).
+
 ## Terrain
+
+Floors (grass, stone, cobble, wood, dirt, sand, snow, ice, swamp, carpet, checker, water, lava, pit), walls
+(wall block, low block, thin wall, hedge, door, fence), paths (road, river, bridge) and props (tree, rock).
+Thin walls, hedges, doors and fences join up with their neighbours; doors line up with the wall they're in;
+roads and rivers run on into the next road or river square; a bridge sits across a river.
 
 Pick a tile type under **Terrain** (or the **Eraser**) and painting turns on: click or drag across the board.
 Tiles join up with their neighbours, and minis stand on top of them (walls too). **Fill board** covers every

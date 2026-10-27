@@ -12,19 +12,36 @@ const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from 
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
 const SIZE_CELLS = { '0.7': 1, '1': 1, '2': 2, '3': 3 };
 const MAX_CELLS = 12;
-// terrain tile types: h = height of the tile's top
+// terrain tile types. h = how high a mini stands on it. group = section in the menu.
+// link = pieces with the same link join up with their neighbours (walls, fences, roads, rivers).
 const TILES = {
-  grass: { name: 'Grass', color: '#5f8f3e', h: 0.06 },
-  stone: { name: 'Stone', color: '#8c8f94', h: 0.06, seams: true },
-  wood: { name: 'Wood', color: '#9a6b3f', h: 0.06, planks: true },
-  dirt: { name: 'Dirt', color: '#7a5a3a', h: 0.06 },
-  sand: { name: 'Sand', color: '#d8c38a', h: 0.06 },
-  water: { name: 'Water', color: '#3f78b5', h: 0.03, water: true },
-  lava: { name: 'Lava', color: '#e2531d', h: 0.04, glow: true },
-  pit: { name: 'Pit', color: '#121315', h: 0.004 },
-  wall: { name: 'Wall', color: '#6d6a66', h: 1.0, seams: true },
-  low: { name: 'Low wall', color: '#807b73', h: 0.4, seams: true },
+  grass: { name: 'Grass', group: 'Floors', color: '#5f8f3e', h: 0.06 },
+  stone: { name: 'Stone', group: 'Floors', color: '#8c8f94', h: 0.06, seams: true },
+  cobble: { name: 'Cobble', group: 'Floors', color: '#76736d', h: 0.06, cobble: true },
+  wood: { name: 'Wood', group: 'Floors', color: '#9a6b3f', h: 0.06, planks: true },
+  dirt: { name: 'Dirt', group: 'Floors', color: '#7a5a3a', h: 0.06 },
+  sand: { name: 'Sand', group: 'Floors', color: '#d8c38a', h: 0.06 },
+  snow: { name: 'Snow', group: 'Floors', color: '#e8eef2', h: 0.06 },
+  ice: { name: 'Ice', group: 'Floors', color: '#a9d8ea', h: 0.05, shiny: true },
+  swamp: { name: 'Swamp', group: 'Floors', color: '#4b5a35', h: 0.05 },
+  carpet: { name: 'Carpet', group: 'Floors', color: '#8a2b2b', h: 0.05, rug: true },
+  checker: { name: 'Checker', group: 'Floors', color: '#d9d4c7', h: 0.06, checker: true },
+  water: { name: 'Water', group: 'Floors', color: '#3f78b5', h: 0.03, water: true },
+  lava: { name: 'Lava', group: 'Floors', color: '#e2531d', h: 0.04, glow: true },
+  pit: { name: 'Pit', group: 'Floors', color: '#121315', h: 0.004 },
+  wall: { name: 'Wall block', group: 'Walls', color: '#6d6a66', h: 1.0, seams: true, link: 'wall' },
+  low: { name: 'Low block', group: 'Walls', color: '#807b73', h: 0.4, seams: true, link: 'wall' },
+  thin: { name: 'Thin wall', group: 'Walls', color: '#77746f', h: 1.0, seams: true, link: 'wall', piece: 'thin', thick: 0.3 },
+  hedge: { name: 'Hedge', group: 'Walls', color: '#3d6b2c', h: 0.8, link: 'wall', piece: 'thin', thick: 0.45 },
+  door: { name: 'Door', group: 'Walls', color: '#77746f', h: 0, link: 'wall', piece: 'door' },
+  fence: { name: 'Fence', group: 'Walls', color: '#8b5e34', h: 0, link: 'fence', piece: 'fence' },
+  road: { name: 'Road', group: 'Paths', color: '#8a8378', h: 0.04, link: 'road', piece: 'strip', width: 0.6, cobble: true },
+  river: { name: 'River', group: 'Paths', color: '#3f78b5', h: 0.02, link: 'river', piece: 'strip', width: 0.75, water: true },
+  bridge: { name: 'Bridge', group: 'Paths', color: '#9a6b3f', h: 0.16, link: 'river', piece: 'bridge', planks: true },
+  tree: { name: 'Tree', group: 'Props', color: '#2f6b2a', h: 0, piece: 'tree' },
+  rock: { name: 'Rock', group: 'Props', color: '#7d7c78', h: 0.45, piece: 'rock' },
 };
+const linked = (a, b) => !!(TILES[a]?.link && TILES[a].link === TILES[b]?.link);
 // squares a mini covers along the board's x (w) and z (d)
 const fp = f => ({ w: f.w || SIZE_CELLS[f.size] || 1, d: f.d || SIZE_CELLS[f.size] || 1 });
 
@@ -61,7 +78,8 @@ if (!clientId) { clientId = rid(12); store.set('tabletop.clientId', clientId); }
 let isHost = false, myName = '', roomCode = '', hostId = '';
 let state = freshState();
 function freshState() {
-  return { board: { cols: 20, rows: 14, grid: true }, map: null, figures: {}, players: {}, log: [], gm: '', models: {}, tiles: {} };
+  // boards: each is a rectangle of squares on one shared grid; (x, z) = its top-left corner
+  return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, players: {}, log: [], gm: '', models: {}, tiles: {} };
 }
 
 // =====================================================================
@@ -76,7 +94,17 @@ async function startHost(name) {
   roomCode = saved?.code || rid(6);
   if (saved?.state) {
     state = Object.assign(freshState(), saved.state);
-    state.map = (await blobs.get('map')) || saved.state.map || null;
+    if (saved.state.board && !saved.state.boards) {           // a save from before there were several boards
+      const b = saved.state.board, x = -Math.floor(b.cols / 2), z = -Math.floor(b.rows / 2);
+      state.boards = [{ id: 'b1', x, z, cols: b.cols, rows: b.rows, grid: b.grid }];
+      const tiles = {};
+      for (const [k, t] of Object.entries(state.tiles || {})) { const [i, j] = k.split(',').map(Number); tiles[(i + x) + ',' + (j + z)] = t; }
+      state.tiles = tiles;
+      const old = (await blobs.get('map')) || saved.state.map;
+      if (old) state.maps.b1 = old;
+      delete state.board; delete state.map;
+    }
+    for (const b of state.boards) { const m = await blobs.get('map:' + b.id); if (m) state.maps[b.id] = m; }
     for (const id of Object.keys(state.models)) {
       const data = await blobs.get('model:' + id);
       if (data) modelData.set(id, data); else delete state.models[id];
@@ -140,7 +168,7 @@ function connectToHost() {
 function viewFor() {
   const figures = {};
   for (const f of Object.values(state.figures)) if (!f.hidden) figures[f.id] = f;
-  return { board: state.board, figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm, models: state.models, tiles: state.tiles };
+  return { boards: state.boards, figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm, models: state.models, tiles: state.tiles };
 }
 
 function sendAll(msg, filter) {
@@ -176,7 +204,8 @@ function onHostData(conn, msg) {
       state.figures[id] = { id, name, color: state.players[cid].color, size: '1', owner: cid, hidden: false,
         ...freeSpot(0, 0, 1, 1) };
     }
-    conn.send({ t: 'welcome', state: viewFor(), map: state.map });
+    conn.send({ t: 'welcome', state: viewFor() });
+    for (const [id, map] of Object.entries(state.maps)) conn.send({ t: 'map', id, map });
     for (const [id, data] of modelData) conn.send({ t: 'model', id, name: state.models[id]?.name, data });
     sendAll({ t: 'figs', figures: viewFor().figures });
     addLog({ kind: 'sys', text: `${name} joined.` });
@@ -191,20 +220,19 @@ function onClientData(msg) {
   switch (msg.t) {
     case 'welcome':
       state = Object.assign(freshState(), msg.state);
-      state.map = msg.map || null;
       if ($('game').style.display !== 'block') enterGame(); else rebuildAll();
       break;
     case 'fig': upsertFig(msg.fig); break;
     case 'figs': state.figures = msg.figures; syncFigures(); break;
     case 'del': delete state.figures[msg.id]; removeFigMesh(msg.id); break;
-    case 'board': state.board = msg.board; buildBoard(); break;
+    case 'boards': state.boards = msg.boards; buildBoard(); updateBoardInputs(); break;
     case 'tiles':
       if (msg.clear) state.tiles = {};
       Object.assign(state.tiles, msg.set || {});
       for (const k in msg.set || {}) if (!msg.set[k]) delete state.tiles[k];
       tilesChanged();
       break;
-    case 'map': state.map = msg.map; buildBoard(); break;
+    case 'map': if (msg.map) state.maps[msg.id] = msg.map; else delete state.maps[msg.id]; buildBoard(); break;
     case 'model':
       if (msg.data instanceof ArrayBuffer || ArrayBuffer.isView(msg.data)) {
         const d = msg.data instanceof ArrayBuffer ? msg.data : msg.data.buffer.slice(msg.data.byteOffset, msg.data.byteOffset + msg.data.byteLength);
@@ -302,11 +330,11 @@ function handle(msg, from) {
     }
     case 'tiles': {
       if (!gm) return;
-      const b = state.board, set = {};
+      const set = {};
       if (msg.clear) state.tiles = {};
       for (const [k, v] of Object.entries(msg.set || {})) {
         const [i, j] = k.split(',').map(Number);
-        if (!(i >= 0 && i < b.cols && j >= 0 && j < b.rows)) continue;
+        if (!boardAt(i + 0.5, j + 0.5)) continue;
         const t = TILES[v] ? v : null;
         if (t) state.tiles[k] = t; else delete state.tiles[k];
         set[k] = t;
@@ -325,26 +353,64 @@ function handle(msg, from) {
       save();
       break;
     }
-    case 'board': {
+    case 'boardAdd': {
       if (!gm) return;
-      const cols = Math.max(2, Math.min(80, Math.round(+msg.cols) || 20));
-      const rows = Math.max(2, Math.min(80, Math.round(+msg.rows) || 14));
-      state.board = { cols, rows, grid: msg.grid !== false };
-      for (const k of Object.keys(state.tiles)) { const [i, j] = k.split(',').map(Number); if (i >= cols || j >= rows) delete state.tiles[k]; }
+      const box = boardsBox(), cols = clampSize(msg.cols, 12), rows = clampSize(msg.rows, 12);
+      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols, rows, grid: true };   // lined up to the right
+      state.boards.push(b);
+      boardsChanged();
+      return b.id;
+    }
+    case 'boardEdit': {
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      const old = { ...b };
+      if (msg.cols != null) b.cols = clampSize(msg.cols, b.cols);
+      if (msg.rows != null) b.rows = clampSize(msg.rows, b.rows);
+      if (msg.grid != null) b.grid = !!msg.grid;
+      dropTilesOutside(old);
+      boardsChanged(true);
+      break;
+    }
+    case 'boardMove': {                         // the board and everything standing on it moves by whole squares
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b || !isFinite(+msg.x) || !isFinite(+msg.z)) return;
+      const dx = Math.round(+msg.x) - b.x, dz = Math.round(+msg.z) - b.z;
+      if (!dx && !dz) return;
+      const inside = (x, z) => x >= b.x && x <= b.x + b.cols && z >= b.z && z <= b.z + b.rows;
+      const moved = {}, set = {};
+      for (const [k, t] of Object.entries(state.tiles)) {
+        const [i, j] = k.split(',').map(Number);
+        if (inside(i + 0.5, j + 0.5)) { moved[(i + dx) + ',' + (j + dz)] = t; set[k] = null; delete state.tiles[k]; }
+      }
+      Object.assign(state.tiles, moved); Object.assign(set, moved);
+      const riders = Object.values(state.figures).filter(f => inside(f.x, f.z) && !(f.parent && state.figures[f.parent] && inside(state.figures[f.parent].x, state.figures[f.parent].z)));
+      b.x += dx; b.z += dz;
+      for (const f of riders) { f.x += dx; f.z += dz; pushFig(f); carry(f.id, dx, dz, 0, f); }
       tilesChanged();
-      sendAll({ t: 'tiles', set: {}, clear: true }); sendAll({ t: 'tiles', set: state.tiles });
-      for (const fig of Object.values(state.figures)) { const c = fp(fig); Object.assign(fig, snapPos(fig.x, fig.z, c.w, c.d)); }
-      buildBoard(); syncFigures();
-      sendAll({ t: 'board', board: state.board });
-      sendAll({ t: 'figs', figures: viewFor().figures });
-      save();
+      sendAll({ t: 'tiles', set });
+      boardsChanged();
+      break;
+    }
+    case 'boardDel': {
+      if (!gm || state.boards.length < 2) return;
+      const b = state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      state.boards = state.boards.filter(x => x !== b);
+      delete state.maps[b.id]; blobs.set('map:' + b.id, null);
+      sendAll({ t: 'map', id: b.id, map: null });
+      dropTilesOutside(b);
+      boardsChanged(true);
       break;
     }
     case 'map': {
-      if (!gm) return;
-      state.map = typeof msg.map === 'string' && msg.map.startsWith('data:image/') ? msg.map : null;
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      const map = typeof msg.map === 'string' && msg.map.startsWith('data:image/') ? msg.map : null;
+      if (map) state.maps[b.id] = map; else delete state.maps[b.id];
+      blobs.set('map:' + b.id, map);
       buildBoard();
-      sendAll({ t: 'map', map: state.map });
+      sendAll({ t: 'map', id: b.id, map });
       save();
       break;
     }
@@ -382,11 +448,11 @@ async function rollPhysics(msg, from) {
   const kinds = sides === 100 ? Array.from({ length: n }, () => ['d10t', 'd10']).flat() : Array(n).fill('d' + sides);
   const CANNON = await (cannonP ||= import('cannon-es'));
   const num = (v, lo, hi) => Math.max(lo, Math.min(hi, isFinite(+v) ? +v : 0));
-  const b = state.board;
-  const at = { x: num(msg.at?.x, -b.cols / 2, b.cols / 2), z: num(msg.at?.z, -b.rows / 2, b.rows / 2) };
+  const box = boardsBox();
+  const at = { x: num(msg.at?.x, box.x0, box.x1), z: num(msg.at?.z, box.z0, box.z1) };
   const dir = { x: num(msg.dir?.x, -1, 1), z: num(msg.dir?.z, -1, 1) || -1 };
   const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
-  const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: { w: b.cols, d: b.rows }, random: rnd });
+  const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: box, random: rnd });
   const parts = diceTotal(kinds, values), total = parts.reduce((a, c) => a + c, 0);
   const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames };
   const to = msg.hidden ? from : null;
@@ -433,6 +499,28 @@ function animateDice(now) {
     }
     if (r.doneAt && now - r.doneAt > 8000) { clearRoll(r); rolls.splice(k, 1); }
   }
+}
+
+const clampSize = (v, dflt) => Math.max(2, Math.min(80, Math.round(+v) || dflt));
+// host: tiles that were on a board that shrank or went away (and aren't on another board)
+function dropTilesOutside(old) {
+  const set = {};
+  for (const k of Object.keys(state.tiles)) {
+    const [i, j] = k.split(',').map(Number), x = i + 0.5, z = j + 0.5;
+    if (x > old.x && x < old.x + old.cols && z > old.z && z < old.z + old.rows && !boardAt(x, z)) { delete state.tiles[k]; set[k] = null; }
+  }
+  if (Object.keys(set).length) { tilesChanged(); sendAll({ t: 'tiles', set }); }
+}
+// host: boards changed; minis left off the boards are put back on (refit = re-snap everyone)
+function boardsChanged(refit) {
+  buildBoard(); updateBoardInputs();
+  sendAll({ t: 'boards', boards: state.boards });
+  for (const f of Object.values(state.figures)) {
+    if (!refit && boardAt(f.x, f.z)) continue;
+    const c = fp(f), p = snapPos(f.x, f.z, c.w, c.d);
+    if (p.x !== f.x || p.z !== f.z) { Object.assign(f, p); pushFig(f); }
+  }
+  save();
 }
 
 function turnOne(f, deg) {
@@ -482,29 +570,38 @@ function save() {
   if (!isHost) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const s = { ...state, players: {}, map: null };
+    const s = { ...state, players: {}, maps: {} };
     for (const [k, p] of Object.entries(state.players)) s.players[k] = { ...p, online: false };
     store.set('tabletop.host', { code: roomCode, state: s });
-    if (state.map !== save.map) { save.map = state.map; blobs.set('map', state.map); }
   }, 400);
 }
 
 // =====================================================================
 // Board maths (positions are board units: one square = 1)
 // =====================================================================
-function axisSnap(v, n, cells) {
-  const u = v + n / 2;
-  const s = cells % 2 ? Math.round(u - 0.5) + 0.5 : Math.round(u);
-  return Math.max(cells / 2, Math.min(n - cells / 2, s)) - n / 2;
+const boardAt = (x, z) => state.boards.find(b => x >= b.x && x <= b.x + b.cols && z >= b.z && z <= b.z + b.rows);
+function boardsBox() {
+  const B = state.boards;
+  return { x0: Math.min(...B.map(b => b.x)), z0: Math.min(...B.map(b => b.z)), x1: Math.max(...B.map(b => b.x + b.cols)), z1: Math.max(...B.map(b => b.z + b.rows)) };
 }
+// a piece w squares wide has its middle on a square's middle (odd) or on a grid line (even)
+const gridSnap = (v, cells) => cells % 2 ? Math.floor(v) + 0.5 : Math.round(v);
 function snapPos(x, z, w = 1, d = 1) {
-  const b = state.board;
-  if (!snapOn()) return clampPos(x, z, w, d);
-  return { x: axisSnap(x, b.cols, Math.min(w, b.cols)), z: axisSnap(z, b.rows, Math.min(d, b.rows)) };
+  const p = clampPos(x, z, w, d);
+  if (!snapOn()) return p;
+  return clampPos(gridSnap(p.x, w), gridSnap(p.z, d), w, d);
 }
+// keep a piece on the boards: its middle must be on one; if it's off them all, pull it onto the nearest
 function clampPos(x, z, w = 1, d = 1) {
-  const b = state.board, hw = Math.min(w, b.cols) / 2, hd = Math.min(d, b.rows) / 2;
-  return { x: Math.max(-b.cols / 2 + hw, Math.min(b.cols / 2 - hw, x)), z: Math.max(-b.rows / 2 + hd, Math.min(b.rows / 2 - hd, z)) };
+  if (boardAt(x, z)) return { x, z };
+  let best = null, bd = Infinity;
+  for (const b of state.boards) {
+    const hw = Math.min(w, b.cols) / 2, hd = Math.min(d, b.rows) / 2;
+    const cx = Math.max(b.x + hw, Math.min(b.x + b.cols - hw, x)), cz = Math.max(b.z + hd, Math.min(b.z + b.rows - hd, z));
+    const dist = (cx - x) ** 2 + (cz - z) ** 2;
+    if (dist < bd) { bd = dist; best = { x: cx, z: cz }; }
+  }
+  return best;
 }
 // nearest square where a new mini doesn't stand on another one
 function freeSpot(x, z, w = 1, d = 1) {
@@ -550,7 +647,8 @@ function initView() {
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.47;
   controls.minDistance = 3; controls.maxDistance = 120;
-  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+  controls.screenSpacePanning = false;          // pan across the table, not up into the air
 
   scene.add(new THREE.HemisphereLight('#dfe6ff', '#3a3226', 0.9));
   const sun = new THREE.DirectionalLight('#fff4e0', 1.6);
@@ -579,40 +677,55 @@ function resize() {
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 
-let mapTexture = null;
+const mapTextures = new Map();                  // board id -> texture of its map picture
 function buildBoard() {
   if (!boardGroup) return;
+  for (const o of boardGroup.children) { o.geometry?.dispose(); if (o.material && !o.material.map) o.material.dispose(); }
   boardGroup.clear();
-  const { cols, rows, grid } = state.board;
-  const mat = new THREE.MeshStandardMaterial({ color: '#4d5b47', roughness: 0.95 });
-  if (state.map) {
-    if (mapTexture?.userData.src !== state.map) {
-      mapTexture?.dispose();
-      mapTexture = new THREE.TextureLoader().load(state.map);
-      mapTexture.colorSpace = THREE.SRGBColorSpace;
-      mapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      mapTexture.userData.src = state.map;
+  const slabMat = new THREE.MeshStandardMaterial({ color: '#3b2a1c', roughness: 0.8 });
+  for (const b of state.boards) {
+    const { cols, rows, grid } = b, cx = b.x + cols / 2, cz = b.z + rows / 2;
+    const mat = new THREE.MeshStandardMaterial({ color: '#4d5b47', roughness: 0.95 });
+    const src = state.maps[b.id];
+    if (src) {
+      let tex = mapTextures.get(b.id);
+      if (tex?.userData.src !== src) {
+        tex?.dispose();
+        tex = new THREE.TextureLoader().load(src);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.userData.src = src;
+        mapTextures.set(b.id, tex);
+      }
+      mat.map = tex; mat.color.set('#ffffff');
     }
-    mat.map = mapTexture; mat.color.set('#ffffff');
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), mat);
+    top.rotation.x = -Math.PI / 2; top.position.set(cx, 0, cz); top.receiveShadow = true;
+    top.userData.board = b.id;
+    boardGroup.add(top);
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(cols + 0.3, 0.5, rows + 0.3), slabMat);
+    slab.position.set(cx, -0.26, cz); slab.receiveShadow = true;
+    boardGroup.add(slab);
+    if (grid) {
+      const pts = [];
+      for (let i = 0; i <= cols; i++) pts.push(b.x + i, 0, b.z, b.x + i, 0, b.z + rows);
+      for (let j = 0; j <= rows; j++) pts.push(b.x, 0, b.z + j, b.x + cols, 0, b.z + j);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#000000', transparent: true, opacity: 0.35 }));
+      lines.position.y = 0.003;
+      boardGroup.add(lines);
+    }
+    if (isHost && b.id === selBoard && state.boards.length > 1) {      // outline the board being edited
+      const o = frame(cols + 0.3, rows + 0.3, 0.12, '#e0a64b', 0.9);
+      o.position.set(cx, 0.006, cz);
+      boardGroup.add(o);
+    }
   }
-  const top = new THREE.Mesh(new THREE.PlaneGeometry(cols, rows), mat);
-  top.rotation.x = -Math.PI / 2; top.receiveShadow = true;
-  boardGroup.add(top);
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(cols + 0.6, 0.5, rows + 0.6),
-    new THREE.MeshStandardMaterial({ color: '#3b2a1c', roughness: 0.8 }));
-  slab.position.y = -0.26; slab.receiveShadow = true;
-  boardGroup.add(slab);
-  if (grid) {
-    const pts = [];
-    for (let i = 0; i <= cols; i++) pts.push(i - cols / 2, 0, -rows / 2, i - cols / 2, 0, rows / 2);
-    for (let j = 0; j <= rows; j++) pts.push(-cols / 2, 0, j - rows / 2, cols / 2, 0, j - rows / 2);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#000000', transparent: true, opacity: 0.35 }));
-    lines.position.y = 0.003;
-    boardGroup.add(lines);
-  }
-  const sun = scene.userData.sun, r = Math.max(cols, rows) * 0.75 + 4;
+  for (const id of [...mapTextures.keys()]) if (!state.maps[id]) { mapTextures.get(id).dispose(); mapTextures.delete(id); }
+  const box = boardsBox(), sun = scene.userData.sun, r = Math.max(box.x1 - box.x0, box.z1 - box.z0) * 0.75 + 4;
+  sun.position.set((box.x0 + box.x1) / 2 - 8, 20, (box.z0 + box.z1) / 2 + 10);
+  sun.target.position.set((box.x0 + box.x1) / 2, 0, (box.z0 + box.z1) / 2); sun.target.updateMatrixWorld();
   Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 1, far: 80 });
   sun.shadow.camera.updateProjectionMatrix();
   if (!buildBoard.framed) { frameBoard(); buildBoard.framed = true; }
@@ -632,16 +745,20 @@ function tileTexture(t) {
   g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 2;
   if (t.seams) { g.strokeRect(1, 1, 62, 62); g.beginPath(); g.moveTo(0, 32); g.lineTo(64, 32); g.moveTo(32, 0); g.lineTo(32, 32); g.moveTo(16, 32); g.lineTo(16, 64); g.moveTo(48, 32); g.lineTo(48, 64); g.stroke(); }
   if (t.planks) { g.beginPath(); for (const y of [0, 16, 32, 48]) { g.moveTo(0, y); g.lineTo(64, y); } g.stroke(); }
+  if (t.cobble) for (let y = 0; y < 64; y += 16) for (let x = (y / 16 % 2) * 8; x < 72; x += 16) { g.beginPath(); g.ellipse(x, y + 8, 7, 6, 0, 0, 7); g.stroke(); }
+  if (t.checker) { g.fillStyle = 'rgba(30,30,34,0.85)'; g.fillRect(0, 0, 32, 32); g.fillRect(32, 32, 32, 32); }
+  if (t.rug) { g.strokeStyle = '#d8b25a'; g.lineWidth = 3; g.strokeRect(5, 5, 54, 54); }
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+const LOOKS = { trunk: { color: '#5a3d22', planks: true } };
 function kit(type) {
   if (!tileKit[type]) {
-    const t = TILES[type];
-    const mat = new THREE.MeshStandardMaterial({ map: tileTexture(t), roughness: t.water ? 0.15 : 0.9 });
+    const t = TILES[type] || LOOKS[type];
+    const mat = new THREE.MeshStandardMaterial({ map: tileTexture(t), roughness: t.water || t.shiny ? 0.15 : 0.9 });
     if (t.water) { mat.transparent = true; mat.opacity = 0.85; mat.metalness = 0.1; }
     if (t.glow) { mat.emissive = new THREE.Color('#ff5a1a'); mat.emissiveIntensity = 0.8; mat.emissiveMap = mat.map; }
-    tileKit[type] = { geo: new THREE.BoxGeometry(1, t.h, 1), mat };
+    tileKit[type] = { geo: new THREE.BoxGeometry(1, t.h || 0.05, 1), mat };
   }
   return tileKit[type];
 }
@@ -651,36 +768,111 @@ function buildTiles() {
   if (!tileGroup) { tileGroup = new THREE.Group(); scene.add(tileGroup); }
   for (const m of tileGroup.children) m.dispose();
   tileGroup.clear();
-  const { cols, rows } = state.board, byType = {};
-  for (const [k, t] of Object.entries(state.tiles)) (byType[t] ||= []).push(k);
+  const byType = {}, parts = new Map();
   const mtx = new THREE.Matrix4();
+  for (const [k, t] of Object.entries(state.tiles)) {
+    if (!TILES[t].piece) { (byType[t] ||= []).push(k); continue; }
+    const [i, j] = k.split(',').map(Number);
+    const near = (di, dj) => linked(t, state.tiles[(i + di) + ',' + (j + dj)]);
+    piecesFor(t, i + 0.5, j + 0.5, { n: near(0, -1), s: near(0, 1), e: near(1, 0), w: near(-1, 0) }, i * 7919 + j * 104729,
+      (shape, look, m) => { const key = shape + '|' + look; if (!parts.has(key)) parts.set(key, []); parts.get(key).push(m.clone()); });
+  }
   for (const [type, keys] of Object.entries(byType)) {
     const { geo, mat } = kit(type), h = TILES[type].h;
     const im = new THREE.InstancedMesh(geo, mat, keys.length);
-    keys.forEach((k, n) => { const [i, j] = k.split(',').map(Number); im.setMatrixAt(n, mtx.makeTranslation(i - cols / 2 + 0.5, h / 2 + 0.001, j - rows / 2 + 0.5)); });
+    keys.forEach((k, n) => { const [i, j] = k.split(',').map(Number); im.setMatrixAt(n, mtx.makeTranslation(i + 0.5, h / 2 + 0.001, j + 0.5)); });
     im.castShadow = h > 0.2; im.receiveShadow = true;
+    tileGroup.add(im);
+  }
+  for (const [key, list] of parts) {
+    const [shape, look] = key.split('|');
+    const im = new THREE.InstancedMesh(SHAPES[shape], kit(look).mat, list.length);
+    list.forEach((m, n) => im.setMatrixAt(n, m));
+    im.castShadow = true; im.receiveShadow = true;
     tileGroup.add(im);
   }
   for (const g of figMeshes.values()) { const f = state.figures[g.userData.id]; if (f) upsertFig(f, true); }
 }
+// unit shapes, stretched into place for each part of a piece
+const SHAPES = {
+  box: new THREE.BoxGeometry(1, 1, 1),
+  post: new THREE.CylinderGeometry(0.5, 0.5, 1, 10),
+  cone: new THREE.ConeGeometry(0.5, 1, 9),
+  rock: new THREE.DodecahedronGeometry(0.5, 0),
+};
+const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _y = new THREE.Vector3(0, 1, 0);
+const place = (x, y, z, sx, sy, sz, rot = 0) => new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromAxisAngle(_y, rot), _s.set(sx, sy, sz));
+
+// the parts of one connecting piece / prop. links = which neighbours it joins (n s e w). put(shape, look, matrix)
+function piecesFor(type, x, z, links, seed, put) {
+  const t = TILES[type], arms = [['n', 0, -1], ['s', 0, 1], ['e', 1, 0], ['w', -1, 0]].filter(a => links[a[0]]);
+  const rand = k => { const v = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453; return v - Math.floor(v); };
+  switch (t.piece) {
+    case 'thin': {                              // a pillar in the middle with an arm out to each joined neighbour
+      const th = t.thick;
+      put('box', type, place(x, t.h / 2, z, th + 0.04, t.h, th + 0.04));
+      for (const [, dx, dz] of arms) put('box', type, place(x + dx * 0.25, t.h / 2, z + dz * 0.25, dx ? 0.5 : th, t.h, dz ? 0.5 : th));
+      break;
+    }
+    case 'fence': {
+      put('post', 'fence', place(x, 0.35, z, 0.12, 0.7, 0.12));
+      for (const [, dx, dz] of arms) for (const y of [0.3, 0.58])
+        put('box', 'fence', place(x + dx * 0.25, y, z + dz * 0.25, dx ? 0.5 : 0.05, 0.06, dz ? 0.5 : 0.05));
+      break;
+    }
+    case 'door': {                              // sits in a wall line: runs east-west unless the wall comes from north/south
+      const ew = links.e || links.w || !(links.n || links.s);
+      const at = (ox, oy, sx, sy, sz, look) => put('box', look, place(x + (ew ? ox : 0), oy, z + (ew ? 0 : ox), ew ? sx : sz, sy, ew ? sz : sx));
+      at(-0.4, 0.5, 0.2, 1.0, 0.3, 'thin'); at(0.4, 0.5, 0.2, 1.0, 0.3, 'thin');
+      at(0, 0.9, 0.6, 0.2, 0.3, 'thin');
+      at(0, 0.4, 0.58, 0.8, 0.08, 'wood');
+      break;
+    }
+    case 'strip': {                             // road / river: a band that runs on to each joined neighbour
+      const wd = t.width;
+      put('box', type, place(x, t.h / 2, z, wd, t.h, wd));
+      for (const [, dx, dz] of arms) put('box', type, place(x + dx * (0.25 + wd / 4), t.h / 2, z + dz * (0.25 + wd / 4), dx ? 0.5 - wd / 2 + 0.001 : wd, t.h, dz ? 0.5 - wd / 2 + 0.001 : wd));
+      break;
+    }
+    case 'bridge': {                            // river underneath, planks across it, rails on the sides
+      piecesFor('river', x, z, links, seed, put);
+      const along = links.e || links.w;         // river flows east-west, so the bridge crosses north-south
+      put('box', 'bridge', place(x, 0.12, z, along ? 0.8 : 1.0, 0.08, along ? 1.0 : 0.8));
+      for (const side of [-0.42, 0.42])
+        put('box', 'bridge', place(x + (along ? side : 0), 0.32, z + (along ? 0 : side), along ? 0.06 : 1.0, 0.06, along ? 1.0 : 0.06));
+      break;
+    }
+    case 'tree': {
+      const k = 0.85 + rand(1) * 0.35, ox = (rand(2) - 0.5) * 0.2, oz = (rand(3) - 0.5) * 0.2;
+      put('post', 'trunk', place(x + ox, 0.25 * k, z + oz, 0.18 * k, 0.5 * k, 0.18 * k));
+      put('cone', 'tree', place(x + ox, 0.85 * k, z + oz, 0.85 * k, 0.9 * k, 0.85 * k, rand(4) * 6));
+      put('cone', 'tree', place(x + ox, 1.25 * k, z + oz, 0.6 * k, 0.65 * k, 0.6 * k, rand(5) * 6));
+      break;
+    }
+    case 'rock':
+      put('rock', 'rock', place(x + (rand(1) - 0.5) * 0.15, 0.2, z + (rand(2) - 0.5) * 0.15, 0.75 + rand(3) * 0.2, 0.5 + rand(4) * 0.2, 0.7 + rand(5) * 0.2, rand(6) * 6));
+      break;
+  }
+}
+
 // height of the ground under a piece (it stands on the highest tile it covers)
 function groundAt(x, z, w = 1, d = 1) {
-  const { cols, rows } = state.board;
   let top = 0;
-  const i0 = Math.floor(x - w / 2 + cols / 2 + 0.01), i1 = Math.ceil(x + w / 2 + cols / 2 - 0.01);
-  const j0 = Math.floor(z - d / 2 + rows / 2 + 0.01), j1 = Math.ceil(z + d / 2 + rows / 2 - 0.01);
+  const i0 = Math.floor(x - w / 2 + 0.01), i1 = Math.ceil(x + w / 2 - 0.01);
+  const j0 = Math.floor(z - d / 2 + 0.01), j1 = Math.ceil(z + d / 2 - 0.01);
   for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) { const t = state.tiles[i + ',' + j]; if (t) top = Math.max(top, TILES[t].h); }
   return top;
 }
 const cellAt = p => {
-  const { cols, rows } = state.board, i = Math.floor(p.x + cols / 2), j = Math.floor(p.z + rows / 2);
-  return i >= 0 && i < cols && j >= 0 && j < rows ? i + ',' + j : null;
+  const i = Math.floor(p.x), j = Math.floor(p.z);
+  return boardAt(i + 0.5, j + 0.5) ? i + ',' + j : null;
 };
 
 function frameBoard() {
-  const { cols, rows } = state.board, d = Math.max(cols, rows * camera.aspect * 0.8, 8);
-  camera.position.set(0, d * 0.85, d * 0.75);
-  controls.target.set(0, 0, 0);
+  const b = boardsBox(), cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const d = Math.max(b.x1 - b.x0, (b.z1 - b.z0) * camera.aspect * 0.8, 8);
+  camera.position.set(cx, d * 0.85, cz + d * 0.75);
+  controls.target.set(cx, 0, cz);
 }
 
 function labelSprite(text) {
@@ -864,6 +1056,7 @@ function floorAt(e) {
 const canMove = f => f && (isHost || f.owner === clientId);
 
 let painting = false, paintMode = false, paintType = 'stone', attachFor = null;
+let moveBoards = false, boardDrag = null, selBoard = 'b1';
 function paintAt(e) {
   const p = floorAt(e), k = p && cellAt(p);
   if (!k) return;
@@ -871,7 +1064,13 @@ function paintAt(e) {
   if ((state.tiles[k] || null) !== want) act({ t: 'tiles', set: { [k]: want } });
 }
 
+let rightClick = null;
 function onDown(e) {
+  if (e.button === 2 && e.target === renderer.domElement) {
+    const id = figAt(e);
+    rightClick = id && canMove(state.figures[id]) ? { id, x: e.clientX, y: e.clientY } : null;
+    return;                                     // the camera still turns if you drag
+  }
   if (e.button !== 0 || e.target !== renderer.domElement) return;
   if (attachFor) {                              // picking what the selected piece attaches to
     const to = figAt(e), id = attachFor;
@@ -882,6 +1081,11 @@ function onDown(e) {
     return;
   }
   if (paintMode && isHost) { e.stopPropagation(); painting = true; paintAt(e); return; }
+  if (moveBoards && isHost) {
+    const p = floorAt(e), b = p && boardAt(p.x, p.z);
+    if (b) { e.stopPropagation(); boardDrag = { id: b.id, sx: p.x, sz: p.z, bx: b.x, bz: b.z }; pickBoard(b.id); }
+    return;
+  }
   const id = figAt(e);
   if (!id) { select(null); return; }
   const f = state.figures[id];
@@ -895,6 +1099,13 @@ function onDown(e) {
 
 function onMove(e) {
   if (painting) { paintAt(e); return; }
+  if (boardDrag) {
+    const p = floorAt(e), b = state.boards.find(x => x.id === boardDrag.id);
+    if (!p || !b) return;
+    const x = boardDrag.bx + Math.round(p.x - boardDrag.sx), z = boardDrag.bz + Math.round(p.z - boardDrag.sz);
+    if (x !== b.x || z !== b.z) act({ t: 'boardMove', id: b.id, x, z });
+    return;
+  }
   if (!dragging) return;
   const p = floorAt(e);
   if (!p) return;
@@ -906,8 +1117,12 @@ function onMove(e) {
   if (now - lastSend > 60) { lastSend = now; act({ t: 'move', id: dragging.id, x: pos.x, z: pos.z }); }
 }
 
-function onUp() {
-  painting = false;
+function onUp(e) {
+  if (rightClick && e?.button === 2) {          // a right-click without dragging turns the mini
+    if (Math.hypot(e.clientX - rightClick.x, e.clientY - rightClick.y) < 6) { act({ t: 'edit', id: rightClick.id, turn: true }); select(rightClick.id); }
+    rightClick = null;
+  }
+  painting = false; boardDrag = null;
   if (!dragging) return;
   const d = dragging, g = figMeshes.get(d.id);
   dragging = null;
@@ -991,8 +1206,24 @@ function renderLogEntry(e) {
 function renderLog() { $('log').innerHTML = ''; state.log.forEach(renderLogEntry); }
 
 function updateBoardInputs() {
-  $('cols').value = state.board.cols; $('rows').value = state.board.rows; $('gridOn').checked = state.board.grid;
+  if (!isHost || !$('boardList')) return;
+  if (!state.boards.some(b => b.id === selBoard)) selBoard = state.boards[0].id;
+  const list = $('boardList'); list.innerHTML = '';
+  state.boards.forEach((b, n) => {
+    const btn = document.createElement('button');
+    btn.textContent = `Board ${n + 1} (${b.cols}×${b.rows})`;
+    btn.classList.toggle('on', b.id === selBoard);
+    btn.onclick = () => pickBoard(b.id);
+    list.appendChild(btn);
+  });
+  const b = state.boards.find(x => x.id === selBoard);
+  if (document.activeElement !== $('cols')) $('cols').value = b.cols;
+  if (document.activeElement !== $('rows')) $('rows').value = b.rows;
+  $('gridOn').checked = b.grid;
+  $('delBoard').disabled = state.boards.length < 2;
 }
+function pickBoard(id) { selBoard = id; updateBoardInputs(); buildBoard(); }
+const curBoard = () => state.boards.find(x => x.id === selBoard) || state.boards[0];
 
 function status(t) { $('status').textContent = t; $('status').style.display = t ? 'block' : 'none'; }
 function lobbyMsg(t) { $('lobbyMsg').textContent = t; }
@@ -1076,7 +1307,13 @@ function wirePanel() {
   $('selDetach').onclick = () => selectedId && act({ t: 'attach', id: selectedId, to: null });
   addEventListener('keydown', e => { if (e.key === 'Escape' && attachFor) { attachFor = null; status(''); } });
 
-  for (const [type, t] of [...Object.entries(TILES), ['erase', { name: 'Eraser', color: 'transparent' }]]) {
+  let lastGroup = '';
+  for (const [type, t] of [...Object.entries(TILES), ['erase', { name: 'Eraser', color: 'transparent', group: 'Tools' }]]) {
+    if (t.group !== lastGroup) {
+      lastGroup = t.group;
+      const hd = document.createElement('div'); hd.className = 'tilehead'; hd.textContent = t.group;
+      $('tileTypes').appendChild(hd);
+    }
     const b = document.createElement('button');
     b.dataset.type = type;
     b.innerHTML = '<i></i><span></span>';
@@ -1084,7 +1321,7 @@ function wirePanel() {
     b.lastChild.textContent = t.name;
     b.onclick = () => {
       paintType = type;
-      for (const x of $('tileTypes').children) x.classList.toggle('on', x === b);
+      for (const x of $('tileTypes').querySelectorAll('button')) x.classList.toggle('on', x === b);
       setPaint(true);
     };
     $('tileTypes').appendChild(b);
@@ -1092,16 +1329,18 @@ function wirePanel() {
   $('tileTypes').querySelector('[data-type=stone]').classList.add('on');
   const setPaint = on => {
     paintMode = on;
+    if (on) setMoveBoards(false);
     $('paintBtn').textContent = on ? 'Paint: ON' : 'Paint: off';
     $('paintBtn').classList.toggle('on', on);
-    $('hint').textContent = on ? 'Painting: click or drag to place tiles · right-drag to pan · scroll to zoom'
-      : 'Drag a mini to move it · drag empty space to rotate · right-drag to pan · scroll to zoom';
+    $('hint').textContent = on ? 'Painting: click or drag to place tiles · right-drag to rotate · scroll to zoom'
+      : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
   };
   $('paintBtn').onclick = () => setPaint(!paintMode);
   $('fillTiles').onclick = () => {
     if (paintType === 'erase') return;
     const set = {};
-    for (let i = 0; i < state.board.cols; i++) for (let j = 0; j < state.board.rows; j++) set[i + ',' + j] = paintType;
+    const b = curBoard();                      // fills the board picked under Boards
+    for (let i = 0; i < b.cols; i++) for (let j = 0; j < b.rows; j++) set[(b.x + i) + ',' + (b.z + j)] = paintType;
     act({ t: 'tiles', set });
   };
   $('clearTiles').onclick = () => { if (confirm('Remove all terrain?')) act({ t: 'tiles', set: {}, clear: true }); };
@@ -1112,22 +1351,33 @@ function wirePanel() {
     const id = handle({ t: 'add', name: $('newName').value, color: $('newColor').value, owner: $('newOwner').value || null, x: t.x, z: t.z }, clientId);
     if (id) select(id);
   };
-  $('applyBoard').onclick = () => act({ t: 'board', cols: $('cols').value, rows: $('rows').value, grid: $('gridOn').checked });
-  $('gridOn').onchange = () => act({ t: 'board', cols: state.board.cols, rows: state.board.rows, grid: $('gridOn').checked });
+  $('applyBoard').onclick = () => act({ t: 'boardEdit', id: curBoard().id, cols: $('cols').value, rows: $('rows').value });
+  $('gridOn').onchange = () => act({ t: 'boardEdit', id: curBoard().id, grid: $('gridOn').checked });
+  $('addBoard').onclick = () => { const b = curBoard(); const id = handle({ t: 'boardAdd', cols: b.cols, rows: b.rows }, clientId); if (id) pickBoard(id); };
+  $('delBoard').onclick = () => { if (state.boards.length > 1 && confirm('Delete this board (and the terrain on it)?')) act({ t: 'boardDel', id: curBoard().id }); };
+  function setMoveBoards(on) {
+    moveBoards = on;
+    $('moveBoards').textContent = on ? 'Move boards: ON' : 'Move boards: off';
+    $('moveBoards').classList.toggle('on', on);
+    if (on && paintMode) $('paintBtn').click();
+    $('hint').textContent = on ? 'Moving boards: drag a board to move it (it snaps to whole squares) · right-drag to rotate · scroll to zoom'
+      : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
+  }
+  $('moveBoards').onclick = () => setMoveBoards(!moveBoards);
   $('mapFile').onchange = async () => {
     const file = $('mapFile').files[0];
     if (!file) return;
     try {
       const m = await readMap(file);
       // keep the squares square: match the rows to the picture's shape
-      const rows = Math.max(2, Math.min(80, Math.round(state.board.cols * m.h / m.w)));
-      act({ t: 'board', cols: state.board.cols, rows, grid: state.board.grid });
-      act({ t: 'map', map: m.data });
+      const b = curBoard(), rows = Math.max(2, Math.min(80, Math.round(b.cols * m.h / m.w)));
+      act({ t: 'boardEdit', id: b.id, rows });
+      act({ t: 'map', id: b.id, map: m.data });
       updateBoardInputs();
     } catch { alert('Could not read that picture.'); }
     $('mapFile').value = '';
   };
-  $('clearMap').onclick = () => act({ t: 'map', map: null });
+  $('clearMap').onclick = () => act({ t: 'map', id: curBoard().id, map: null });
   addEventListener('keydown', e => {
     if (e.key === 'Delete' && isHost && selectedId && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) act({ t: 'del', id: selectedId });
   });
@@ -1153,5 +1403,5 @@ $('codeIn').onkeydown = e => { if (e.key === 'Enter') $('joinBtn').click(); };
 $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('joinBtn') : $('createBtn')).click(); };
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls }; },
+window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; },
   async addModel(data, name, figId) { act({ t: 'model', id: await modelId(data), name, data, figId }); } };
