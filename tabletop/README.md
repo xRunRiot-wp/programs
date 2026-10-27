@@ -111,7 +111,10 @@ can have a one-square entrance. The GM can also **Roll dungeon event** by hand.
 Pick a move (the list is read live from the Voice of the Forest site; nothing is ever changed there) and check the
 numbers: accuracy = the move's attribute + skill dice, a hit needs 1 success; damage = attribute + the move's Power
 minus the target's Vitality (or Insight against Special moves). The dice land green on 4-6 (a success) and red on 1-3,
-and the badge counts the successes. On a hit, **Roll damage** takes that many HP off the target. Physical moves lunge and
+and the badge counts the successes. On a hit, **Roll damage** takes that many HP off the target. Her combat rules are applied: same-type moves get
++1 damage die, 4+ accuracy successes are a critical (+2 damage dice), super effective +1 damage per weak type (not very
+effective -1, immune = none), pain at half HP / 1 HP removes 1 / 2 successes, and a move's Chance Dice are rolled after
+it lands (any 6 triggers the effect, written in the log for the GM). Physical moves lunge and
 claw, Special moves throw an orb, Status moves ring the target, all in the move's type colour. The numbers you type are
 remembered on the mini; only the GM can set the target's defence.
 

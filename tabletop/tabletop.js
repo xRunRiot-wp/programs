@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=31';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=31';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=32';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=32';
 
-const VERSION = 31;                              // raised by bump.py on every publish
+const VERSION = 32;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -868,12 +868,31 @@ const TYPES = { Normal: '#a8a77a', Fire: '#ee8130', Water: '#6390f0', Electric: 
   Fighting: '#c22e28', Poison: '#a33ea1', Ground: '#e2bf65', Flying: '#a98ff3', Psychic: '#f95587', Bug: '#a6b91a',
   Rock: '#b6a136', Ghost: '#735797', Dragon: '#6f35fc', Dark: '#705746', Steel: '#b7b7ce', Fairy: '#d685ad' };
 const defenceFor = cat => (cat === 'Special' ? 'Insight' : 'Vitality');
+// attacking type -> [super effective on, not very effective on, no effect on]
+const CHART = {
+  Normal: ['', 'Rock Steel', 'Ghost'], Fire: ['Grass Ice Bug Steel', 'Fire Water Rock Dragon', ''],
+  Water: ['Fire Ground Rock', 'Water Grass Dragon', ''], Electric: ['Water Flying', 'Electric Grass Dragon', 'Ground'],
+  Grass: ['Water Ground Rock', 'Fire Grass Poison Flying Bug Dragon Steel', ''], Ice: ['Grass Ground Flying Dragon', 'Fire Water Ice Steel', ''],
+  Fighting: ['Normal Ice Rock Dark Steel', 'Poison Flying Psychic Bug Fairy', 'Ghost'], Poison: ['Grass Fairy', 'Poison Ground Rock Ghost', 'Steel'],
+  Ground: ['Fire Electric Poison Rock Steel', 'Grass Bug', 'Flying'], Flying: ['Grass Fighting Bug', 'Electric Rock Steel', ''],
+  Psychic: ['Fighting Poison', 'Psychic Steel', 'Dark'], Bug: ['Grass Psychic Dark', 'Fire Fighting Poison Flying Ghost Steel Fairy', ''],
+  Rock: ['Fire Ice Flying Bug', 'Fighting Ground Steel', ''], Ghost: ['Psychic Ghost', 'Dark', 'Normal'],
+  Dragon: ['Dragon', 'Steel', 'Fairy'], Dark: ['Psychic Ghost', 'Fighting Dark Fairy', ''],
+  Steel: ['Ice Rock Fairy', 'Fire Water Electric Steel', ''], Fairy: ['Fighting Dragon Dark', 'Fire Poison Steel', ''] };
+// her rules: super effective +1 damage per weak type, not very effective -1 per resisting type, immune = no damage
+function matchup(type, foeTypes) {
+  const [sup, nve, imm] = (CHART[type] || ['', '', '']).map(x => x.split(' '));
+  if (foeTypes.some(t => imm.includes(t))) return { immune: true, mod: 0 };
+  return { immune: false, mod: foeTypes.filter(t => sup.includes(t)).length - foeTypes.filter(t => nve.includes(t)).length };
+}
+// pain: at half HP or less 1 success is lost, at 1 HP 2
+const painOf = f => { const h = f.st?.hp, m = f.st?.hpMax; return h == null || !m || h <= 0 ? 0 : h <= 1 ? 2 : h <= m / 2 ? 1 : 0; };
 function cleanMove(m) {
   if (!m || typeof m !== 'object') return null;
   const name = clean(m.name, 40);
   if (!name) return null;
   const cat = ['Physical', 'Special', 'Status'].includes(m.cat) ? m.cat : 'Physical';
-  return { name, type: TYPES[m.type] ? m.type : 'Normal', cat, power: Math.max(0, Math.min(10, Math.round(+m.power) || 0)),
+  return { name, type: TYPES[m.type] ? m.type : 'Normal', cat, power: Math.max(0, Math.min(10, Math.round(+m.power) || 0)), effect: clean(m.effect, 300),
     acc: (Array.isArray(m.acc) ? m.acc : []).filter(a => ATTRS.includes(a)).slice(0, 2), dmg: ATTRS.includes(m.dmg) ? m.dmg : '' };
 }
 // turn a mini to face another (square minis, in 45 degree steps; 0 = facing +z)
@@ -892,25 +911,32 @@ async function attackRoll(f, tg, mv, msg, from) {
   attackBusy = true;
   try {
     if (msg.step !== 'dmg') {
-      const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0));
+      const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0)), pain = painOf(f);
       let hits = 0;
       await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
-        hits = parts.filter(v => v >= 4).length;
-        return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}, ${hits ? 'hit!' : 'miss.'}`;
+        hits = Math.max(0, parts.filter(v => v >= 4).length - pain);
+        return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}` +
+          `${pain ? ` (pain: -${pain})` : ''}, ${hits ? (hits >= 4 && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : 'miss.'}`;
       });
       const fx = { t: 'fx', kind: hits ? mv.cat : 'miss', type: mv.type, from: f.id, to: tg.id };
       sendAll(fx); playFx(fx);
-      state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from } : null;
+      state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from, crit: hits >= 4 } : null;
       pushAttack();
+      if (hits && mv.cat === 'Status') await chanceRoll(f, tg, mv, from, at, dir);
     } else {
       const A = state.attack;
       if (!A || A.id !== f.id || A.target !== tg.id) return;
       const def = tg.st?.attr?.[defenceFor(mv.cat)] || 0;
-      const n = Math.max(1, (a[mv.dmg] || 0) + mv.power - def);
+      const stab = (f.st.types || []).includes(mv.type) ? 1 : 0, crit = A.crit ? 2 : 0, pain = painOf(f);
+      const n = Math.max(1, (a[mv.dmg] || 0) + mv.power - def + stab + crit);
+      const mu = matchup(mv.type, tg.st?.types || []);
       let dmg = 0;
       await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
-        dmg = parts.filter(v => v >= 4).length;
-        return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)} ${def}) - ${dmg} damage to ${tg.name}`;
+        const rolled = Math.max(0, parts.filter(v => v >= 4).length - pain);
+        dmg = mu.immune ? 0 : Math.max(0, rolled + mu.mod);
+        const extra = [stab && 'same type +1', crit && 'critical +2'].filter(Boolean).join(', ');
+        const eff = mu.immune ? `, but ${tg.name} is immune` : mu.mod > 0 ? `, super effective +${mu.mod}` : mu.mod < 0 ? `, not very effective ${mu.mod}` : '';
+        return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)} ${def}${extra ? ', ' + extra : ''}) - ${rolled} success${rolled === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${eff}: ${dmg} damage to ${tg.name}`;
       });
       if (tg.st?.hp != null && dmg) {
         const hp = Math.max(0, tg.st.hp - dmg);
@@ -921,8 +947,19 @@ async function attackRoll(f, tg, mv, msg, from) {
       const fx = { t: 'fx', kind: 'dmg', text: dmg ? `-${dmg}` : 'No damage', to: tg.id };
       sendAll(fx); playFx(fx);
       state.attack = null; pushAttack();
+      await chanceRoll(f, tg, mv, from, at, dir);
     }
   } finally { attackBusy = false; }
+}
+
+// "Roll 1 Chance Dice to Burn the foe": after the move lands, any 6 triggers the effect
+async function chanceRoll(f, tg, mv, from, at, dir) {
+  const m = /Roll (\d+) Chance Dic?e to ([^.]+)/i.exec(mv.effect || '');
+  if (!m) return;
+  const n = Math.max(1, Math.min(10, +m[1])), what = m[2].trim();
+  await new Promise(ok => setTimeout(ok, 600));
+  await rollPhysics({ sides: 6, n, at, dir }, from, (t, parts) =>
+    `${mv.name} chance dice (${n}, a 6 triggers it): ${parts.join(', ')} - ${parts.includes(6) ? `yes! ${what}` : 'no effect'}`);
 }
 
 // ---------- warp out: once the Dungeon Goal is done, every player votes; all yes = the team warps out ----------
@@ -2004,8 +2041,12 @@ function renderAttack() {
     if (!m) { $('atkSum').textContent = 'Pick a move.'; return; }
     const val = (k, own) => +([...rows.querySelectorAll('input')].find(i => i.dataset.key === k && !!i.dataset.own === own)?.value) || 0;
     const acc = Math.max(1, m.acc.reduce((s, k) => s + val(k, true), 0));
-    const dmg = Math.max(1, val(m.dmg, true) + m.power - val(defenceFor(m.cat), false));
-    $('atkSum').textContent = `Accuracy: ${acc} dice, a hit needs 1 success (4-6)` + (m.cat !== 'Status' ? ` · Damage: ${dmg} dice, each success = 1 damage` : '');
+    const stab = (f.st?.types || []).includes(m.type) ? 1 : 0, mu = matchup(m.type, tg.st?.types || []), pain = painOf(f);
+    const dmg = Math.max(1, val(m.dmg, true) + m.power - val(defenceFor(m.cat), false) + stab);
+    const notes = [stab && 'same type +1 die', mu.immune ? `${tg.name} is immune` : mu.mod > 0 ? `super effective +${mu.mod}` : mu.mod < 0 ? `not very effective ${mu.mod}` : '',
+      pain && `pain -${pain} success${pain > 1 ? 'es' : ''}`].filter(Boolean);
+    $('atkSum').textContent = `Accuracy: ${acc} dice, a hit needs 1 success (4-6; 4+ = critical, +2 damage dice)` +
+      (m.cat !== 'Status' ? ` · Damage: ${dmg} dice, each success = 1 damage` : '') + (notes.length ? ` · ${notes.join(' · ')}` : '');
   }
   calc();
   $('atkAcc').disabled = !m || !!preview;
