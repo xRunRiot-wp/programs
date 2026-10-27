@@ -166,7 +166,7 @@ function startClient(name, code) {
 
 function connectToHost() {
   hostConn = peer.connect(hostId, { reliable: true });
-  hostConn.on('open', () => { status(''); hostConn.send({ t: 'hello', clientId, name: myName }); });
+  hostConn.on('open', () => { status(''); hostConn.send({ t: 'hello', clientId, name: myName, test: testWindow }); });
   hostConn.on('data', onClientData);
   hostConn.on('close', () => {
     status('Lost the GM. Trying again...');
@@ -239,6 +239,12 @@ function onHostData(conn, msg) {
       const id = rid(8);
       state.figures[id] = { id, name, color: state.players[cid].color, size: '1', owner: cid, hidden: false,
         ...freeSpot(0, 0, 1, 1) };
+    }
+    // the GM's test player starts with 1 in every stat (only filled in where nothing is set yet)
+    if (msg.test) for (const f of Object.values(state.figures)) if (f.owner === cid) {
+      const st = f.st || {};
+      for (const k of ['dex', 'alert', 'hp', 'hpMax']) if (st[k] == null) st[k] = 1;
+      f.st = st;
     }
     conn.send({ t: 'welcome', state: viewFor() });
     for (const [id, map] of Object.entries(state.maps)) if (!state.boards.find(b => b.id === id)?.hidden) conn.send({ t: 'map', id, map });

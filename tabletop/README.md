@@ -35,7 +35,7 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 ## Player view (GM)
 
 **Play as a test player** (under the room code) opens a second window where the GM is a real player
-called "Test player" (with its own mini): moving, End turn and Dash all work there, and it only sees what
+called "Test player" (with its own mini, starting with 1 in every stat): moving, End turn and Dash all work there, and it only sees what
 players see. It's the same test player every time; delete its mini when you're done.
 
 **Peek** switches the GM's own screen to a player's view: hidden minis,
