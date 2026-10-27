@@ -59,7 +59,9 @@ Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, 
 block; you can't slip diagonally past a wall corner; you can pass other minis but not stop on them.
 Immobilized means 0. A diagonal step counts as 1 square.
 
-**Combat.** The GM clicks **Start combat**: everyone with stats rolls initiative (1d6 + Dexterity + Alert);
+**Combat.** The GM clicks **Start combat**: every player's mini and every GM mini with a Dexterity rolls
+initiative (1d6 + Dexterity + Alert; missing stats count as 0). Anyone joining mid-fight rolls and slots in; the GM
+can also **Add to / Take out of turn order** on a picked mini;
 Sped Up goes first and Slowed last. The **Turn order** list and a gold marker show whose turn it is.
 On your turn: move, take your action, **End turn**. **Dash** spends your action on another move's
 worth of squares (once a turn); press it again to take it back if you haven't gone past a normal move.

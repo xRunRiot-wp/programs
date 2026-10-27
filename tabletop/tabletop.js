@@ -245,6 +245,7 @@ function onHostData(conn, msg) {
     for (const [id, data] of modelData) conn.send({ t: 'model', id, name: state.models[id]?.name, data });
     sendAll({ t: 'figs', figures: viewFor().figures });
     addLog({ kind: 'sys', text: `${name} joined.` });
+    for (const x of Object.values(state.figures)) if (x.owner === cid && state.combat) joinCombat(x);
     pushPlayers();
     return;
   }
@@ -335,23 +336,32 @@ function handle(msg, from) {
       if (Array.isArray(msg.status)) st.status = [...new Set(msg.status.filter(x => STATUSES.includes(x)))].slice(0, 10);
       f.st = st;
       pushFig(f); save();
-      if (state.combat) pushCombat();
+      if (state.combat) { if (fights(f)) joinCombat(f); pushCombat(); }
       break;
     }
     case 'combatStart': {
       if (!gm) return;
-      const fighters = Object.values(state.figures).filter(x => x.st && x.st.dex != null);
-      if (!fighters.length) { note(from, 'Give the minis their stats (Dexterity etc.) first.'); return; }
-      const order = fighters.map(x => {
-        const roll = rollDie(6), init = roll + (x.st.dex || 0) + (x.st.alert || 0);
-        const st = x.st.status || [], speed = st.includes('Sped Up') ? 1 : st.includes('Slowed') ? -1 : 0;
-        return { id: x.id, roll, init, speed, dex: x.st.dex || 0, tie: Math.random() };
-      }).sort((a, b) => b.speed - a.speed || b.init - a.init || b.dex - a.dex || b.tie - a.tie);
+      const fighters = Object.values(state.figures).filter(fights);
+      if (!fighters.length) { note(from, 'No minis to fight: players\' minis join by themselves, GM minis need a Dexterity.'); return; }
+      const order = fighters.map(rollInit).sort(initOrder);
       const first = state.figures[order[0].id];
-      state.combat = { order: order.map(({ id, roll, init }) => ({ id, roll, init })), turn: 0, round: 1, from: { x: first.x, z: first.z }, dash: 0 };
+      state.combat = { order, turn: 0, round: 1, from: { x: first.x, z: first.z }, dash: 0 };
       const shown = combatView().order.map(o => `${state.figures[o.id].name} ${o.init}`).join(', ');
       addLog({ kind: 'sys', text: `Combat! Initiative (1d6 + Dexterity + Alert): ${shown}.` });
       pushCombat();
+      break;
+    }
+    case 'combatJoin': {                         // GM: add a mini to the fight, or take it out
+      const c = state.combat;
+      if (!gm || !c || !f) return;
+      if (c.order.some(o => o.id === f.id)) {
+        const curId = c.order[c.turn]?.id;
+        if (curId === f.id) { note(from, 'End its turn first, then take it out.'); return; }
+        c.order = c.order.filter(o => o.id !== f.id);
+        c.turn = Math.max(0, c.order.findIndex(o => o.id === curId));
+        addLog({ kind: 'sys', text: `${f.name} leaves the fight.` });
+        pushCombat();
+      } else joinCombat(f);
       break;
     }
     case 'combatNext': case 'combatDash': {
@@ -430,7 +440,7 @@ function handle(msg, from) {
         carry(f.id, f.x - ox, f.z - oz, 0, f);
       }
       if (turned) carry(f.id, 0, 0, turned, f);
-      if (gm && msg.owner !== undefined) f.owner = msg.owner && state.players[msg.owner] ? msg.owner : null;
+      if (gm && msg.owner !== undefined) { f.owner = msg.owner && state.players[msg.owner] ? msg.owner : null; if (f.owner) joinCombat(f); }
       if (gm && msg.hidden != null) f.hidden = !!msg.hidden;
       if (gm && msg.model !== undefined) f.model = msg.model && state.models[msg.model] ? msg.model : '';
       pushFig(f); save();
@@ -662,6 +672,24 @@ function boardsChanged(refit) {
 }
 
 // ---------- rules helpers (host) ----------
+// in a fight: every player's mini, and GM minis once they have a Dexterity
+const fights = x => !!x.owner || (x.st && x.st.dex != null);
+function rollInit(x) {
+  const st = x.st || {}, roll = rollDie(6), sts = st.status || [];
+  return { id: x.id, roll, init: roll + (st.dex || 0) + (st.alert || 0), speed: sts.includes('Sped Up') ? 1 : sts.includes('Slowed') ? -1 : 0, dex: st.dex || 0, tie: Math.random() };
+}
+const initOrder = (a, b) => (b.speed || 0) - (a.speed || 0) || b.init - a.init || (b.dex || 0) - (a.dex || 0) || (b.tie || 0) - (a.tie || 0);
+// someone joins a fight already going: roll for them and slot them in by initiative
+function joinCombat(x) {
+  const c = state.combat;
+  if (!c || c.order.some(o => o.id === x.id)) return;
+  const curId = c.order[c.turn]?.id, o = rollInit(x);
+  c.order.push(o);
+  c.order.sort(initOrder);
+  c.turn = c.order.findIndex(e => e.id === curId);
+  if (figVisible(x)) addLog({ kind: 'sys', text: `${x.name} joins the fight (initiative ${o.init}).` });
+  pushCombat();
+}
 function note(to, text) {
   if (to === state.gm) { status(text); setTimeout(() => status(''), 4000); }
   else sendAll({ t: 'note', text }, cid => cid === to);
@@ -682,7 +710,7 @@ function worldFor(f) {
   }
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
 }
-function pushCombat() { renderCombat(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
+function pushCombat() { renderCombat(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
 function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, explored: state.explored }); save(); figsVersion++; }
 // a hidden board comes into view; every 2 new ones the GM is reminded to roll the dungeon event
 function revealBoard(b) {
@@ -1251,7 +1279,8 @@ function updateOverlays() {
   // movement range of the picked mini (yours, or any for the GM) once it has a Dexterity
   if (rangeMesh) { scene.remove(rangeMesh); rangeMesh.dispose(); rangeMesh = null; }
   const f = selectedId && state.figures[selectedId];
-  if (f && f.st?.dex != null && (canMove(f) || (preview && f.owner === preview.as))) {
+  const fighting = f && state.combat?.order.some(o => o.id === f.id);
+  if (f && (f.st?.dex != null || fighting) && (canMove(f) || (preview && f.owner === preview.as))) {
     const c = state.combat, myTurn = c && c.order[c.turn]?.id === f.id;
     const from = myTurn ? c.from : dragging?.id === f.id ? dragging.from : { x: f.x, z: f.z };
     const budget = moveBudget(f) * (1 + (myTurn ? c.dash || 0 : 0));
@@ -1480,6 +1509,11 @@ function showSelected() {
     $('selParent').textContent = par ? par.name : 'nothing';
     $('selDetach').style.display = par ? '' : 'none';
   }
+  if (isHost) {
+    const inFight = state.combat?.order.some(o => o.id === f.id);
+    $('selFight').style.display = state.combat ? '' : 'none';
+    $('selFight').textContent = inFight ? 'Take out of turn order' : 'Add to turn order';
+  }
   if (isHost) { ownerOptions($('selOwner'), f.owner); $('selHide').textContent = f.hidden ? 'Show to players' : 'Hide from players'; }
 }
 
@@ -1701,6 +1735,7 @@ function wirePanel() {
     act({ t: 'tiles', set });
   };
   $('clearTiles').onclick = () => { if (confirm('Remove all terrain?')) act({ t: 'tiles', set: {}, clear: true }); };
+  $('selFight').onclick = () => selectedId && act({ t: 'combatJoin', id: selectedId });
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
   // a real player window next to the GM's: moves, End turn and Dash all work there
   $('previewBtn').onclick = () => window.open(location.origin + location.pathname + '?room=' + roomCode + '&test=1', 'tabletop-test-player', 'width=1100,height=750');
