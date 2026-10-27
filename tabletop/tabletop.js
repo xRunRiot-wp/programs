@@ -5,9 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=12';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=12';
 
+const VERSION = 12;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1652,7 +1653,18 @@ function enterGame() {
   rebuildAll();
 }
 
+// a newer version was published: offer a reload (the GM's game and the players' minis come back as they were)
+async function checkVersion() {
+  try {
+    const r = await fetch('version.json', { cache: 'no-store' });
+    if (r.ok && (await r.json()).v > VERSION) $('updateBar').style.display = 'flex';
+  } catch { /* offline or opened from a file: nothing to check */ }
+}
+
 function wirePanel() {
+  $('verLabel').textContent = 'v' + VERSION;
+  $('updateReload').onclick = () => location.reload();
+  checkVersion(); setInterval(checkVersion, 120000);
   for (const s of [4, 6, 8, 10, 12, 20, 100]) {
     const b = document.createElement('button'); b.textContent = 'd' + s;
     b.onclick = () => {
