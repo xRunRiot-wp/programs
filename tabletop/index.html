@@ -45,6 +45,7 @@
   #side h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
   .gm-only { display: none; }
   body.gm .gm-only { display: block; }
+  body.gm .row.gm-only { display: flex; }
   #roomLine { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
   #roomCode { font-weight: 700; letter-spacing: .12em; font-size: 16px; }
   #players div { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
@@ -125,7 +126,10 @@
         <button id="copyLink" class="fit">Copy invite link</button>
       </div>
       <div id="whoAmI" style="color:var(--dim);font-size:12px;margin-top:4px"></div>
-      <button id="previewBtn" class="gm-only" style="width:100%;margin-top:8px">👁 See what players see</button>
+      <div class="row gm-only" style="margin-top:8px">
+        <button id="previewBtn" title="Opens a window where you play as a test player: everything works there">👁 Play as a test player</button>
+        <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
+      </div>
     </section>
 
     <section id="selSec" style="display:none">

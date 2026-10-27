@@ -72,8 +72,11 @@ const MAX_MODEL = 15 * 1024 * 1024;
 const modelData = new Map();                    // model id -> .glb bytes (ArrayBuffer)
 const okColor = c => /^#[0-9a-f]{6}$/i.test(c) ? c : '#888888';
 
-let clientId = store.get('tabletop.clientId');
-if (!clientId) { clientId = rid(12); store.set('tabletop.clientId', clientId); }
+// ?test=1: the GM's own test-player window. It gets its own id (kept, so it's the same player and mini
+// every time), so it joins as a real player instead of counting as the GM.
+const testWindow = new URLSearchParams(location.search).get('test') === '1';
+let clientId = store.get(testWindow ? 'tabletop.testId' : 'tabletop.clientId');
+if (!clientId) { clientId = rid(12); store.set(testWindow ? 'tabletop.testId' : 'tabletop.clientId', clientId); }
 
 // ---------- game state (the host's copy is the real one) ----------
 let isHost = false, myName = '', roomCode = '', hostId = '';
@@ -1699,7 +1702,9 @@ function wirePanel() {
   };
   $('clearTiles').onclick = () => { if (confirm('Remove all terrain?')) act({ t: 'tiles', set: {}, clear: true }); };
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
-  $('previewBtn').onclick = () => setPreview(true);
+  // a real player window next to the GM's: moves, End turn and Dash all work there
+  $('previewBtn').onclick = () => window.open(location.origin + location.pathname + '?room=' + roomCode + '&test=1', 'tabletop-test-player', 'width=1100,height=750');
+  $('peekBtn').onclick = () => setPreview(true);
   $('previewBack').onclick = () => setPreview(false);
   $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
   for (const k of ['dex', 'alert', 'hp', 'hpMax']) $('st_' + k).onchange = () => selectedId && act({ t: 'stats', id: selectedId, [k]: $('st_' + k).value });
@@ -1765,7 +1770,8 @@ if (params.get('room')) { $('codeIn').value = params.get('room').toUpperCase(); 
 const needName = () => {
   const n = clean($('nameIn').value);
   if (!n) { lobbyMsg('Type your name first.'); $('nameIn').focus(); return null; }
-  store.set('tabletop.name', n); return n;
+  if (!testWindow) store.set('tabletop.name', n);
+  return n;
 };
 $('createBtn').onclick = () => { const n = needName(); if (n) { lobbyMsg('Opening the game...'); startHost(n); } };
 $('joinBtn').onclick = () => {
@@ -1776,6 +1782,7 @@ $('joinBtn').onclick = () => {
 };
 $('codeIn').onkeydown = e => { if (e.key === 'Enter') $('joinBtn').click(); };
 $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('joinBtn') : $('createBtn')).click(); };
+if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('joinBtn').click(); }   // straight in
 
 // for testing in a browser console
 window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
