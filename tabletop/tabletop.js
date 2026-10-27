@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=14';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=14';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=15';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=15';
 
-const VERSION = 14;                              // raised by bump.py on every publish
+const VERSION = 15;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1067,9 +1067,9 @@ function qMat() {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(30,22,0,0.75)'; g.beginPath(); g.arc(64, 64, 58, 0, 7); g.fill();
-  g.strokeStyle = '#ffd23f'; g.lineWidth = 6; g.stroke();
-  g.fillStyle = '#ff2b2b'; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('?', 64, 70);                      // the ? itself is red
+  g.strokeStyle = '#ff2b2b'; g.lineWidth = 6; g.stroke();          // red ring
+  g.fillStyle = '#ffd23f'; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('?', 64, 70);                      // yellow ?
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return (qMatCache = new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
 }
