@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=20';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=20';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=21';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=21';
 
-const VERSION = 20;                              // raised by bump.py on every publish
+const VERSION = 21;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -344,8 +344,16 @@ function handle(msg, from) {
         const o = limited ? state.combat.from : state.party.from[f.id];
         const budget = moveBudget(f) * (1 + (limited ? state.combat.dash || 0 : state.party.dash[f.id] ? 1 : 0));
         if (!reachable(worldFor(f), o.x, o.z, w, d, budget, state.rules.diag).has(`${f.x},${f.z}`)) {
+          const taken = cellsOf(f.x, f.z, w, d).some(([i, j]) => worldFor(f).occupied(i, j));
           Object.assign(f, f._from);
-          note(from, `${f.name} can't reach that square this turn (${budget} movement).`);
+          note(from, taken ? `${f.name} can't stand on another mini's square.` : `${f.name} can't reach that square this turn (${budget} movement).`);
+        }
+      }
+      if (msg.done) {                             // no standing inside another mini (attached pieces excepted)
+        const W = worldFor(f);
+        if (cellsOf(f.x, f.z, w, d).some(([i, j]) => W.occupied(i, j))) {
+          Object.assign(f, f._from);
+          note(from, `${f.name} can't stand on another mini's square.`);
         }
       }
       if (msg.done) delete f._from;
