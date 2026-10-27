@@ -103,6 +103,15 @@
   .evwait:has(button.big) { flex-direction: column; align-items: stretch; }
   .evwait:has(button.big) .evbtns { justify-content: stretch; }
   button.waiting { opacity: .45; }
+  #atkPanel, #warpBox { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(460px, calc(100% - 32px));
+    max-height: 70%; overflow-y: auto; filter: drop-shadow(0 6px 20px #000c); margin: 0; }
+  #warpBox { top: 30%; border-color: #5fe0ff; }
+  @media (min-width: 701px) { #atkPanel, #warpBox { left: calc(50% - 150px); } }
+  #atkRows { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 6px; }
+  #atkRows label { font-size: 11px; }
+  #atkRows input { width: 100%; }
+  .typechip { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #111; font-weight: 700; font-size: 12px; }
+  .librow { align-items: center; margin-top: 4px; }
   #updateBar { display: none; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); z-index: 5;
     background: #14261a; border: 1px solid #5cb85c; border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center; }
   #prompts { position: absolute; left: 0; top: 0; right: 300px; bottom: 0; pointer-events: none; overflow: hidden; }
@@ -154,6 +163,20 @@
   <button id="toggleSide">Menu</button>
   <div id="pauseBar" style="display:none"></div>
   <div id="eventBox" style="display:none"></div>
+  <div id="atkPanel" class="evcard" style="display:none">
+    <div class="evt" id="atkTitle"></div>
+    <input id="atkMove" list="atkMoves" placeholder="Move (type to search)" style="width:100%" autocomplete="off">
+    <datalist id="atkMoves"></datalist>
+    <div class="evx" id="atkInfo" style="margin-top:4px"></div>
+    <div id="atkRows"></div>
+    <div class="evx" id="atkSum" style="margin-top:6px;color:var(--dim)"></div>
+    <div class="row evb">
+      <button id="atkAcc" class="primary">🎲 Roll accuracy</button>
+      <button id="atkDmg" class="primary" style="display:none">🎲 Roll damage</button>
+      <button id="atkClose" class="fit">Close</button>
+    </div>
+  </div>
+  <div id="warpBox" class="evcard" style="display:none"></div>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
     <button id="updateReload" class="primary">Reload now</button>
@@ -188,7 +211,14 @@
         </div>
         <button id="selTurn" class="fit" style="margin-top:20px" title="Turn 45°">Turn ↻</button>
       </div>
+      <button id="selAttack" class="primary" style="width:100%;margin-top:8px" title="Pick who to attack, then a move: accuracy and damage dice are rolled for you">⚔ Attack…</button>
       <div class="stats">
+        <div id="speciesRow">
+          <label>Pokémon (from the Voice of the Forest site: fills attributes, HP, types and moves)</label>
+          <input id="selSpecies" list="speciesList" placeholder="Type a Pokémon…" style="width:100%" autocomplete="off">
+          <datalist id="speciesList"></datalist>
+          <div id="speciesInfo" style="color:var(--dim);font-size:12px;margin-top:2px"></div>
+        </div>
         <div class="row">
           <div><label>Dexterity</label><input id="st_dex" type="number" min="0" max="20"></div>
           <div><label>Alert</label><input id="st_alert" type="number" min="0" max="20"></div>
@@ -228,6 +258,7 @@
         <select id="selOwner" style="width:100%"></select>
         <div class="row" style="margin-top:8px">
           <button id="selHide">Hide from players</button>
+          <button id="libSave" class="fit" title="Keep a copy in your saved minis list (players never see the list)">Save to list</button>
           <button id="selFight" style="display:none">Add to turn order</button>
           <button id="selDel" class="danger fit">Delete</button>
         </div>
@@ -244,6 +275,9 @@
         <select id="newOwner"></select>
         <button id="addFig" class="primary fit">Add</button>
       </div>
+      <label style="color:var(--text);margin-top:6px"><input id="newHidden" type="checkbox"> Hidden from players while I work on it</label>
+      <h3 style="margin-top:12px">Saved minis</h3>
+      <div id="libList"></div>
     </section>
 
     <section id="partySec" style="display:none">
@@ -359,6 +393,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=30"></script>
+<script type="module" src="tabletop.js?v=31"></script>
 </body>
 </html>

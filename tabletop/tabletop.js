@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=30';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=30';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=31';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=31';
 
-const VERSION = 30;                              // raised by bump.py on every publish
+const VERSION = 31;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -102,7 +102,8 @@ function freshState() {
   // party: exploring (no combat) - all allies move in the same turn. from = where each started this turn
   return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, party: { turn: 1, from: {}, dash: {} }, players: {}, log: [], gm: '', models: {}, tiles: {},
     combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0,
-    pending: [], event: null, threat: 0, paused: false };                     // GM-only: events waiting / shown
+    pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
+    attack: null, warp: null, warpUsed: {}, library: {} };                     // attack in progress, warp-out vote, GM's saved minis
 }
 
 // =====================================================================
@@ -194,7 +195,8 @@ function viewFor() {
   for (const f of Object.values(state.figures)) if (figVisible(f)) figures[f.id] = f;
   for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
-    models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused };
+    models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {} };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
@@ -302,6 +304,9 @@ function onClientData(msg) {
     case 'log': state.log.push(msg.entry); renderLogEntry(msg.entry); break;
     case 'dice': showDice(msg); break;
     case 'paused': state.paused = msg.on; renderPause(); break;
+    case 'attack': state.attack = msg.attack; renderAttack(); break;
+    case 'fx': playFx(msg); break;
+    case 'warp': state.warp = msg.warp; renderWarp(); break;
     case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); break;
     case 'party': state.party = msg.party; renderParty(); break;
     case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); buildBoard(); break;
@@ -469,13 +474,91 @@ function handle(msg, from) {
       if (kind === 'chest') { state.tiles[msg.key] = 'chestOpen'; tilesChanged(); sendTiles({ [msg.key]: 'chestOpen' }); }
       else if (kind !== 'goal') { delete state.tiles[msg.key]; tilesChanged(); sendTiles({ [msg.key]: null }); }
       addLog({ kind: 'sys', text: `${f.name} ${what}` });
-      state.pending.push({ id: rid(6), kind, who: f.name, x: ki + 0.5, z: kj + 0.5 });
+      state.pending.push({ id: rid(6), kind, key: msg.key, who: f.name, x: ki + 0.5, z: kj + 0.5 });
       addLog({ kind: 'sys', text: `${f.name}: ${INTERACT[kind].slice(2).toLowerCase()} - see Rules & dungeon.`, to: state.gm });
       renderEvent(); save();
       break;
     }
+    case 'attack': {                            // a move: accuracy roll, then (on a hit) damage
+      const tg = state.figures[msg.target];
+      if (!mayMove || !tg || tg.id === f.id || attackBusy) return;
+      if (state.paused && !gm) { note(from, 'Paused: the GM is resolving an event.'); return; }
+      if (!gm && state.combat && state.combat.order[state.combat.turn]?.id !== f.id) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      const mv = cleanMove(msg.move);
+      if (!mv) return;
+      const num = v => Math.max(0, Math.min(20, Math.round(+v) || 0));
+      f.st = { ...(f.st || {}) }; f.st.attr = { ...(f.st.attr || {}) };
+      for (const [k, v] of Object.entries(msg.attr || {})) if (ATTRS.includes(k)) f.st.attr[k] = num(v);
+      if (gm && msg.def && ATTRS.includes(msg.def.name)) { tg.st = { ...(tg.st || {}) }; tg.st.attr = { ...(tg.st.attr || {}), [msg.def.name]: num(msg.def.v) }; pushFig(tg); }
+      f.st.moves = [mv.name, ...(f.st.moves || []).filter(x => x !== mv.name)].slice(0, 8);
+      faceToward(f, tg);
+      pushFig(f); save();
+      attackRoll(f, tg, mv, msg, from);
+      break;
+    }
+    case 'species': {                           // GM: a Pokémon from the site fills the mini's attributes, HP, types and moves
+      if (!gm || !f) return;
+      const num = (v, hi = 20) => Math.max(0, Math.min(hi, Math.round(+v) || 0));
+      const st = { ...(f.st || {}) };
+      st.attr = { ...(st.attr || {}) };
+      for (const k of ['Strength', 'Dexterity', 'Vitality', 'Special', 'Insight']) if (msg.attr?.[k] != null) st.attr[k] = num(msg.attr[k]);
+      st.species = clean(msg.name, 40);
+      st.types = (Array.isArray(msg.types) ? msg.types : []).filter(t => TYPES[t]).slice(0, 2);
+      st.learn = (Array.isArray(msg.moves) ? msg.moves : []).map(x => clean(x, 40)).filter(Boolean).slice(0, 40);
+      st.dex = st.attr.Dexterity;
+      st.hpMax = num(msg.hp, 99) + (st.attr.Vitality || 0);    // PokéRole: HP = base HP + Vitality
+      st.hp = st.hpMax;
+      f.st = st;
+      pushFig(f); save();
+      if (state.combat) { if (fights(f)) joinCombat(f); pushCombat(); }
+      break;
+    }
+    case 'attackCancel': {
+      if (!state.attack || !(gm || state.attack.by === from)) return;
+      state.attack = null; pushAttack();
+      break;
+    }
+    case 'warpVote': {                          // the players' unanimous vote to warp out once the goal is done
+      const w = state.warp;
+      if (!w || w.result || !w.voters.includes(from)) return;
+      w.votes[from] = !!msg.yes;
+      if (!msg.yes || w.voters.every(v => w.votes[v])) {
+        w.result = msg.yes ? 'out' : 'stay';
+        addLog({ kind: 'sys', text: msg.yes ? 'Everyone agreed: the team warps out of the dungeon!' : `${state.players[from]?.name || 'Someone'} chose to stay: the team stays in the dungeon (the warp is used up).` });
+      }
+      pushWarp();
+      break;
+    }
+    case 'warpClose': {
+      if (!gm) return;
+      state.warp = null; pushWarp();
+      break;
+    }
+    case 'libSave': {                           // GM: keep a copy of a mini in the saved list (players never see it)
+      if (!gm || !f) return;
+      const { id: _id, x: _x, z: _z, parent: _p, ...rest } = f;
+      state.library[rid(8)] = JSON.parse(JSON.stringify(rest));
+      renderLibrary(); save();
+      note(from, `${f.name} saved to your minis list.`);
+      break;
+    }
+    case 'libPlace': {
+      const L = gm && state.library[msg.lib];
+      if (!L) return;
+      const id = rid(8), c = fp(L);
+      state.figures[id] = { ...JSON.parse(JSON.stringify(L)), id, owner: null, hidden: true, ...freeSpot(+msg.x || 0, +msg.z || 0, c.w, c.d) };
+      pushFig(state.figures[id]); save();
+      return id;
+    }
+    case 'libDel': {
+      if (!gm || !state.library[msg.lib]) return;
+      delete state.library[msg.lib]; renderLibrary(); save();
+      break;
+    }
     case 'pendingDone': {
       if (!gm) return;
+      const pend = state.pending.find(x => x.id === msg.pid);
+      if (pend?.kind === 'goal' && msg.tell && !state.warpUsed[pend.key]) startWarp(pend.key);
       state.pending = state.pending.filter(x => x.id !== msg.pid);
       if (msg.tool) handle({ t: 'eventTool', tool: msg.tool, mod: msg.mod }, from);
       if (msg.tell) addLog({ kind: 'sys', text: msg.tell });
@@ -755,11 +838,11 @@ async function rollPhysics(msg, from, logText) {
   const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
   const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: box, random: rnd });
   const parts = diceTotal(kinds, values), total = parts.reduce((a, c) => a + c, 0);
-  const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames };
+  const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames, pool: !!msg.pool && sides === 6 };
   const to = msg.hidden ? from : null;
   showDice(roll);
   sendAll(roll, to ? cid => cid === to : null);
-  const text = logText ? logText(total) : `rolled ${n}d${sides}: ${n > 1 ? parts.join(' + ') + ' = ' : ''}${total}`;
+  const text = logText ? logText(total, parts) : `rolled ${n}d${sides}: ${n > 1 ? parts.join(' + ') + ' = ' : ''}${total}`;
   await new Promise(ok => setTimeout(ok, frames.length * 1000 / 30 + 250));    // the log waits for the dice to land
   addLog({ kind: 'roll', from, text, to });
   return total;
@@ -775,6 +858,83 @@ async function rollEvent(from, who, at) {
   rollingEvent = false;
   renderEvent(); save();
 }
+
+// ---------- attacks (PokéRole): accuracy = attribute + skill dice, a hit needs 1 success (4-6);
+// damage = attribute + the move's Power - the target's defence (Vitality, or Insight vs Special) dice, each success = 1 damage
+const ATTRS = ['Strength', 'Dexterity', 'Vitality', 'Special', 'Insight', 'Tough', 'Cool', 'Beauty', 'Clever', 'Cute',
+  'Brawl', 'Channel', 'Clash', 'Evasion', 'Alert', 'Athletic', 'Nature', 'Stealth', 'Allure', 'Etiquette', 'Intimidate', 'Perform',
+  'Crafts', 'Lore', 'Medicine', 'Science', 'Will', 'Happiness', 'Loyalty'];
+const TYPES = { Normal: '#a8a77a', Fire: '#ee8130', Water: '#6390f0', Electric: '#f7d02c', Grass: '#7ac74c', Ice: '#96d9d6',
+  Fighting: '#c22e28', Poison: '#a33ea1', Ground: '#e2bf65', Flying: '#a98ff3', Psychic: '#f95587', Bug: '#a6b91a',
+  Rock: '#b6a136', Ghost: '#735797', Dragon: '#6f35fc', Dark: '#705746', Steel: '#b7b7ce', Fairy: '#d685ad' };
+const defenceFor = cat => (cat === 'Special' ? 'Insight' : 'Vitality');
+function cleanMove(m) {
+  if (!m || typeof m !== 'object') return null;
+  const name = clean(m.name, 40);
+  if (!name) return null;
+  const cat = ['Physical', 'Special', 'Status'].includes(m.cat) ? m.cat : 'Physical';
+  return { name, type: TYPES[m.type] ? m.type : 'Normal', cat, power: Math.max(0, Math.min(10, Math.round(+m.power) || 0)),
+    acc: (Array.isArray(m.acc) ? m.acc : []).filter(a => ATTRS.includes(a)).slice(0, 2), dmg: ATTRS.includes(m.dmg) ? m.dmg : '' };
+}
+// turn a mini to face another (square minis, in 45 degree steps; 0 = facing +z)
+function faceToward(f, t) {
+  const c = fp(f);
+  if (c.w !== c.d || (Math.abs(t.x - f.x) < 0.01 && Math.abs(t.z - f.z) < 0.01)) return;
+  const deg = Math.atan2(-(t.x - f.x), t.z - f.z) * 180 / Math.PI;
+  const want = ((Math.round(deg / 45) * 45) % 360 + 360) % 360, turn = (want - (f.rot || 0) + 360) % 360;
+  if (turn) { turnOne(f, turn); carry(f.id, 0, 0, turn, f); }
+}
+function pushAttack() { sendAll({ t: 'attack', attack: state.attack }); renderAttack(); save(); }
+let attackBusy = false;
+async function attackRoll(f, tg, mv, msg, from) {
+  const a = f.st.attr || {}, dir = { x: Math.sign(tg.x - f.x) * 0.7, z: Math.sign(tg.z - f.z) * 0.7 || -1 };
+  const at = { x: (f.x + tg.x) / 2, z: (f.z + tg.z) / 2 };
+  attackBusy = true;
+  try {
+    if (msg.step !== 'dmg') {
+      const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0));
+      let hits = 0;
+      await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
+        hits = parts.filter(v => v >= 4).length;
+        return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}, ${hits ? 'hit!' : 'miss.'}`;
+      });
+      const fx = { t: 'fx', kind: hits ? mv.cat : 'miss', type: mv.type, from: f.id, to: tg.id };
+      sendAll(fx); playFx(fx);
+      state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from } : null;
+      pushAttack();
+    } else {
+      const A = state.attack;
+      if (!A || A.id !== f.id || A.target !== tg.id) return;
+      const def = tg.st?.attr?.[defenceFor(mv.cat)] || 0;
+      const n = Math.max(1, (a[mv.dmg] || 0) + mv.power - def);
+      let dmg = 0;
+      await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
+        dmg = parts.filter(v => v >= 4).length;
+        return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)} ${def}) - ${dmg} damage to ${tg.name}`;
+      });
+      if (tg.st?.hp != null && dmg) {
+        const hp = Math.max(0, tg.st.hp - dmg);
+        tg.st = { ...tg.st, hp };
+        pushFig(tg);
+        if (!hp) addLog({ kind: 'sys', text: `${tg.name} faints!` });
+      }
+      const fx = { t: 'fx', kind: 'dmg', text: dmg ? `-${dmg}` : 'No damage', to: tg.id };
+      sendAll(fx); playFx(fx);
+      state.attack = null; pushAttack();
+    }
+  } finally { attackBusy = false; }
+}
+
+// ---------- warp out: once the Dungeon Goal is done, every player votes; all yes = the team warps out ----------
+function startWarp(key) {
+  const voters = Object.entries(state.players).filter(([id, p]) => id !== state.gm && p.online !== false && Object.values(state.figures).some(f => f.owner === id)).map(([id]) => id);
+  if (!voters.length) return;
+  state.warpUsed[key] = true;
+  state.warp = { voters, votes: {}, result: null };
+  addLog({ kind: 'sys', text: 'Dungeon cleared! The team can warp out, but only if everyone agrees (one chance).' });
+  pushWarp();
+}
+function pushWarp() { sendAll({ t: 'warp', warp: state.warp }); renderWarp(); save(); }
 
 const rolls = [];                               // dice on the table right now
 function showDice(roll) {
@@ -807,7 +967,14 @@ function animateDice(now) {
     if (f >= n && !r.badge) {                   // settled: show the total above the dice for a while
       const c = new THREE.Vector3();
       r.meshes.forEach(m => c.add(m.position)); c.multiplyScalar(1 / r.meshes.length);
-      r.badge = labelSprite(String(r.total)); r.badge.position.set(c.x, 1.1, c.z); r.badge.scale.set(2.4, 0.6, 1);
+      let text = String(r.total);
+      if (r.pool) {                             // a success pool: 4-6 turn green, 1-3 red, and the badge counts successes
+        const last = r.frames[n - 1];
+        let ok = 0;
+        r.meshes.forEach((m, d) => { const v = readDie(dieKit('d6'), last[d].slice(3)); if (v >= 4) ok++; m.material = dieMaterials(dieKit('d6'), v >= 4 ? '#2fae4f' : '#c8382f'); });
+        text = `${ok} success${ok === 1 ? '' : 'es'}`;
+      }
+      r.badge = labelSprite(text); r.badge.position.set(c.x, 1.1, c.z); r.badge.scale.set(2.4, 0.6, 1);
       scene.add(r.badge);
       r.doneAt = now;
     }
@@ -1600,7 +1767,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -1696,9 +1863,213 @@ function updatePrompts() {
   for (const b of [...box.children]) if (!seen.has(b.dataset.key)) b.remove();
 }
 
+// ---------- attack effects: physical = lunge + claw marks, special = an orb flying over, status = rings; coloured by type ----------
+const fxList = [];
+function fxMesh(geo, color, opacity = 1) {
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
+  scene.add(m); return m;
+}
+const dropMesh = m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); };
+function playFx(fx) {
+  const tg = state.figures[fx.to], src = state.figures[fx.from], color = TYPES[fx.type] || '#ffffff';
+  if (!tg || !scene) return;
+  const T = new THREE.Vector3(tg.x, 0.6, tg.z), t0 = performance.now();
+  const add = (ms, step, end) => fxList.push({ t0, ms, step, end });
+  const burst = (delay, n = 10) => {
+    const bits = Array.from({ length: n }, () => {
+      const m = fxMesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), color);
+      m.visible = false; m.userData.v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).multiplyScalar(2.4);
+      return m;
+    });
+    add(delay + 600, k => {
+      const u = Math.max(0, (k * (delay + 600) - delay) / 600);
+      for (const b of bits) { b.visible = u > 0; b.position.copy(T).addScaledVector(b.userData.v, u * 0.6); b.position.y -= u * u * 0.4; b.material.opacity = 1 - u; b.rotation.x += 0.2; }
+    }, () => bits.forEach(dropMesh));
+  };
+  const floatText = (text, col) => {
+    const sp = labelSprite(text); sp.position.copy(T).setY(1.6); scene.add(sp);
+    if (col) sp.material.color.set(col);
+    add(1500, k => { sp.position.y = 1.6 + k * 0.8; sp.material.opacity = 1 - Math.max(0, k - 0.6) / 0.4; }, () => { scene.remove(sp); sp.material.map.dispose(); sp.material.dispose(); });
+  };
+  if (fx.kind === 'miss') { floatText('Miss!'); return; }
+  if (fx.kind === 'dmg') { floatText(fx.text, '#ff8a80'); return; }
+  if (fx.kind === 'Physical') {
+    const g = src && figMeshes.get(src.id);
+    if (g) g.position.lerp(new THREE.Vector3(tg.x, g.position.y, tg.z), 0.45);   // lunge; it glides back by itself
+    const claws = [-0.18, 0, 0.18].map(o => {
+      const m = fxMesh(new THREE.PlaneGeometry(0.07, 0.9), color);
+      m.position.copy(T); m.lookAt(camera.position); m.translateX(o); m.rotateZ(0.6); m.scale.y = 0.01;
+      return m;
+    });
+    add(500, k => claws.forEach(m => { m.scale.y = Math.min(1, k * 3); m.material.opacity = 1 - k; }), () => claws.forEach(dropMesh));
+    burst(80);
+  } else if (fx.kind === 'Special') {
+    const S = src ? new THREE.Vector3(src.x, 0.8, src.z) : T.clone().setY(3);
+    const orb = fxMesh(new THREE.SphereGeometry(0.2, 16, 12), color), glow = fxMesh(new THREE.SphereGeometry(0.34, 16, 12), color, 0.35);
+    add(450, k => { orb.position.lerpVectors(S, T, k); orb.position.y += Math.sin(k * Math.PI) * 0.6; glow.position.copy(orb.position); glow.scale.setScalar(1 + Math.sin(k * 20) * 0.15); },
+      () => [orb, glow].forEach(dropMesh));
+    const ring = fxMesh(new THREE.RingGeometry(0.3, 0.42, 40), color); ring.visible = false; ring.rotation.x = -Math.PI / 2;
+    add(950, k => { const u = Math.max(0, (k * 950 - 450) / 500); ring.visible = u > 0; ring.position.copy(T).setY(0.3); ring.scale.setScalar(1 + u * 2.5); ring.material.opacity = 1 - u; },
+      () => dropMesh(ring));
+    burst(450, 14);
+  } else {
+    const rings = [0, 1].map(() => { const m = fxMesh(new THREE.RingGeometry(0.5, 0.58, 40), color); m.rotation.x = -Math.PI / 2; return m; });
+    add(900, k => rings.forEach((m, i) => { const u = Math.min(1, Math.max(0, k * 1.4 - i * 0.3)); m.position.copy(T).setY(0.05 + u * 1.2); m.material.opacity = 1 - u; }),
+      () => rings.forEach(dropMesh));
+  }
+}
+function animateFx(now) {
+  for (let i = fxList.length - 1; i >= 0; i--) {
+    const e = fxList[i], k = Math.min(1, (now - e.t0) / e.ms);
+    e.step(k);
+    if (k >= 1) { e.end(); fxList.splice(i, 1); }
+  }
+}
+
+// ---------- the attack panel (pick a move, then roll accuracy and, on a hit, damage) ----------
+// moves come from the Voice of the Forest site's public index (read only)
+let indexP = null, attackFor = null, atk = null;
+const INDEX_URL = 'https://xrunriot-wp.github.io/thevoiceoftheforest/data/index.json';
+function loadIndex() {
+  return indexP ||= fetch(INDEX_URL).then(r => r.json()).then(E => {
+    const moves = E.filter(e => e.kind === 'Move' && e.mv).map(e => ({ name: e.name, ...e.mv, text: e.trigger || '' })).sort((a, b) => a.name.localeCompare(b.name));
+    const species = E.filter(e => e.kind === 'Species').map(parseSpecies).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+    return { moves, species };
+  }).catch(() => { indexP = null; return { moves: [], species: [] }; });
+}
+const loadMoves = () => loadIndex().then(x => x.moves);
+// "Attributes (start/max): Str 3/7, Dex 1/2, ..." + "Grass/Ice type. Base HP 5." + "Starter: Leer, Powder Snow | Beginner: ..."
+function parseSpecies(e) {
+  const at = {}, names = { Str: 'Strength', Dex: 'Dexterity', Vit: 'Vitality', Spe: 'Special', Ins: 'Insight' };
+  for (const [, k, v] of (e.roll || '').matchAll(/(Str|Dex|Vit|Spe|Ins) (\d+)\//g)) at[names[k]] = +v;
+  if (!Object.keys(at).length) return null;
+  const types = ((e.outcome || '').match(/([A-Za-z]+(?:\/[A-Za-z]+)?) type\./) || [, ''])[1].split('/').filter(t => TYPES[t]);
+  const hp = +((e.outcome || '').match(/Base HP (\d+)/) || [, 0])[1];
+  const moves = (e.learn || '').split('|').flatMap(r => r.replace(/^[^:]*:/, '').split(',')).map(x => x.trim()).filter(Boolean);
+  return { name: e.name, attr: at, types, hp, moves };
+}
+async function openAttack(id, target) {
+  atk = { id, target, move: null };
+  $('atkPanel').style.display = 'block';
+  $('atkMove').value = '';
+  renderAttack();
+  const list = await loadMoves(), f = state.figures[id];
+  const dl = $('atkMoves'); dl.innerHTML = '';
+  const recent = [...new Set([...(f?.st?.moves || []), ...(f?.st?.learn || [])])];
+  for (const m of [...recent.map(n => list.find(x => x.name === n)).filter(Boolean), ...list.filter(x => !recent.includes(x.name))]) {
+    const o = document.createElement('option'); o.value = m.name; dl.appendChild(o);
+  }
+  if (!list.length) $('atkInfo').textContent = 'Could not load the moves from the Voice of the Forest site. Check the connection and try again.';
+  else if (recent[0]) { $('atkMove').value = recent[0]; pickMove(); }
+}
+async function pickMove() {
+  const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
+  if (!atk || (atk.move?.name === m?.name && m)) return;
+  atk.move = m || null;
+  renderAttack();
+}
+function renderAttack() {
+  const P = $('atkPanel');
+  if (!P) return;
+  if (!atk) { P.style.display = 'none'; return; }
+  const f = state.figures[atk.id], tg = state.figures[atk.target];
+  if (!f || !tg) { atk = null; P.style.display = 'none'; return; }
+  const m = atk.move, A = state.attack, rolledHit = !!(A && A.id === f.id && A.target === tg.id);
+  $('atkTitle').textContent = `${f.name} attacks ${tg.name}`;
+  $('atkInfo').innerHTML = '';
+  if (m) {
+    const c = document.createElement('span'); c.className = 'typechip'; c.textContent = m.type; c.style.background = TYPES[m.type] || '#888';
+    $('atkInfo').append(c, ` ${m.cat}${m.cat !== 'Status' ? ` · Power ${m.power}` : ''}${m.effect && m.effect !== '-' ? ' · ' + m.effect : ''}`);
+  }
+  const a = f.st?.attr || {}, rows = $('atkRows');
+  const keep = new Map([...rows.querySelectorAll('input')].map(i => [i.dataset.key + '|' + i.dataset.own, i.value]));
+  rows.innerHTML = '';
+  const field = (label, key, val, own) => {
+    const d = document.createElement('div'), l = document.createElement('label'), i = document.createElement('input');
+    l.textContent = label; i.type = 'number'; i.min = 0; i.max = 20;
+    i.dataset.key = key; i.dataset.own = own ? '1' : '';
+    i.value = keep.get(key + '|' + i.dataset.own) ?? val ?? '';
+    i.oninput = calc;
+    d.append(l, i); rows.appendChild(d);
+    return i;
+  };
+  if (m) {
+    for (const k of m.acc) field(`${f.name}'s ${k}`, k, a[k], true);
+    if (m.cat !== 'Status') {
+      if (m.dmg && !m.acc.includes(m.dmg)) field(`${f.name}'s ${m.dmg}`, m.dmg, a[m.dmg], true);
+      field(`${tg.name}'s ${defenceFor(m.cat)}`, defenceFor(m.cat), tg.st?.attr?.[defenceFor(m.cat)], false).disabled = !gmView();
+    }
+  }
+  function calc() {
+    if (!m) { $('atkSum').textContent = 'Pick a move.'; return; }
+    const val = (k, own) => +([...rows.querySelectorAll('input')].find(i => i.dataset.key === k && !!i.dataset.own === own)?.value) || 0;
+    const acc = Math.max(1, m.acc.reduce((s, k) => s + val(k, true), 0));
+    const dmg = Math.max(1, val(m.dmg, true) + m.power - val(defenceFor(m.cat), false));
+    $('atkSum').textContent = `Accuracy: ${acc} dice, a hit needs 1 success (4-6)` + (m.cat !== 'Status' ? ` · Damage: ${dmg} dice, each success = 1 damage` : '');
+  }
+  calc();
+  $('atkAcc').disabled = !m || !!preview;
+  $('atkDmg').disabled = !!preview;
+  $('atkDmg').style.display = rolledHit ? '' : 'none';
+  $('atkAcc').style.display = rolledHit ? 'none' : '';
+}
+function attackMsg(step) {
+  const m = atk?.move;
+  if (!m) return;
+  const attr = {};
+  let def = null;
+  for (const i of $('atkRows').querySelectorAll('input')) { if (i.dataset.own) attr[i.dataset.key] = i.value; else def = { name: i.dataset.key, v: i.value }; }
+  act({ t: 'attack', id: atk.id, target: atk.target, step, move: m, attr, def });
+}
+function closeAttack() {
+  if (atk && state.attack && state.attack.id === atk.id) act({ t: 'attackCancel' });
+  atk = null; $('atkPanel').style.display = 'none';
+}
+
+// ---------- warp-out vote ----------
+function renderWarp() {
+  const box = $('warpBox'), w = state.warp;
+  if (!box) return;
+  if (!w) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  const me = viewerId(), voted = w.votes[me] != null, n = Object.keys(w.votes).length;
+  const name = id => state.players[id]?.name || '?';
+  box.innerHTML = '<div class="evt">Warp out of the dungeon?</div><div class="evx"></div><div class="row evb"></div>';
+  const x = box.querySelector('.evx'), row = box.querySelector('.evb');
+  if (w.result === 'out') x.innerHTML = 'Everyone agreed: <b>the team warps out!</b>';
+  else if (w.result === 'stay') x.textContent = 'Not everyone agreed, so the team stays in the dungeon. The warp is used up.';
+  else x.innerHTML = `The Dungeon Goal is done. The team can warp out now, but only if <b>everyone</b> says yes. This chance comes once.<br>Voted: ${n} of ${w.voters.length}` +
+    (n ? ' (' + Object.keys(w.votes).map(name).join(', ').replace(/[<>&]/g, '') + ')' : '');
+  const btn = (t, cls, fn) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; row.appendChild(b); };
+  if (!w.result && w.voters.includes(me) && !voted && !preview) { btn('Warp out', 'primary', () => act({ t: 'warpVote', yes: true })); btn('Stay', '', () => act({ t: 'warpVote', yes: false })); }
+  else if (!w.result && voted) row.append('Waiting for the others...');
+  if (gmView()) btn(w.result ? 'Close' : 'Cancel the vote', '', () => act({ t: 'warpClose' }));
+  else if (w.result) btn('OK', '', () => { box.style.display = 'none'; });
+}
+
+// ---------- the GM's saved minis ----------
+function renderLibrary() {
+  const box = $('libList');
+  if (!box || !isHost) return;
+  box.innerHTML = '';
+  const L = Object.entries(state.library || {});
+  if (!L.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px">None yet. Pick a mini and click <b>Save to list</b>.</div>'; return; }
+  for (const [id, m] of L.sort((a, b) => a[1].name.localeCompare(b[1].name))) {
+    const r = document.createElement('div'); r.className = 'row librow';
+    const dot = document.createElement('span'); dot.style.cssText = `width:12px;height:12px;border-radius:50%;flex:0 0 12px;background:${okColor(m.color)}`;
+    const n = document.createElement('span'); n.textContent = m.name; n.style.flex = '1';
+    const place = document.createElement('button'); place.className = 'fit'; place.textContent = 'Place'; place.title = 'Put a copy on the table, hidden from players until you show it';
+    place.onclick = () => { const t = controls.target, nid = handle({ t: 'libPlace', lib: id, x: t.x, z: t.z }, clientId); if (nid) select(nid); };
+    const del = document.createElement('button'); del.className = 'fit danger'; del.textContent = '×'; del.title = 'Remove from the list';
+    del.onclick = () => confirm(`Remove ${m.name} from your saved minis?`) && act({ t: 'libDel', lib: id });
+    r.append(dot, n, place, del); box.appendChild(r);
+  }
+}
+
 const _shareT = new THREE.Vector3();
 function tick() {
   animateDice(performance.now());
+  animateFx(performance.now());
   updatePrompts();
   if (tileGroup) { const b = Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = o.userData.bob + b; }
   updateOverlays();
@@ -1770,6 +2141,14 @@ function onDown(e) {
     return;                                     // the camera still turns if you drag
   }
   if (e.button !== 0 || e.target !== renderer.domElement) return;
+  if (attackFor) {                              // picking who the selected mini attacks
+    const to = figAt(e), id = attackFor;
+    attackFor = null; status('');
+    e.stopPropagation();
+    if (to && to !== id) openAttack(id, to);
+    select(id);
+    return;
+  }
   if (attachFor) {                              // picking what the selected piece attaches to
     const to = figAt(e), id = attachFor;
     attachFor = null; status('');
@@ -1895,6 +2274,10 @@ function showSelected() {
   }
   // players change name, colour and facing; the GM everything; in player view nothing
   const look = gmView() || (!isHost && f.owner === clientId), all = gmView();
+  $('selAttack').style.display = look ? '' : 'none';
+  $('speciesRow').style.display = all ? '' : 'none';
+  if (document.activeElement !== $('selSpecies')) $('selSpecies').value = st.species || '';
+  $('speciesInfo').textContent = st.species ? `${(st.types || []).join('/')}${st.types?.length ? ' · ' : ''}` + ['Strength', 'Dexterity', 'Vitality', 'Special', 'Insight'].map(k => `${k.slice(0, 3)} ${st.attr?.[k] ?? '-'}`).join(' · ') : '';
   for (const id of ['selName', 'selColor', 'selTurn']) $(id).disabled = !look;
   $('selSizeBox').style.display = all ? '' : 'none';
   if (!all) $('selCustom').style.display = 'none';
@@ -2215,7 +2598,26 @@ function wirePanel() {
     status(`Click the piece to attach ${state.figures[selectedId].name} to (Esc to cancel)`);
   };
   $('selDetach').onclick = () => selectedId && act({ t: 'attach', id: selectedId, to: null });
-  addEventListener('keydown', e => { if (e.key === 'Escape' && attachFor) { attachFor = null; status(''); } });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && (attachFor || attackFor)) { attachFor = attackFor = null; status(''); } });
+  $('selAttack').onclick = () => {
+    if (!selectedId) return;
+    attackFor = selectedId;
+    status(`${touchy ? 'Tap' : 'Click'} the mini ${state.figures[selectedId].name} attacks (Esc to cancel)`);
+  };
+  $('atkMove').oninput = () => pickMove();
+  $('atkAcc').onclick = () => attackMsg('acc');
+  $('atkDmg').onclick = () => attackMsg('dmg');
+  $('atkClose').onclick = () => closeAttack();
+  $('libSave').onclick = () => selectedId && act({ t: 'libSave', id: selectedId });
+  $('selSpecies').onfocus = async () => {
+    const dl = $('speciesList');
+    if (dl.childElementCount) return;
+    for (const sp of (await loadIndex()).species) { const o = document.createElement('option'); o.value = sp.name; dl.appendChild(o); }
+  };
+  $('selSpecies').onchange = async () => {
+    const name = $('selSpecies').value.trim().toLowerCase(), sp = (await loadIndex()).species.find(x => x.name.toLowerCase() === name);
+    if (sp && selectedId) act({ t: 'species', id: selectedId, name: sp.name, attr: sp.attr, hp: sp.hp, types: sp.types, moves: sp.moves });
+  };
 
   let lastGroup = '';
   for (const [type, t] of [...Object.entries(TILES), ['erase', { name: 'Eraser', color: 'transparent', group: 'Tools' }]]) {
@@ -2289,6 +2691,7 @@ function wirePanel() {
   $('addFig').onclick = () => {
     const t = controls.target;
     const id = handle({ t: 'add', name: $('newName').value, color: $('newColor').value, owner: $('newOwner').value || null, x: t.x, z: t.z }, clientId);
+    if (id && $('newHidden').checked) handle({ t: 'edit', id, hidden: true }, clientId);
     if (id) select(id);
   };
   $('applyBoard').onclick = () => act({ t: 'boardEdit', id: curBoard().id, cols: $('cols').value, rows: $('rows').value });

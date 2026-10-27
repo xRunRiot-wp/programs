@@ -107,6 +107,23 @@ right next to one of its open squares (not diagonally, and not through a wall). 
 with walls; paint a **Door** (or erase a wall) on one edge square and that's the room's only way in, so a 7x7 room
 can have a one-square entrance. The GM can also **Roll dungeon event** by hand.
 
+**Attacks.** Pick your mini, click **⚔ Attack…**, then click the mini to attack. Your mini turns to face it.
+Pick a move (the list is read live from the Voice of the Forest site; nothing is ever changed there) and check the
+numbers: accuracy = the move's attribute + skill dice, a hit needs 1 success; damage = attribute + the move's Power
+minus the target's Vitality (or Insight against Special moves). The dice land green on 4-6 (a success) and red on 1-3,
+and the badge counts the successes. On a hit, **Roll damage** takes that many HP off the target. Physical moves lunge and
+claw, Special moves throw an orb, Status moves ring the target, all in the move's type colour. The numbers you type are
+remembered on the mini; only the GM can set the target's defence.
+
+**Pokémon.** The GM can type a Pokémon into a mini's **Pokémon** box: its attributes, HP (base HP + Vitality),
+types and moves are filled in from the site, and its moves come first in the attack list.
+
+**Warp out.** When the GM marks a Dungeon Goal **Mission complete!**, every player gets a vote to warp out. Only a
+unanimous yes warps the team out; one "Stay" and the chance is gone (one per goal).
+
+**Working on minis in secret.** Tick **Hidden from players while I work on it** before adding a mini. **Save to list**
+keeps a copy of any mini in the GM's **Saved minis** list (players never see it); **Place** puts a hidden copy on the table.
+
 ## Boards
 
 The table can have several boards, each with its own size, map picture and grid. **+ Add board** puts a new one
