@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { dieKit, dieMaterials, simulate, readDie } from './dice.js';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js';
 
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
@@ -79,7 +80,8 @@ let isHost = false, myName = '', roomCode = '', hostId = '';
 let state = freshState();
 function freshState() {
   // boards: each is a rectangle of squares on one shared grid; (x, z) = its top-left corner
-  return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, players: {}, log: [], gm: '', models: {}, tiles: {} };
+  return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, players: {}, log: [], gm: '', models: {}, tiles: {},
+    combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0 };
 }
 
 // =====================================================================
@@ -166,9 +168,35 @@ function connectToHost() {
 
 // host: what a player is allowed to see (hidden minis are GM-only)
 function viewFor() {
-  const figures = {};
-  for (const f of Object.values(state.figures)) if (!f.hidden) figures[f.id] = f;
-  return { boards: state.boards, figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm, models: state.models, tiles: state.tiles };
+  const figures = {}, tiles = {};
+  for (const f of Object.values(state.figures)) if (figVisible(f)) figures[f.id] = f;
+  for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
+  return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
+    models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored };
+}
+const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
+const tileVisible = k => { const [i, j] = k.split(',').map(Number); return !boardAt(i + 0.5, j + 0.5)?.hidden; };
+// players' copy of the turn order leaves out hidden minis (their turn shows as "the GM's turn")
+function combatView() {
+  const c = state.combat;
+  if (!c) return null;
+  const order = c.order.filter(o => state.figures[o.id] && figVisible(state.figures[o.id]));
+  return { ...c, order, turn: order.findIndex(o => o.id === c.order[c.turn]?.id) };
+}
+// tiles to players, leaving out squares on hidden boards
+function sendTiles(set, clear) {
+  const vis = {};
+  for (const [k, v] of Object.entries(set)) if (tileVisible(k)) vis[k] = v;
+  sendAll({ t: 'tiles', set: vis, clear: !!clear });
+}
+// after boards are hidden or shown: give every player a fresh view of the table
+function resyncPlayers() {
+  const v = viewFor();
+  sendAll({ t: 'boards', boards: v.boards });
+  for (const b of v.boards) if (state.maps[b.id]) sendAll({ t: 'map', id: b.id, map: state.maps[b.id] });
+  sendAll({ t: 'tiles', set: v.tiles, clear: true });
+  sendAll({ t: 'figs', figures: v.figures });
+  sendAll({ t: 'combat', combat: v.combat });
 }
 
 function sendAll(msg, filter) {
@@ -205,7 +233,7 @@ function onHostData(conn, msg) {
         ...freeSpot(0, 0, 1, 1) };
     }
     conn.send({ t: 'welcome', state: viewFor() });
-    for (const [id, map] of Object.entries(state.maps)) conn.send({ t: 'map', id, map });
+    for (const [id, map] of Object.entries(state.maps)) if (!state.boards.find(b => b.id === id)?.hidden) conn.send({ t: 'map', id, map });
     for (const [id, data] of modelData) conn.send({ t: 'model', id, name: state.models[id]?.name, data });
     sendAll({ t: 'figs', figures: viewFor().figures });
     addLog({ kind: 'sys', text: `${name} joined.` });
@@ -244,7 +272,11 @@ function onClientData(msg) {
     case 'players': state.players = msg.players; renderPlayers(); syncFigures(); break;
     case 'log': state.log.push(msg.entry); renderLogEntry(msg.entry); break;
     case 'dice': showDice(msg); break;
+    case 'combat': state.combat = msg.combat; renderCombat(); break;
+    case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); break;
+    case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
   }
+  figsVersion++;
 }
 
 // Every change goes through here. On the host it runs at once; players send it to the host.
@@ -264,10 +296,99 @@ function handle(msg, from) {
       const x = +msg.x, z = +msg.z;
       if (!isFinite(x) || !isFinite(z)) return;
       const { w, d } = fp(f), ox = f.x, oz = f.z;
-      Object.assign(f, msg.snap ? snapPos(x, z, w, d) : clampPos(x, z, w, d));
+      const turn = state.combat && state.combat.order[state.combat.turn];
+      const limited = !gm && state.rules.limit && state.combat && state.combat.order.some(o => o.id === f.id);
+      if (limited && turn?.id !== f.id) { pushFig(f); note(from, `It's not ${f.name}'s turn.`); return; }
+      if (f._from == null) f._from = { x: ox, z: oz };
+      // a player stepping onto a hidden board explores it (or is kept off it)
+      let boards = state.boards;
+      const onHidden = !gm && boardAt(x, z)?.hidden && boardAt(x, z);
+      if (onHidden && msg.done) { if (state.rules.autoReveal) revealBoard(onHidden); }
+      if (!gm) boards = state.boards.filter(b => !b.hidden);
+      Object.assign(f, msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards));
+      if (msg.done && limited) {                  // in combat: only as far as this turn's movement allows
+        const c = state.combat, budget = moveBudget(f) * (1 + (c.dash || 0));
+        if (!reachable(worldFor(f), c.from.x, c.from.z, w, d, budget, state.rules.diag).has(`${f.x},${f.z}`)) {
+          Object.assign(f, f._from);
+          note(from, `${f.name} can't reach that square this turn (${budget} movement).`);
+        }
+      }
+      if (msg.done) delete f._from;
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
       if (msg.done) save();
+      break;
+    }
+    case 'stats': {
+      if (!mayMove) return;
+      const n = (v, hi = 99) => (v === '' || v == null || !isFinite(+v) ? undefined : Math.max(0, Math.min(hi, Math.round(+v))));
+      const st = { ...(f.st || {}) };
+      for (const k of ['dex', 'alert', 'hp', 'hpMax', 'move']) if (k in msg) st[k] = n(msg[k]);
+      if (Array.isArray(msg.status)) st.status = [...new Set(msg.status.filter(x => STATUSES.includes(x)))].slice(0, 10);
+      f.st = st;
+      pushFig(f); save();
+      if (state.combat) pushCombat();
+      break;
+    }
+    case 'combatStart': {
+      if (!gm) return;
+      const fighters = Object.values(state.figures).filter(x => x.st && x.st.dex != null);
+      if (!fighters.length) { note(from, 'Give the minis their stats (Dexterity etc.) first.'); return; }
+      const order = fighters.map(x => {
+        const roll = rollDie(6), init = roll + (x.st.dex || 0) + (x.st.alert || 0);
+        const st = x.st.status || [], speed = st.includes('Sped Up') ? 1 : st.includes('Slowed') ? -1 : 0;
+        return { id: x.id, roll, init, speed, dex: x.st.dex || 0, tie: Math.random() };
+      }).sort((a, b) => b.speed - a.speed || b.init - a.init || b.dex - a.dex || b.tie - a.tie);
+      const first = state.figures[order[0].id];
+      state.combat = { order: order.map(({ id, roll, init }) => ({ id, roll, init })), turn: 0, round: 1, from: { x: first.x, z: first.z }, dash: 0 };
+      const shown = combatView().order.map(o => `${state.figures[o.id].name} ${o.init}`).join(', ');
+      addLog({ kind: 'sys', text: `Combat! Initiative (1d6 + Dexterity + Alert): ${shown}.` });
+      pushCombat();
+      break;
+    }
+    case 'combatNext': case 'combatDash': {
+      const c = state.combat, cur = c && state.figures[c.order[c.turn]?.id];
+      if (!c || !(gm || cur?.owner === from)) return;
+      if (msg.t === 'combatDash') {
+        c.dash = (c.dash || 0) + 1;
+        addLog({ kind: 'sys', text: `${cur?.name || '?'} dashes (an action spent on extra movement).` });
+      } else {
+        c.order = c.order.filter(o => state.figures[o.id]);
+        if (!c.order.length) { state.combat = null; pushCombat(); return; }
+        c.turn = (c.turn + 1) % c.order.length;
+        if (c.turn === 0) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); }
+        const nx = state.figures[c.order[c.turn].id];
+        c.from = { x: nx.x, z: nx.z }; c.dash = 0;
+      }
+      pushCombat();
+      break;
+    }
+    case 'combatEnd': {
+      if (!gm || !state.combat) return;
+      state.combat = null;
+      addLog({ kind: 'sys', text: 'Combat is over.' });
+      pushCombat();
+      break;
+    }
+    case 'rules': {
+      if (!gm) return;
+      if (['one', 'alt', 'none'].includes(msg.diag)) state.rules.diag = msg.diag;
+      if (msg.limit != null) state.rules.limit = !!msg.limit;
+      if (msg.autoReveal != null) state.rules.autoReveal = !!msg.autoReveal;
+      pushRules();
+      break;
+    }
+    case 'boardHide': {
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      if (msg.hidden) { b.hidden = true; buildBoard(); updateBoardInputs(); resyncPlayers(); save(); }
+      else revealBoard(b);
+      break;
+    }
+    case 'dungeonEvent': {
+      if (!gm) return;
+      const r = rollDie(6);
+      addLog({ kind: 'roll', from, text: `rolled the dungeon event: ${r} = ${DUNGEON_EVENTS[r]}`, to: state.gm });
       break;
     }
     case 'edit': {
@@ -340,7 +461,7 @@ function handle(msg, from) {
         set[k] = t;
       }
       tilesChanged();
-      sendAll({ t: 'tiles', set, clear: !!msg.clear });
+      if (msg.clear) sendTiles(state.tiles, true); else sendTiles(set);
       save();
       break;
     }
@@ -356,7 +477,7 @@ function handle(msg, from) {
     case 'boardAdd': {
       if (!gm) return;
       const box = boardsBox(), cols = clampSize(msg.cols, 12), rows = clampSize(msg.rows, 12);
-      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols, rows, grid: true };   // lined up to the right
+      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols, rows, grid: true, hidden: !!msg.hidden };   // lined up to the right
       state.boards.push(b);
       boardsChanged();
       return b.id;
@@ -388,7 +509,7 @@ function handle(msg, from) {
       b.x += dx; b.z += dz;
       for (const f of riders) { f.x += dx; f.z += dz; pushFig(f); carry(f.id, dx, dz, 0, f); }
       tilesChanged();
-      sendAll({ t: 'tiles', set });
+      sendTiles(set);
       boardsChanged();
       break;
     }
@@ -410,7 +531,7 @@ function handle(msg, from) {
       if (map) state.maps[b.id] = map; else delete state.maps[b.id];
       blobs.set('map:' + b.id, map);
       buildBoard();
-      sendAll({ t: 'map', id: b.id, map });
+      if (!b.hidden) sendAll({ t: 'map', id: b.id, map });
       save();
       break;
     }
@@ -509,18 +630,53 @@ function dropTilesOutside(old) {
     const [i, j] = k.split(',').map(Number), x = i + 0.5, z = j + 0.5;
     if (x > old.x && x < old.x + old.cols && z > old.z && z < old.z + old.rows && !boardAt(x, z)) { delete state.tiles[k]; set[k] = null; }
   }
-  if (Object.keys(set).length) { tilesChanged(); sendAll({ t: 'tiles', set }); }
+  if (Object.keys(set).length) { tilesChanged(); sendTiles(set); }
 }
 // host: boards changed; minis left off the boards are put back on (refit = re-snap everyone)
 function boardsChanged(refit) {
   buildBoard(); updateBoardInputs();
-  sendAll({ t: 'boards', boards: state.boards });
+  sendAll({ t: 'boards', boards: state.boards.filter(b => !b.hidden) });
   for (const f of Object.values(state.figures)) {
     if (!refit && boardAt(f.x, f.z)) continue;
     const c = fp(f), p = snapPos(f.x, f.z, c.w, c.d);
     if (p.x !== f.x || p.z !== f.z) { Object.assign(f, p); pushFig(f); }
   }
   save();
+}
+
+// ---------- rules helpers (host) ----------
+function note(to, text) {
+  if (to === state.gm) { status(text); setTimeout(() => status(''), 4000); }
+  else sendAll({ t: 'note', text }, cid => cid === to);
+}
+const moveBudget = f => (f.st?.status || []).includes('Immobilized') ? 0 : (f.st?.move ?? (2 + (f.st?.dex || 0)));
+// the grid as one mini sees it: other minis' squares are taken (not its own, nor pieces riding on it)
+function worldFor(f) {
+  const taken = new Set();
+  const riders = new Set();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const o of Object.values(state.figures)) if (!riders.has(o.id) && (o.parent === f.id || riders.has(o.parent))) { riders.add(o.id); changed = true; }
+  }
+  for (const o of Object.values(state.figures)) {
+    if (o.id === f.id || riders.has(o.id) || o.id === f.parent) continue;
+    const c = fp(o);
+    for (const [i, j] of cellsOf(o.x, o.z, c.w, c.d)) taken.add(i + ',' + j);
+  }
+  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
+}
+function pushCombat() { renderCombat(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
+function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, explored: state.explored }); save(); figsVersion++; }
+// a hidden board comes into view; every 2 new ones the GM is reminded to roll the dungeon event
+function revealBoard(b) {
+  if (!b.hidden) return;
+  b.hidden = false;
+  if (!b.explored) {
+    b.explored = true; state.explored++;
+    addLog({ kind: 'sys', text: `A new area is revealed (${state.explored} explored).` });
+    if (state.explored % 2 === 0) addLog({ kind: 'sys', text: '2 more areas explored: time to roll the dungeon event (Rules & dungeon > Roll dungeon event).', to: state.gm });
+  }
+  buildBoard(); updateBoardInputs(); resyncPlayers(); pushRules(); save();
 }
 
 function turnOne(f, deg) {
@@ -549,7 +705,7 @@ function carry(id, dx, dz, deg, around) {
 
 function pushFig(f, skipFor, live) {
   upsertFig(f, live);
-  if (f.hidden) sendAll({ t: 'del', id: f.id });
+  if (!figVisible(f)) sendAll({ t: 'del', id: f.id });
   else sendAll({ t: 'fig', fig: f, live: !!live }, live && skipFor ? cid => cid !== skipFor : null);
 }
 function pushPlayers() { renderPlayers(); syncFigures(); sendAll({ t: 'players', players: state.players }); save(); }
@@ -579,23 +735,23 @@ function save() {
 // =====================================================================
 // Board maths (positions are board units: one square = 1)
 // =====================================================================
-const boardAt = (x, z) => state.boards.find(b => x >= b.x && x <= b.x + b.cols && z >= b.z && z <= b.z + b.rows);
+const boardAt = (x, z, boards = state.boards) => boards.find(b => x >= b.x && x <= b.x + b.cols && z >= b.z && z <= b.z + b.rows);
 function boardsBox() {
   const B = state.boards;
   return { x0: Math.min(...B.map(b => b.x)), z0: Math.min(...B.map(b => b.z)), x1: Math.max(...B.map(b => b.x + b.cols)), z1: Math.max(...B.map(b => b.z + b.rows)) };
 }
 // a piece w squares wide has its middle on a square's middle (odd) or on a grid line (even)
 const gridSnap = (v, cells) => cells % 2 ? Math.floor(v) + 0.5 : Math.round(v);
-function snapPos(x, z, w = 1, d = 1) {
-  const p = clampPos(x, z, w, d);
+function snapPos(x, z, w = 1, d = 1, boards = state.boards) {
+  const p = clampPos(x, z, w, d, boards);
   if (!snapOn()) return p;
-  return clampPos(gridSnap(p.x, w), gridSnap(p.z, d), w, d);
+  return clampPos(gridSnap(p.x, w), gridSnap(p.z, d), w, d, boards);
 }
 // keep a piece on the boards: its middle must be on one; if it's off them all, pull it onto the nearest
-function clampPos(x, z, w = 1, d = 1) {
-  if (boardAt(x, z)) return { x, z };
+function clampPos(x, z, w = 1, d = 1, boards = state.boards) {
+  if (boardAt(x, z, boards)) return { x, z };
   let best = null, bd = Infinity;
-  for (const b of state.boards) {
+  for (const b of boards.length ? boards : state.boards) {
     const hw = Math.min(w, b.cols) / 2, hd = Math.min(d, b.rows) / 2;
     const cx = Math.max(b.x + hw, Math.min(b.x + b.cols - hw, x)), cz = Math.max(b.z + hd, Math.min(b.z + b.rows - hd, z));
     const dist = (cx - x) ** 2 + (cz - z) ** 2;
@@ -686,6 +842,7 @@ function buildBoard() {
   for (const b of state.boards) {
     const { cols, rows, grid } = b, cx = b.x + cols / 2, cz = b.z + rows / 2;
     const mat = new THREE.MeshStandardMaterial({ color: '#4d5b47', roughness: 0.95 });
+    if (b.hidden) { mat.transparent = true; mat.opacity = 0.45; }
     const src = state.maps[b.id];
     if (src) {
       let tex = mapTextures.get(b.id);
@@ -762,7 +919,7 @@ function kit(type) {
   }
   return tileKit[type];
 }
-function tilesChanged() { tilesDirty = true; }
+function tilesChanged() { tilesDirty = true; tilesVersion++; }
 function buildTiles() {
   tilesDirty = false;
   if (!tileGroup) { tileGroup = new THREE.Group(); scene.add(tileGroup); }
@@ -875,19 +1032,41 @@ function frameBoard() {
   controls.target.set(cx, 0, cz);
 }
 
-function labelSprite(text) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+function labelSprite(text, extra) {
+  const tags = extra?.tags?.join(' · ') || '', bar = extra?.hpMax > 0;
+  const H = 64 + (bar ? 22 : 0) + (tags ? 30 : 0);
+  const c = document.createElement('canvas'); c.width = 256; c.height = H;
   const g = c.getContext('2d');
   g.font = 'bold 30px system-ui, sans-serif';
-  const w = Math.min(248, g.measureText(text).width + 24);
+  let w = g.measureText(text).width + 24;
+  g.font = 'bold 20px system-ui, sans-serif';
+  if (tags) w = Math.max(w, g.measureText(tags).width + 20);
+  if (bar) w = Math.max(w, 150);
+  w = Math.min(248, w);
   g.fillStyle = 'rgba(10,12,16,0.75)';
-  g.beginPath(); g.roundRect((256 - w) / 2, 8, w, 48, 12); g.fill();
+  g.beginPath(); g.roundRect((256 - w) / 2, 8, w, H - 16, 12); g.fill();
   g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = 'bold 30px system-ui, sans-serif';
   g.fillText(text, 128, 33, 232);
+  let y = 56;
+  if (bar) {                                    // HP bar: green, yellow under half, red under a quarter
+    const k = Math.max(0, Math.min(1, (extra.hp ?? extra.hpMax) / extra.hpMax)), bw = w - 28;
+    g.fillStyle = '#2a2d33'; g.fillRect(128 - bw / 2, y, bw, 12);
+    g.fillStyle = k > 0.5 ? '#5cb85c' : k > 0.25 ? '#e0c04b' : '#d9534f'; g.fillRect(128 - bw / 2, y, bw * k, 12);
+    y += 22;
+  }
+  if (tags) { g.font = 'bold 20px system-ui, sans-serif'; g.fillStyle = '#ffd27a'; g.fillText(tags, 128, y + 8, 236); }
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  s.scale.set(2, 0.5, 1); s.renderOrder = 10;
+  s.scale.set(2, 2 * H / 256, 1); s.renderOrder = 10;
+  s.center.set(0.5, 32 / H);                    // keep the name line where it always was
   return s;
+}
+// what a mini's label shows besides its name
+function labelExtra(f) {
+  const st = f.st || {}, tags = [...(st.status || [])];
+  if (engaged.has(f.id)) tags.unshift('Engaged');
+  return { hp: st.hp, hpMax: st.hpMax, tags };
 }
 
 // flat rectangle outline (selection / "yours" marker) for a w x d footprint
@@ -940,15 +1119,16 @@ function buildBase(u, w, d, small) {
 
 function upsertFig(f, live) {
   state.figures[f.id] = f;
+  figsVersion++;
   let g = figMeshes.get(f.id);
   if (!g) { g = makeMini(f); figMeshes.set(f.id, g); figRoot.add(g); }
   const u = g.userData;
   if (dragging?.id !== f.id) { const c = fp(f); u.target.set(f.x, groundAt(f.x, f.z, c.w, c.d), f.z); }
   u.col.color.set(f.color);
-  const text = f.name + (f.hidden ? ' (hidden)' : '');
-  if (u.labelText !== text) {
+  const text = f.name + (f.hidden ? ' (hidden)' : ''), extra = labelExtra(f), key = text + JSON.stringify(extra);
+  if (u.labelText !== key) {
     g.remove(u.label); u.label.material.map.dispose(); u.label.material.dispose();
-    u.label = labelSprite(text); u.labelText = text; g.add(u.label);
+    u.label = labelSprite(text, extra); u.labelText = key; g.add(u.label);
   }
   const { w, d } = fp(f), small = f.size === '0.7' && w === 1 && d === 1;
   const baseKey = `${w}x${d}${small ? 's' : ''}`;
@@ -1022,10 +1202,90 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); }
+
+let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null;
+let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
+const ruleWorld = f => {                        // the same grid view the GM uses, from this browser's copy
+  const taken = new Set();
+  for (const o of Object.values(state.figures)) {
+    if (o.id === f.id || o.parent === f.id || o.id === f.parent) continue;
+    const c = fp(o);
+    for (const [i, j] of cellsOf(o.x, o.z, c.w, c.d)) taken.add(i + ',' + j);
+  }
+  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
+};
+const box = f => ({ x: f.x, z: f.z, ...fp(f) });
+function updateOverlays() {
+  const key = `${selectedId}|${figsVersion}|${tilesVersion}|${dragging ? dragging.id : ''}|${JSON.stringify(state.combat && [state.combat.turn, state.combat.dash])}|${state.rules.diag}|${hoverId}`;
+  if (key === overlayKey) return;
+  overlayKey = key;
+  // Engaged: a player's mini next to a GM mini (both with stats)
+  const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null);
+  const now = new Set();
+  for (const a of fighters) for (const b of fighters)
+    if (a !== b && !!a.owner !== !!b.owner && adjacent(box(a), box(b), state.rules.diag)) now.add(a.id);
+  const changed = [...now].some(id => !engaged.has(id)) || [...engaged].some(id => !now.has(id));
+  engaged = now;
+  if (changed) for (const f of Object.values(state.figures)) upsertFig(f, true);
+  // movement range of the picked mini (yours, or any for the GM) once it has a Dexterity
+  if (rangeMesh) { scene.remove(rangeMesh); rangeMesh.dispose(); rangeMesh = null; }
+  const f = selectedId && state.figures[selectedId];
+  if (f && f.st?.dex != null && canMove(f)) {
+    const c = state.combat, myTurn = c && c.order[c.turn]?.id === f.id;
+    const from = myTurn ? c.from : dragging?.id === f.id ? dragging.from : { x: f.x, z: f.z };
+    const budget = moveBudget(f) * (1 + (myTurn ? c.dash || 0 : 0));
+    const { w, d } = fp(f);
+    const cells = reachable(ruleWorld(f), from.x, from.z, w, d, budget, state.rules.diag);
+    rangeMesh = new THREE.InstancedMesh(rangeGeo, rangeMat, cells.size);
+    let n = 0;
+    for (const k of cells.keys()) {
+      const [x, z] = k.split(',').map(Number);
+      rangeMesh.setMatrixAt(n++, place(x, groundAt(x, z, w, d) + 0.012, z, w - 0.08, 1, d - 0.08));
+    }
+    rangeMesh.renderOrder = 2;
+    scene.add(rangeMesh);
+  }
+  // line of sight from the picked mini to the one under the mouse
+  if (losLine) { scene.remove(losLine); losLine.material.dispose(); losLine = null; }
+  if (losLabel) { scene.remove(losLabel); losLabel.material.map.dispose(); losLabel.material.dispose(); losLabel = null; }
+  const h = hoverId && hoverId !== selectedId && state.figures[hoverId];
+  if (f && h) {
+    const clear = lineOfSight(ruleWorld(f), f.x, f.z, h.x, h.z), dist = distance(box(f), box(h), state.rules.diag);
+    const y = 0.6;
+    // a thin rod from one mini to the other: green = in sight, red = blocked
+    const len = Math.hypot(h.x - f.x, h.z - f.z);
+    losLine = new THREE.Mesh(losGeo, new THREE.MeshBasicMaterial({ color: clear ? '#5cdc6c' : '#ff5a4f', depthTest: false, transparent: true, opacity: 0.9 }));
+    losLine.position.set((f.x + h.x) / 2, y, (f.z + h.z) / 2);
+    losLine.scale.set(1, len, 1);
+    losLine.rotation.set(0, Math.atan2(h.x - f.x, h.z - f.z), 0, 'YXZ'); losLine.rotateX(Math.PI / 2);
+    losLine.renderOrder = 11;
+    scene.add(losLine);
+    const adj = adjacent(box(f), box(h), state.rules.diag);
+    losLabel = labelSprite(`${adj ? 'Adjacent' : dist + ' sq'} · ${clear ? 'in sight' : 'blocked'}`);
+    losLabel.position.set((f.x + h.x) / 2, 1.0, (f.z + h.z) / 2);
+    scene.add(losLabel);
+  }
+}
+const rangeGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const losGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
+const rangeMat = new THREE.MeshBasicMaterial({ color: '#4b9be0', transparent: true, opacity: 0.32, depthWrite: false });
 
 function tick() {
   animateDice(performance.now());
+  updateOverlays();
+  // a bobbing marker over whoever's turn it is
+  const cur = state.combat && figMeshes.get(state.combat.order[state.combat.turn]?.id);
+  if (cur) {
+    if (!turnMarker) {
+      turnMarker = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 16).rotateX(Math.PI), new THREE.MeshStandardMaterial({ color: '#ffd23f', emissive: '#7a5a00' }));
+      scene.add(turnMarker);
+    }
+    turnMarker.visible = true;
+    const lb = cur.userData.label, top = lb.position.y + lb.scale.y * (1 - lb.center.y);   // just above the name tag
+    turnMarker.position.set(cur.position.x, cur.position.y + top + 0.3 + Math.sin(performance.now() / 250) * 0.06, cur.position.z);
+    turnMarker.rotation.y += 0.03;
+  } else if (turnMarker) turnMarker.visible = false;
   if (tilesDirty) buildTiles();
   for (const g of figMeshes.values()) {
     const t = g.userData.target;
@@ -1093,7 +1353,7 @@ function onDown(e) {
   if (!canMove(f)) return;
   e.stopPropagation();                          // the camera stays put while a mini is dragged
   const p = floorAt(e);
-  dragging = { id, dx: p ? f.x - p.x : 0, dz: p ? f.z - p.z : 0, moved: false };
+  dragging = { id, dx: p ? f.x - p.x : 0, dz: p ? f.z - p.z : 0, moved: false, from: { x: f.x, z: f.z } };
   figMeshes.get(id).userData.target.y += 0.35;  // lift it a little while held
 }
 
@@ -1106,11 +1366,15 @@ function onMove(e) {
     if (x !== b.x || z !== b.z) act({ t: 'boardMove', id: b.id, x, z });
     return;
   }
-  if (!dragging) return;
+  if (!dragging) {
+    if (e.target === renderer?.domElement) { const h = figAt(e); if (h !== hoverId) hoverId = h; }
+    return;
+  }
   const p = floorAt(e);
   if (!p) return;
   const f = state.figures[dragging.id];
-  const c = fp(f), pos = clampPos(p.x + dragging.dx, p.z + dragging.dz, c.w, c.d);
+  // players may step off the edge onto a hidden area; the GM decides where they end up
+  const c = fp(f), pos = isHost ? clampPos(p.x + dragging.dx, p.z + dragging.dz, c.w, c.d) : { x: p.x + dragging.dx, z: p.z + dragging.dz };
   dragging.moved = true;
   figMeshes.get(dragging.id).userData.target.set(pos.x, groundAt(pos.x, pos.z, c.w, c.d) + 0.35, pos.z);
   const now = performance.now();
@@ -1129,7 +1393,9 @@ function onUp(e) {
   if (!g) return;
   const t = g.userData.target;
   const f = state.figures[d.id];
-  const c = fp(f), pos = snapOn() ? snapPos(t.x, t.z, c.w, c.d) : clampPos(t.x, t.z, c.w, c.d);
+  const c = fp(f);
+  const pos = isHost ? (snapOn() ? snapPos(t.x, t.z, c.w, c.d) : clampPos(t.x, t.z, c.w, c.d))
+    : (snapOn() ? { x: gridSnap(t.x, c.w), z: gridSnap(t.z, c.d) } : { x: t.x, z: t.z });
   t.set(pos.x, groundAt(pos.x, pos.z, c.w, c.d), pos.z);
   if (d.moved) act({ t: 'move', id: d.id, x: pos.x, z: pos.z, snap: snapOn(), done: true });
 }
@@ -1163,6 +1429,15 @@ function showSelected() {
   $('selCustom').style.display = preset ? 'none' : 'flex';
   if (document.activeElement !== $('selW')) $('selW').value = c.w;
   if (document.activeElement !== $('selD')) $('selD').value = c.d;
+  const st = f.st || {};
+  for (const k of ['dex', 'alert', 'hp', 'hpMax']) if (document.activeElement !== $('st_' + k)) $('st_' + k).value = st[k] ?? '';
+  $('stMove').textContent = st.dex != null ? `Moves ${moveBudget(f)} squares a turn (2 + Dexterity${(st.status || []).includes('Immobilized') ? ', Immobilized' : ''}).` : 'Set Dexterity to see how far it can move.';
+  const chips = $('stChips'); chips.innerHTML = '';
+  for (const x of st.status || []) {
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = x + ' ×'; b.title = 'Remove';
+    b.onclick = () => act({ t: 'stats', id: f.id, status: (f.st?.status || []).filter(y => y !== x) });
+    chips.appendChild(b);
+  }
   if (isHost) {
     const sm = $('selModel'); sm.innerHTML = '<option value="">Pawn (no model)</option>';
     for (const [id, m] of Object.entries(state.models)) { const o = document.createElement('option'); o.value = id; o.textContent = m.name; sm.appendChild(o); }
@@ -1221,9 +1496,44 @@ function updateBoardInputs() {
   if (document.activeElement !== $('rows')) $('rows').value = b.rows;
   $('gridOn').checked = b.grid;
   $('delBoard').disabled = state.boards.length < 2;
+  renderRules();
 }
 function pickBoard(id) { selBoard = id; updateBoardInputs(); buildBoard(); }
 const curBoard = () => state.boards.find(x => x.id === selBoard) || state.boards[0];
+
+function renderCombat() {
+  const c = state.combat;
+  $('combatSec').style.display = c ? 'block' : 'none';
+  if (isHost) { $('combatStart').style.display = c ? 'none' : ''; $('combatEndBtn').style.display = c ? '' : 'none'; }
+  if (!c) return;
+  $('combatRound').textContent = `Round ${c.round}`;
+  const list = $('turnList'); list.innerHTML = '';
+  c.order.forEach((o, n) => {
+    const f = state.figures[o.id];
+    if (!f) return;
+    const d = document.createElement('div');
+    d.className = 'turn' + (n === c.turn ? ' now' : '');
+    d.innerHTML = '<span class="dot"></span><span class="nm"></span><span class="ini"></span>';
+    d.children[0].style.background = f.color;
+    d.children[1].textContent = f.name + (f.st?.hpMax ? `  ${f.st.hp ?? f.st.hpMax}/${f.st.hpMax} HP` : '');
+    d.children[2].textContent = o.init;
+    d.onclick = () => { select(canMove(f) ? f.id : null); controls.target.set(f.x, 0, f.z); };
+    list.appendChild(d);
+  });
+  const cur = state.figures[c.order[c.turn]?.id], mine = cur && (isHost || cur.owner === clientId);
+  $('turnBtns').style.display = mine ? 'flex' : 'none';
+  $('turnWho').textContent = cur ? (cur.owner === clientId ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ` · dashed ×${c.dash}` : '') : "The GM's turn";
+}
+
+function renderRules() {
+  if (!isHost) return;
+  $('ruleDiag').value = state.rules.diag;
+  $('ruleLimit').checked = state.rules.limit;
+  $('ruleReveal').checked = state.rules.autoReveal;
+  $('explored').textContent = state.explored;
+  const b = curBoard();
+  $('hideBoard').textContent = b?.hidden ? 'Show to players' : 'Hide from players';
+}
 
 function status(t) { $('status').textContent = t; $('status').style.display = t ? 'block' : 'none'; }
 function lobbyMsg(t) { $('lobbyMsg').textContent = t; }
@@ -1345,6 +1655,25 @@ function wirePanel() {
   };
   $('clearTiles').onclick = () => { if (confirm('Remove all terrain?')) act({ t: 'tiles', set: {}, clear: true }); };
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
+  for (const k of ['dex', 'alert', 'hp', 'hpMax']) $('st_' + k).onchange = () => selectedId && act({ t: 'stats', id: selectedId, [k]: $('st_' + k).value });
+  for (const x of STATUSES) { const o = document.createElement('option'); o.value = o.textContent = x; $('stStatus').appendChild(o); }
+  $('stAdd').onclick = () => {
+    const f = selectedId && state.figures[selectedId], x = $('stStatus').value;
+    if (f && x) act({ t: 'stats', id: f.id, status: [...(f.st?.status || []), x] });
+    $('stStatus').value = '';
+  };
+  $('hpDown').onclick = () => { const f = state.figures[selectedId]; if (f?.st?.hpMax) act({ t: 'stats', id: f.id, hp: Math.max(0, (f.st.hp ?? f.st.hpMax) - 1) }); };
+  $('hpUp').onclick = () => { const f = state.figures[selectedId]; if (f?.st?.hpMax) act({ t: 'stats', id: f.id, hp: Math.min(f.st.hpMax, (f.st.hp ?? f.st.hpMax) + 1) }); };
+  $('turnEnd').onclick = () => act({ t: 'combatNext' });
+  $('turnDash').onclick = () => act({ t: 'combatDash' });
+  $('combatStart').onclick = () => act({ t: 'combatStart' });
+  $('combatEndBtn').onclick = () => { if (confirm('End combat?')) act({ t: 'combatEnd' }); };
+  $('ruleDiag').onchange = () => act({ t: 'rules', diag: $('ruleDiag').value });
+  $('ruleLimit').onchange = () => act({ t: 'rules', limit: $('ruleLimit').checked });
+  $('ruleReveal').onchange = () => act({ t: 'rules', autoReveal: $('ruleReveal').checked });
+  $('eventRoll').onclick = () => act({ t: 'dungeonEvent' });
+  $('hideBoard').onclick = () => { const b = curBoard(); act({ t: 'boardHide', id: b.id, hidden: !b.hidden }); };
+  $('addHiddenBoard').onclick = () => { const b = curBoard(); const id = handle({ t: 'boardAdd', cols: b.cols, rows: b.rows, hidden: true }, clientId); if (id) pickBoard(id); };
 
   $('addFig').onclick = () => {
     const t = controls.target;
@@ -1403,5 +1732,6 @@ $('codeIn').onkeydown = e => { if (e.key === 'Enter') $('joinBtn').click(); };
 $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('joinBtn') : $('createBtn')).click(); };
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; },
+window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
+  hover(id) { hoverId = id; },
   async addModel(data, name, figId) { act({ t: 'model', id: await modelId(data), name, data, figId }); } };

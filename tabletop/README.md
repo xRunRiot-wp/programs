@@ -27,6 +27,9 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | Boards: add more, size, map picture, grid lines, drag them together | | yes |
 | 3D models (.glb) for minis | | yes |
 | Physics dice (d4 to d100, "only me" rolls) and chat | yes | yes |
+| Stats on a mini (Dexterity, Alert, HP, statuses) | their own | all |
+| Combat: roll initiative, next turn, end combat | end own turn, Dash | yes |
+| Hide areas, dungeon event roll, rules settings | | yes |
 
 ## Controls
 
@@ -34,6 +37,33 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 - Right-click a mini to turn it.
 - Right-drag to rotate the view, drag empty space to pan, scroll to zoom.
 - GM: select a mini and press **Delete** to remove it.
+
+## Dungeon play (PokéRole-style grid rules)
+
+**Stats.** Pick a mini and fill in Dexterity, Alert, HP and Max HP, and add statuses (Burn, Paralysis,
+Immobilized, Slowed, Sped Up...). The name tag shows an HP bar and the statuses.
+
+**Movement range.** A picked mini with a Dexterity lights up the squares it can reach: 2 + Dexterity squares.
+Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, fences, rocks, trees and pits
+block; you can't slip diagonally past a wall corner; you can pass other minis but not stop on them.
+Immobilized means 0. Diagonals count as 1 square (or 1-2-1, or not at all: **Rules & dungeon**).
+
+**Combat.** The GM clicks **Start combat**: everyone with stats rolls initiative (1d6 + Dexterity + Alert);
+Sped Up goes first and Slowed last. The **Turn order** list and a gold marker show whose turn it is.
+On your turn: move, take your action, **End turn**. **Dash** adds another move's worth of squares.
+When the order comes round again the log reminds everyone that Burn, Poison and weather happen.
+With **Limit moves in combat** (on unless the GM turns it off) a player can only move on their own turn and
+only within range; a move that's too far snaps back.
+
+**Engaged** shows on the name tags when a player's mini stands next to a GM mini.
+
+**Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
+(walls, thin walls, hedges, doors and trees block the view), with the distance in squares.
+
+**Exploring.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
+(nor anything on it). When a player steps onto it, it's revealed. Every 2 new areas the GM is reminded
+to **Roll dungeon event** (1d6: trap or hazard, enemy team, treasure, guild challenge, safe passage,
+mission clue); only the GM sees that roll.
 
 ## Boards
 
@@ -72,5 +102,5 @@ Blender, Sketchfab and most free mini packs can export .glb.
 
 ## Putting it on another website
 
-It's three static files (`index.html`, `tabletop.js` and `dice.js`) with no build step. Copy them to any web host
+It's four static files (`index.html`, `tabletop.js`, `dice.js` and `rules.js`) with no build step. Copy them to any web host
 (it needs https). Three.js, cannon-es (dice physics) and PeerJS load from unpkg.

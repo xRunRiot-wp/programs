@@ -16,6 +16,6 @@ of this repo.
 | [Biome Compass](biome-compass/) | Minecraft mod: Nature's Compass-style biome finder where you unlock biomes by visiting them, with shared compass groups and a Curios slot | Release `biome-compass-v1.8.1` |
 | [Legendary Clock](legendary-clock/) | Pixelmon add-on mod: countdown to the next legendary and mega boss spawn try, the time of day it will be then, movable on-screen timer and a Curios slot | Release `legendary-clock-v1.1` |
 | [Forage Station](forage-station/) | Pixelmon add-on mod: a block that holds a Pokémon from your party or PC and forages the biome on its own (Pixelmon's Forage items, faster with Speed), hopper-friendly storage | Release `forage-station-v1` |
-| [Tabletop](tabletop/) | Browser tabletop: grid board with 3D minis, GM hosts and players join with a code; players move only their own mini, GM controls everything; physics dice, terrain tiles, attachable any-size pieces, chat, map pictures, .glb models | [Play in the browser](https://xrunriot-wp.github.io/programs/tabletop/) |
+| [Tabletop](tabletop/) | Browser tabletop: grid board with 3D minis, GM hosts and players join with a code; players move only their own mini, GM controls everything; physics dice, terrain, joinable boards, attachable any-size pieces, stats/movement range/initiative/line of sight/hidden areas for dungeon play, chat, map pictures, .glb models | [Play in the browser](https://xrunriot-wp.github.io/programs/tabletop/) |
 
 The first four are Windows programs; Schedule Helper is a Chrome/Edge extension (no install, no .exe).
