@@ -77,6 +77,10 @@ if (!clientId) { clientId = rid(12); store.set('tabletop.clientId', clientId); }
 
 // ---------- game state (the host's copy is the real one) ----------
 let isHost = false, myName = '', roomCode = '', hostId = '';
+// GM only: "see what players see". null = normal GM view; { as: clientId or '' } = looking as a player
+let preview = null;
+const gmView = () => isHost && !preview;
+const viewerId = () => (preview ? preview.as : clientId);
 let state = freshState();
 function freshState() {
   // boards: each is a rectangle of squares on one shared grid; (x, z) = its top-left corner
@@ -840,6 +844,7 @@ function buildBoard() {
   boardGroup.clear();
   const slabMat = new THREE.MeshStandardMaterial({ color: '#3b2a1c', roughness: 0.8 });
   for (const b of state.boards) {
+    if (b.hidden && isHost && !gmView()) continue;
     const { cols, rows, grid } = b, cx = b.x + cols / 2, cz = b.z + rows / 2;
     const mat = new THREE.MeshStandardMaterial({ color: '#4d5b47', roughness: 0.95 });
     if (b.hidden) { mat.transparent = true; mat.opacity = 0.45; }
@@ -873,7 +878,7 @@ function buildBoard() {
       lines.position.y = 0.003;
       boardGroup.add(lines);
     }
-    if (isHost && b.id === selBoard && state.boards.length > 1) {      // outline the board being edited
+    if (gmView() && b.id === selBoard && state.boards.length > 1) {      // outline the board being edited
       const o = frame(cols + 0.3, rows + 0.3, 0.12, '#e0a64b', 0.9);
       o.position.set(cx, 0.006, cz);
       boardGroup.add(o);
@@ -928,6 +933,7 @@ function buildTiles() {
   const byType = {}, parts = new Map();
   const mtx = new THREE.Matrix4();
   for (const [k, t] of Object.entries(state.tiles)) {
+    if (isHost && !gmView() && !tileVisible(k)) continue;
     if (!TILES[t].piece) { (byType[t] ||= []).push(k); continue; }
     const [i, j] = k.split(',').map(Number);
     const near = (di, dj) => linked(t, state.tiles[(i + di) + ',' + (j + dj)]);
@@ -1144,7 +1150,8 @@ function upsertFig(f, live) {
   const sc = small ? 0.7 : Math.min(w, d);
   u.pawn.scale.setScalar(sc);
   u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
-  u.mine.visible = f.owner === clientId;
+  u.mine.visible = !!viewerId() && f.owner === viewerId();
+  g.visible = !isHost || gmView() || figVisible(f);
   u.ring.visible = selectedId === f.id;
   for (const m of [u.col, u.dark]) { m.transparent = !!f.hidden; m.opacity = f.hidden ? 0.4 : 1; }
   if (selectedId === f.id && !live) showSelected();
@@ -1217,11 +1224,11 @@ const ruleWorld = f => {                        // the same grid view the GM use
 };
 const box = f => ({ x: f.x, z: f.z, ...fp(f) });
 function updateOverlays() {
-  const key = `${selectedId}|${figsVersion}|${tilesVersion}|${dragging ? dragging.id : ''}|${JSON.stringify(state.combat && [state.combat.turn, state.combat.dash])}|${state.rules.diag}|${hoverId}`;
+  const key = `${preview ? 'p' + preview.as : 'g'}|${selectedId}|${figsVersion}|${tilesVersion}|${dragging ? dragging.id : ''}|${JSON.stringify(state.combat && [state.combat.turn, state.combat.dash])}|${state.rules.diag}|${hoverId}`;
   if (key === overlayKey) return;
   overlayKey = key;
   // Engaged: a player's mini next to a GM mini (both with stats)
-  const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null);
+  const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null && (!isHost || gmView() || figVisible(f)));
   const now = new Set();
   for (const a of fighters) for (const b of fighters)
     if (a !== b && !!a.owner !== !!b.owner && adjacent(box(a), box(b), state.rules.diag)) now.add(a.id);
@@ -1275,7 +1282,8 @@ function tick() {
   animateDice(performance.now());
   updateOverlays();
   // a bobbing marker over whoever's turn it is
-  const cur = state.combat && figMeshes.get(state.combat.order[state.combat.turn]?.id);
+  const shownCombat = isHost && !gmView() ? combatView() : state.combat;
+  const cur = shownCombat && figMeshes.get(shownCombat.order[shownCombat.turn]?.id);
   if (cur) {
     if (!turnMarker) {
       turnMarker = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 16).rotateX(Math.PI), new THREE.MeshStandardMaterial({ color: '#ffd23f', emissive: '#7a5a00' }));
@@ -1303,17 +1311,19 @@ function ndc(e) {
 }
 function figAt(e) {
   raycaster.setFromCamera(ndc(e), camera);
-  const hit = raycaster.intersectObjects(figRoot.children, true)[0];
-  let o = hit?.object;
-  while (o && !o.userData.id) o = o.parent;
-  return o?.userData.id || null;
+  for (const hit of raycaster.intersectObjects(figRoot.children, true)) {
+    let o = hit.object;
+    while (o && !o.userData.id) o = o.parent;
+    if (o?.visible) return o.userData.id;      // minis hidden in player view can't be picked
+  }
+  return null;
 }
 function floorAt(e) {
   raycaster.setFromCamera(ndc(e), camera);
   const p = new THREE.Vector3();
   return raycaster.ray.intersectPlane(floor, p) ? p : null;
 }
-const canMove = f => f && (isHost || f.owner === clientId);
+const canMove = f => f && (gmView() || (!isHost && f.owner === clientId));
 
 let painting = false, paintMode = false, paintType = 'stone', attachFor = null;
 let moveBoards = false, boardDrag = null, selBoard = 'b1';
@@ -1478,7 +1488,7 @@ function renderLogEntry(e) {
   while (el.children.length > 200) el.firstChild.remove();
   if (atEnd) el.scrollTop = el.scrollHeight;
 }
-function renderLog() { $('log').innerHTML = ''; state.log.forEach(renderLogEntry); }
+function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !isHost || gmView() || e.to === viewerId()).forEach(renderLogEntry); }
 
 function updateBoardInputs() {
   if (!isHost || !$('boardList')) return;
@@ -1502,7 +1512,7 @@ function pickBoard(id) { selBoard = id; updateBoardInputs(); buildBoard(); }
 const curBoard = () => state.boards.find(x => x.id === selBoard) || state.boards[0];
 
 function renderCombat() {
-  const c = state.combat;
+  const c = isHost && !gmView() ? combatView() : state.combat;
   $('combatSec').style.display = c ? 'block' : 'none';
   if (isHost) { $('combatStart').style.display = c ? 'none' : ''; $('combatEndBtn').style.display = c ? '' : 'none'; }
   if (!c) return;
@@ -1520,7 +1530,7 @@ function renderCombat() {
     d.onclick = () => { select(canMove(f) ? f.id : null); controls.target.set(f.x, 0, f.z); };
     list.appendChild(d);
   });
-  const cur = state.figures[c.order[c.turn]?.id], mine = cur && (isHost || cur.owner === clientId);
+  const cur = state.figures[c.order[c.turn]?.id], mine = cur && (gmView() || (!isHost && cur.owner === clientId));
   $('turnBtns').style.display = mine ? 'flex' : 'none';
   $('turnWho').textContent = cur ? (cur.owner === clientId ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ` · dashed ×${c.dash}` : '') : "The GM's turn";
 }
@@ -1533,6 +1543,18 @@ function renderRules() {
   $('explored').textContent = state.explored;
   const b = curBoard();
   $('hideBoard').textContent = b?.hidden ? 'Show to players' : 'Hide from players';
+}
+
+function setPreview(on, as = '') {
+  preview = on ? { as } : null;
+  document.body.classList.toggle('gm', gmView());
+  document.body.classList.toggle('previewing', !!preview);
+  select(null);
+  $('previewAs').innerHTML = '<option value="">Any player</option>';
+  for (const [cid, p] of Object.entries(state.players)) if (cid !== state.gm) { const o = document.createElement('option'); o.value = cid; o.textContent = p.name; $('previewAs').appendChild(o); }
+  $('previewAs').value = as;
+  overlayKey = '';
+  rebuildAll();
 }
 
 function status(t) { $('status').textContent = t; $('status').style.display = t ? 'block' : 'none'; }
@@ -1655,6 +1677,9 @@ function wirePanel() {
   };
   $('clearTiles').onclick = () => { if (confirm('Remove all terrain?')) act({ t: 'tiles', set: {}, clear: true }); };
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
+  $('previewBtn').onclick = () => setPreview(true);
+  $('previewBack').onclick = () => setPreview(false);
+  $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
   for (const k of ['dex', 'alert', 'hp', 'hpMax']) $('st_' + k).onchange = () => selectedId && act({ t: 'stats', id: selectedId, [k]: $('st_' + k).value });
   for (const x of STATUSES) { const o = document.createElement('option'); o.value = o.textContent = x; $('stStatus').appendChild(o); }
   $('stAdd').onclick = () => {

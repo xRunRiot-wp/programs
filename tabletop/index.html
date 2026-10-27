@@ -73,6 +73,12 @@
   #tileTypes button { padding: 4px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
   #tileTypes button i { width: 26px; height: 14px; border-radius: 3px; display: block; border: 1px solid #0006; }
   #tileTypes button.on, #paintBtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  #previewBar { display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4;
+    background: #2a2414; border: 1px solid var(--accent); border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center;
+    flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
+  body.previewing #previewBar { display: flex; }
+  body.previewing #view { right: 300px; }
+  @media (max-width: 700px) { body.previewing #view { right: 0; } }
   #toggleSide { display: none; position: absolute; right: 10px; top: 10px; z-index: 3; }
 
   @media (max-width: 700px) {
@@ -107,6 +113,11 @@
   <div id="status"></div>
   <div id="hint">Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom</div>
   <button id="toggleSide">Menu</button>
+  <div id="previewBar">
+    <span>👁 Player view: this is what players see.</span>
+    <label style="margin:0;color:inherit">Looking as <select id="previewAs"></select></label>
+    <button id="previewBack" class="primary">Back to GM view</button>
+  </div>
   <aside id="side">
     <section>
       <div id="roomLine">
@@ -114,6 +125,7 @@
         <button id="copyLink" class="fit">Copy invite link</button>
       </div>
       <div id="whoAmI" style="color:var(--dim);font-size:12px;margin-top:4px"></div>
+      <button id="previewBtn" class="gm-only" style="width:100%;margin-top:8px">👁 See what players see</button>
     </section>
 
     <section id="selSec" style="display:none">

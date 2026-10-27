@@ -31,6 +31,12 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | Combat: roll initiative, next turn, end combat | end own turn, Dash | yes |
 | Hide areas, dungeon event roll, rules settings | | yes |
 
+## Player view (GM)
+
+**See what players see** (under the room code) switches the GM's screen to a player's view: hidden minis,
+hidden areas and everything on them, GM-only log lines and the GM menus disappear. **Looking as** picks a
+player, so their own mini gets its white ring. **Back to GM view** returns. Nothing can be moved while looking.
+
 ## Controls
 
 - Drag a mini to move it (it snaps to the squares; turn **Snap to squares** off for free placement).
