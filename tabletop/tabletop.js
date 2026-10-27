@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=29';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=29';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=30';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=30';
 
-const VERSION = 29;                              // raised by bump.py on every publish
+const VERSION = 30;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -345,7 +345,7 @@ function handle(msg, from) {
       Object.assign(f, msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards));
       if (msg.done && (limited || exploring)) {   // only as far as this turn's movement allows
         const o = limited ? state.combat.from : state.party.from[f.id];
-        const budget = moveBudget(f) * (1 + (limited ? state.combat.dash || 0 : state.party.dash[f.id] ? 1 : 0));
+        const budget = moveBudget(f) * (1 + (limited ? state.combat.dash || 0 : state.party.dash[f.id] ? 1 : 0)) - (o.used || 0);
         if (!reachable(worldFor(f), o.x, o.z, w, d, budget, state.rules.diag).has(`${f.x},${f.z}`)) {
           const taken = cellsOf(f.x, f.z, w, d).some(([i, j]) => worldFor(f).occupied(i, j));
           Object.assign(f, f._from);
@@ -376,7 +376,15 @@ function handle(msg, from) {
       }
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
-      if (msg.done && f.owner && state.rules.autoReveal) revealNextTo(f);
+      if (msg.done && f.owner && state.rules.autoReveal) {
+        // revealing an area locks in the movement spent so far: walking back doesn't hand it out again
+        const o = (limited || exploring) && (limited ? state.combat.from : state.party.from[f.id]);
+        const spent = o && reachable(worldFor(f), o.x, o.z, w, d, Infinity, state.rules.diag).get(`${f.x},${f.z}`);
+        if (revealNextTo(f) && spent) {
+          const now = { x: f.x, z: f.z, used: (o.used || 0) + spent };
+          if (limited) { state.combat.from = now; pushCombat(); } else { state.party.from[f.id] = now; pushParty(); }
+        }
+      }
       if (msg.done) save();
       break;
     }
@@ -423,7 +431,7 @@ function handle(msg, from) {
       if (msg.t === 'combatDash') {
         if (c.dash) {                           // undo: only while still inside the normal move
           const k = fp(cur);
-          if (!reachable(worldFor(cur), c.from.x, c.from.z, k.w, k.d, moveBudget(cur), state.rules.diag).has(`${cur.x},${cur.z}`)) {
+          if (!reachable(worldFor(cur), c.from.x, c.from.z, k.w, k.d, moveBudget(cur) - (c.from.used || 0), state.rules.diag).has(`${cur.x},${cur.z}`)) {
             note(from, `${cur.name} has already moved further than a normal move, so the Dash stays.`); return;
           }
           c.dash = 0;
@@ -488,7 +496,7 @@ function handle(msg, from) {
       const P = state.party, k = fp(f);
       if (P.dash[f.id]) {
         const o = P.from[f.id] || { x: f.x, z: f.z };
-        if (!reachable(worldFor(f), o.x, o.z, k.w, k.d, moveBudget(f), state.rules.diag).has(`${f.x},${f.z}`)) {
+        if (!reachable(worldFor(f), o.x, o.z, k.w, k.d, moveBudget(f) - (o.used || 0), state.rules.diag).has(`${f.x},${f.z}`)) {
           note(from, `${f.name} has already moved further than a normal move, so the Dash stays.`); return;
         }
         delete P.dash[f.id];
@@ -919,12 +927,14 @@ function revealBoard(b) {
 // so a room walled all round with one gap or Door has a one-square entrance
 function revealNextTo(f) {
   const { w, d } = fp(f);
+  let any = false;
   for (const [i, j] of cellsOf(f.x, f.z, w, d)) {
     for (const [a, c] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
       const b = boardAt(a + 0.5, c + 0.5);
-      if (b?.hidden && !BLOCKS_MOVE.has(state.tiles[a + ',' + c]) && !edgeWall(i, j, a, c)) revealBoard(b);
+      if (b?.hidden && !BLOCKS_MOVE.has(state.tiles[a + ',' + c]) && !edgeWall(i, j, a, c)) { revealBoard(b); any = true; }
     }
   }
+  return any;
 }
 
 function turnOne(f, deg) {
@@ -1619,7 +1629,7 @@ function updateOverlays() {
   if (f && (f.st?.dex != null || fighting) && (canMove(f) || (preview && f.owner === preview.as))) {
     const c = state.combat, myTurn = c && c.order[c.turn]?.id === f.id, P = state.party, party = !c && f.owner;
     const from = myTurn ? c.from : party && P.from[f.id] ? P.from[f.id] : dragging?.id === f.id ? dragging.from : { x: f.x, z: f.z };
-    const budget = moveBudget(f) * (1 + (myTurn ? c.dash || 0 : party && P.dash[f.id] ? 1 : 0));
+    const budget = moveBudget(f) * (1 + (myTurn ? c.dash || 0 : party && P.dash[f.id] ? 1 : 0)) - (from.used || 0);
     const { w, d } = fp(f);
     const cells = reachable(ruleWorld(f), from.x, from.z, w, d, budget, state.rules.diag);
     rangeMesh = new THREE.InstancedMesh(rangeGeo, rangeMat, cells.size);

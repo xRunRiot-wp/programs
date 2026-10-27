@@ -115,6 +115,8 @@ and the minis and terrain on it move along. Minis can walk from one board onto t
 **Edge walls** (Rules & Dungeon, on by default): every board has a low wall all round its edge. Where two boards
 join, the wall has a one-square gap at the middle of the shared edge: the only way through. These walls block
 movement and line of sight like real walls, and a hidden area is revealed only through its gap.
+Revealing an area locks in the movement spent so far that turn: the rest of the move is counted from where the
+mini stands, with what's left, so walking back can't give it extra movement.
 Click a board's name to pick it for editing (it gets an outline).
 
 ## Terrain
