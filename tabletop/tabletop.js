@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=24';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=24';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=25';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=25';
 
-const VERSION = 24;                              // raised by bump.py on every publish
+const VERSION = 25;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -894,12 +894,16 @@ function carry(id, dx, dz, deg, around) {
   for (const c of Object.values(state.figures)) {
     if (c.parent !== id) continue;
     if (deg) {
-      const ox = c.x - around.x, oz = c.z - around.z;
-      c.x = around.x + ox * cos - oz * sin; c.z = around.z + ox * sin + oz * cos;
+      // turn around the parent, keeping the same number of squares away, then land on a square
+      const ox = c.x - around.x, oz = c.z - around.z, r = Math.max(Math.abs(ox), Math.abs(oz));
+      let nx = ox * cos - oz * sin, nz = ox * sin + oz * cos;
+      const m = Math.max(Math.abs(nx), Math.abs(nz));
+      if (m > 1e-6) { nx *= r / m; nz *= r / m; }
+      c.x = around.x + nx; c.z = around.z + nz;
       turnOne(c, deg);
     } else { c.x += dx; c.z += dz; }
     const k = fp(c);
-    Object.assign(c, clampPos(c.x, c.z, k.w, k.d));
+    Object.assign(c, deg ? snapPos(c.x, c.z, k.w, k.d) : clampPos(c.x, c.z, k.w, k.d));
     pushFig(c);
     carry(c.id, dx, dz, deg, around);
   }
