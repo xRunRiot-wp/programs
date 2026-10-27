@@ -74,10 +74,15 @@ only within range; a move that's too far snaps back.
 **Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
 (walls, thin walls, hedges, doors and trees block the view), with the distance in squares.
 
-**Exploring.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
-(nor anything on it). When a player steps onto it, it's revealed. Every 2 new areas the GM is reminded
-to **Roll dungeon event** (1d6: trap or hazard, enemy team, treasure, guild challenge, safe passage,
-mission clue); only the GM sees that roll.
+**Exploring = party turns.** Out of combat, all allies move and act in the same turn, each up to their range
+(and once each: **Dash** / **Undo dash**). When everyone is done the GM clicks **Next party turn**.
+
+**? markers.** The GM places **? Event** markers (Terrain > Props). When an ally steps on one, the dungeon event
+(1d6: trap or hazard, enemy team, treasure, guild challenge, safe passage, mission clue) is rolled, only the GM
+sees the result, and the marker disappears.
+
+**Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
+(nor anything on it). When a player steps onto it, it's revealed. The GM can also **Roll dungeon event** by hand.
 
 ## Boards
 
