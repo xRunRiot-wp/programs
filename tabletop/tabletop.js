@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=28';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=28';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=29';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=29';
 
-const VERSION = 28;                              // raised by bump.py on every publish
+const VERSION = 29;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1176,7 +1176,7 @@ function buildBoard() {
       for (let j = b.z; j < b.z + b.rows; j++) { add(b.x - 1, j, b.x, j, b.x, j + 0.5, 'z'); add(b.x + b.cols - 1, j, b.x + b.cols, j, b.x + b.cols, j + 0.5, 'z'); }
     }
     if (segs.size) {
-      const H = 0.45, T = 0.14;
+      const H = 0.45 / 4, T = 0.14;
       const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, H, T), new THREE.MeshStandardMaterial({ color: '#7a756e', roughness: 0.9 }), segs.size);
       const o = new THREE.Object3D();
       let n = 0;
