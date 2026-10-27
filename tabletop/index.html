@@ -78,6 +78,11 @@
   #gmTabs button { flex: 1 1 auto; padding: 6px 8px; font-size: 13px; }
   #gmTabs button.on { background: var(--accent); color: #1a1408; border-color: var(--accent); font-weight: 700; }
   body.gm:not(.previewing) section[data-tab]:not(.tabOn) { display: none !important; }
+  /* in the GM's Combat tab, players, dice and log sit on top (under the room box) */
+  body.gm:not(.previewing) #side { display: flex; flex-direction: column; }
+  body.gm:not(.previewing) #side > section { flex-shrink: 0; }
+  body.gm:not(.previewing) #side > section:first-child { order: -2; }
+  body.gm:not(.previewing) #side > section.tblSec { order: -1; }
   body.gm:not(.previewing) section.fold > .foldBody { display: block; }
   body.gm:not(.previewing) section.fold > h3 { cursor: default; }
   body.gm:not(.previewing) section.fold > h3::before { content: ''; }
@@ -209,7 +214,7 @@
         <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
       </div>
       <nav id="gmTabs" class="gm-only">
-        <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="boards">Boards</button><button data-tab="table">Table</button>
+        <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="boards">Boards</button>
       </nav>
     </section>
 
@@ -385,12 +390,12 @@
       </div>
     </section>
 
-    <section data-tab="table">
+    <section class="tblSec" data-tab="combat">
       <h3>Players</h3>
       <div id="players"></div>
     </section>
 
-    <section data-tab="table">
+    <section class="tblSec" data-tab="combat">
       <h3>Dice</h3>
       <div id="dice"></div>
       <div class="row" style="margin-top:6px">
@@ -401,7 +406,7 @@
       </div>
     </section>
 
-    <section data-tab="table">
+    <section class="tblSec" data-tab="combat">
       <h3>Log</h3>
       <div id="log"></div>
       <div class="row" style="margin-top:6px">
@@ -420,6 +425,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=33"></script>
+<script type="module" src="tabletop.js?v=34"></script>
 </body>
 </html>

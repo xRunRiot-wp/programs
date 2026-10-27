@@ -129,7 +129,7 @@ keeps a copy of any mini in the GM's **Saved minis** list (players never see it)
 Saved minis go in the labelled group typed above the list (e.g. "Floor 1 enemies"); **✎** renames one or moves it to
 another group. Click a group's name to open or close it.
 
-**The GM's panel** is split into tabs: **Minis**, **Combat**, **Terrain**, **Boards** and **Table** (players, dice, log).
+**The GM's panel** is split into tabs: **Minis**, **Combat** (players, dice and log on top, then exploring, combat and rules), **Terrain** and **Boards**.
 Players see the plain panel as before.
 
 **Saved boards** (Boards tab): give the picked board a name and a group and click **Save picked board**. It keeps the

@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=33';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=33';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=34';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=34';
 
-const VERSION = 33;                              // raised by bump.py on every publish
+const VERSION = 34;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2255,6 +2255,9 @@ function tick() {
     if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off < 0 ? 0.5 : 0);   // name tags one above the other (the back one higher)
   }
   controls.update();
+  // keep the near plane in step with the zoom, so thin layers (grid, terrain) don't flicker through each other from far away
+  const near = Math.max(0.05, camera.position.distanceTo(controls.target) * 0.03);
+  if (Math.abs(near - camera.near) > near * 0.05) { camera.near = near; camera.updateProjectionMatrix(); }
   renderer.render(scene, camera);
 }
 
@@ -2565,6 +2568,7 @@ function renderParty() {
 // the GM's panel tabs (remembered per browser)
 let gmTab = 'minis';
 function setTab(t) {
+  if (t === 'table') t = 'combat';               // Combat and Table are one tab now
   gmTab = t;
   for (const b of document.querySelectorAll('#gmTabs button')) b.classList.toggle('on', b.dataset.tab === t);
   for (const sec of document.querySelectorAll('section[data-tab]')) sec.classList.toggle('tabOn', sec.dataset.tab.split(' ').includes(t));
