@@ -89,3 +89,20 @@ export function adjacent(a, b, diag = 'one') {
   if (diag === 'none' && ox > -0.01 && oz > -0.01) return false;   // corner to corner
   return true;
 }
+
+// what each dungeon event means, for the GM's event card (PMD supplement v2.0, p.11-16)
+export const EVENT_INFO = {
+  1: { name: 'Trap or Hazard', text: 'A hindering or deadly trap. The players get the trap maneuvers: Detect (Insight + Alert: hidden 3 successes, well-hidden 5+; must detect before the others), Disarm (Smart + Logic: simple 3, complex 5+; failure triggers it), Avoid (Smart + Logic + Nature: simple 3, complex 5+; an avoided trap stays active), Resist Lures (pure Logic 1 success or pure Will 3).', tools: ['trap'] },
+  2: { name: 'Enemy Team', text: "A rival guild's team (or the natives) shows up. Threat level: low = 25%, medium = 50%, high = 75% bonus/penalty Guild Points. Max threat turns the mission into stopping them (at least B rank, can't be ignored). Each further 2 advances the Threat Counter; at 6 something disastrous happens.", tools: ['threat', 'combat'] },
+  3: { name: 'Treasure', text: 'A treasure destination is set: roll 2d6 for the direction and 1d6 for the distance (in tiles, reroll 5-6). On arrival roll 2d6 for what it is (loot rarity).', tools: ['direction', 'loot'] },
+  4: { name: 'Guild Challenge', text: 'A team from your own guild challenges you. Within one rank: declining costs 50% of the mission\'s Guild Points, otherwise 25%. Winning adds +5 (lower rank), +10 (same), +15 (one higher), +20 (two+ higher) plus the prize. Losing never costs more than the wager.', tools: [] },
+  5: { name: 'Safe Passage', text: 'Nothing happens: carry on as if no event was rolled.', tools: [] },
+  6: { name: 'Mission Objective', text: 'The party learns where a Clue toward the Dungeon Goal is: roll 2d6 for the direction and 1d6 for the distance (in tiles, reroll 5-6). At the clue: find the goal, the next clue in a chain, or get one step closer. Reach the Dungeon Goal to complete the mission.', tools: ['direction'] },
+};
+// 2d6 direction (the start is the south edge) and 1d6 distance rerolling 5-6
+export function directionFor(sum) { return [2, 3, 7].includes(sum) ? 'North' : [4, 10, 11, 12].includes(sum) ? 'South' : [5, 6].includes(sum) ? 'East' : 'West'; }
+// 2d6 (+ floor modifier) loot rarity
+export function lootFor(sum) {
+  return sum <= 2 ? 'Mundane' : sum <= 6 ? 'Common (up to 100 Poké)' : sum <= 8 ? 'Uncommon (up to 300)' : sum <= 10 ? 'Rare (up to 1,000, may be guarded)'
+    : sum === 11 ? 'Very Rare (up to 2,500, guarded)' : 'Motherlode (two Rare items + a TM, protected)';
+}

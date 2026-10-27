@@ -79,8 +79,11 @@ only within range; a move that's too far snaps back.
 
 **? markers.** The GM places **? Event** markers (Terrain > Props). A ? sits on its square like an object. When an
 ally stands next to it (sides or corners), an **Interact** button appears over it; clicking it is free (not an action;
-in combat only on that mini's turn). Then the dungeon event (1d6: trap or hazard, enemy team, treasure, guild
-challenge, safe passage, mission clue) is rolled, only the GM sees the result, and the marker disappears.
+in combat only on that mini's turn). The marker disappears and the GM gets **Throw the event d6**: a physics d6
+only the GM sees (1 trap or hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue).
+The **event card** then shows that event's rules with helper rolls: direction (2d6) + distance (1d6, reroll 5-6) for
+treasure and clues, loot rarity (2d6 + floor modifier), the Threat Counter and Start combat for enemy teams, and
+**Tell the players** to announce it.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
 (nor anything on it). When a player steps onto it, it's revealed. The GM can also **Roll dungeon event** by hand.

@@ -57,6 +57,13 @@
   #log .sys { color: var(--dim); font-style: italic; }
   #hint { position: absolute; left: 10px; bottom: 10px; color: var(--dim); font-size: 12px; background: #0009; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
   #status { position: absolute; left: 10px; top: 10px; background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 13px; display: none; }
+  .evwait { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; padding: 6px 8px;
+    background: #3a2f0a; border: 1px solid #ffd23f; border-radius: 8px; }
+  .evcard { margin-top: 8px; padding: 8px; background: #1a2230; border: 1px solid #4b9be0; border-radius: 8px; }
+  .evcard .evt { font-weight: 700; color: #ffd27a; margin-bottom: 4px; }
+  .evcard .evx { font-size: 12px; color: var(--text); line-height: 1.45; }
+  .evcard .evb { flex-wrap: wrap; margin-top: 6px; }
+  .evcard .evb > * { flex: 0 0 auto; font-size: 12px; padding: 4px 8px; }
   /* sections that open and close by clicking their title */
   section.fold > h3 { cursor: pointer; user-select: none; }
   section.fold > h3::before { content: '▸ '; color: var(--dim); }
@@ -249,9 +256,10 @@
       <label style="color:var(--text)"><input id="ruleReveal" type="checkbox" checked> Reveal a hidden board when a player steps onto it</label>
       <div class="row" style="margin-top:8px">
         <span>Areas explored: <b id="explored">0</b></span>
-        <button id="eventRoll" class="fit" title="1d6: trap/hazard, enemy team, treasure, guild challenge, safe passage, mission clue">Roll dungeon event</button>
+        <button id="eventRoll" class="fit" title="Throw a hidden d6: 1 trap/hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue">Roll dungeon event</button>
       </div>
-      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Props): when an ally next to one clicks Interact, the event is rolled and only you see the result.</div>
+      <div id="eventBox"></div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Props). When an ally next to one clicks Interact, you get a hidden d6 to throw here; only you see it, then the event card shows the rules and helper rolls.</div>
     </section>
 
     <section class="gm-only fold" data-fold="terrain">
@@ -329,6 +337,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=16"></script>
+<script type="module" src="tabletop.js?v=18"></script>
 </body>
 </html>
