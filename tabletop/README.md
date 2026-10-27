@@ -128,7 +128,8 @@ square with the chosen tile, **Clear** removes all terrain. Turn **Paint** off t
 ## Attaching pieces
 
 Select a piece, click **Attach to…**, then click the piece it belongs on (a rider on a horse, a turret on a wagon).
-When the main piece moves or turns, everything attached comes along. **Detach** separates them again.
+When the main piece moves or turns, everything attached comes along, and attached minis all move at the slowest one's speed
+(minis with 0 movement don't count). **Detach** separates them again.
 
 ## Dice
 

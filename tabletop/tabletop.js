@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=26';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=26';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=27';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=27';
 
-const VERSION = 26;                              // raised by bump.py on every publish
+const VERSION = 27;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -858,7 +858,23 @@ function note(to, text) {
   if (to === state.gm) { status(text); setTimeout(() => status(''), 4000); }
   else sendAll({ t: 'note', text }, cid => cid === to);
 }
-const moveBudget = f => (f.st?.status || []).includes('Immobilized') ? 0 : (f.st?.move ?? (2 + (f.st?.dex || 0)));
+const ownMove = f => (f.st?.status || []).includes('Immobilized') ? 0 : (f.st?.move ?? (2 + (f.st?.dex || 0)));
+// minis attached to each other (riders, what they ride, and so on) all move at the slowest one's speed; 0s don't count
+function attachedGroup(f) {
+  const ids = new Set([f.id]);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const o of Object.values(state.figures)) {
+      if (ids.has(o.id)) { if (o.parent && state.figures[o.parent] && !ids.has(o.parent)) { ids.add(o.parent); changed = true; } }
+      else if (o.parent && ids.has(o.parent)) { ids.add(o.id); changed = true; }
+    }
+  }
+  return [...ids].map(id => state.figures[id]);
+}
+function moveBudget(f) {
+  const speeds = attachedGroup(f).map(ownMove).filter(v => v > 0);
+  return speeds.length ? Math.min(...speeds) : ownMove(f);
+}
 // the grid as one mini sees it: other minis' squares are taken (not its own, nor pieces riding on it)
 const isSmall = f => f.size === '0.7' && fp(f).w === 1 && fp(f).d === 1;
 // the grid as one mini sees it. A square is taken by any other mini, except that two Smalls may share one.
@@ -1803,7 +1819,7 @@ function showSelected() {
   if (document.activeElement !== $('selD')) $('selD').value = c.d;
   const st = f.st || {};
   for (const k of ['dex', 'alert', 'hp', 'hpMax']) if (document.activeElement !== $('st_' + k)) $('st_' + k).value = st[k] ?? '';
-  $('stMove').textContent = st.dex != null ? `Moves ${moveBudget(f)} squares a turn (2 + Dexterity${(st.status || []).includes('Immobilized') ? ', Immobilized' : ''}).` : 'Set Dexterity to see how far it can move.';
+  $('stMove').textContent = st.dex != null ? `Moves ${moveBudget(f)} squares a turn (${moveBudget(f) !== ownMove(f) ? 'the slowest of its attached minis' : '2 + Dexterity' + ((st.status || []).includes('Immobilized') ? ', Immobilized' : '')}).` : 'Set Dexterity to see how far it can move.';
   const chips = $('stChips'); chips.innerHTML = '';
   for (const x of st.status || []) {
     const b = document.createElement('button'); b.className = 'chip'; b.textContent = x + ' ×'; b.title = 'Remove';
