@@ -325,7 +325,7 @@ function handle(msg, from) {
       break;
     }
     case 'stats': {
-      if (!mayMove) return;
+      if (!gm || !f) return;                    // HP, statuses and stats are set by the GM
       const n = (v, hi = 99) => (v === '' || v == null || !isFinite(+v) ? undefined : Math.max(0, Math.min(hi, Math.round(+v))));
       const st = { ...(f.st || {}) };
       for (const k of ['dex', 'alert', 'hp', 'hpMax', 'move']) if (k in msg) st[k] = n(msg[k]);
@@ -355,9 +355,17 @@ function handle(msg, from) {
       const c = state.combat, cur = c && state.figures[c.order[c.turn]?.id];
       if (!c || !(gm || cur?.owner === from)) return;
       if (msg.t === 'combatDash') {
-        if (c.dash) { note(from, 'You can only Dash once a turn (it uses your action).'); return; }
-        c.dash = 1;
-        addLog({ kind: 'sys', text: `${cur?.name || '?'} dashes (an action spent on extra movement).` });
+        if (c.dash) {                           // undo: only while still inside the normal move
+          const k = fp(cur);
+          if (!reachable(worldFor(cur), c.from.x, c.from.z, k.w, k.d, moveBudget(cur), state.rules.diag).has(`${cur.x},${cur.z}`)) {
+            note(from, `${cur.name} has already moved further than a normal move, so the Dash stays.`); return;
+          }
+          c.dash = 0;
+          addLog({ kind: 'sys', text: `${cur.name} takes back the Dash.` });
+        } else {
+          c.dash = 1;
+          addLog({ kind: 'sys', text: `${cur?.name || '?'} dashes (an action spent on extra movement).` });
+        }
       } else {
         c.order = c.order.filter(o => state.figures[o.id]);
         if (!c.order.length) { state.combat = null; pushCombat(); return; }
@@ -398,6 +406,7 @@ function handle(msg, from) {
     }
     case 'edit': {
       if (!mayMove) return;
+      if (!gm) msg = { t: 'edit', id: msg.id, name: msg.name, color: msg.color, turn: msg.turn };   // players: looks only
       if (msg.name != null) f.name = clean(msg.name) || f.name;
       if (msg.color != null) f.color = okColor(msg.color);
       if (msg.size != null && SIZE_CELLS[msg.size]) { f.size = msg.size; f.w = f.d = SIZE_CELLS[msg.size]; }
@@ -1239,7 +1248,7 @@ function updateOverlays() {
   // movement range of the picked mini (yours, or any for the GM) once it has a Dexterity
   if (rangeMesh) { scene.remove(rangeMesh); rangeMesh.dispose(); rangeMesh = null; }
   const f = selectedId && state.figures[selectedId];
-  if (f && f.st?.dex != null && canMove(f)) {
+  if (f && f.st?.dex != null && (canMove(f) || (preview && f.owner === preview.as))) {
     const c = state.combat, myTurn = c && c.order[c.turn]?.id === f.id;
     const from = myTurn ? c.from : dragging?.id === f.id ? dragging.from : { x: f.x, z: f.z };
     const budget = moveBudget(f) * (1 + (myTurn ? c.dash || 0 : 0));
@@ -1360,7 +1369,7 @@ function onDown(e) {
   const id = figAt(e);
   if (!id) { select(null); return; }
   const f = state.figures[id];
-  select(canMove(f) ? id : null);
+  select(canMove(f) || (preview && preview.as && f.owner === preview.as) ? id : null);
   if (!canMove(f)) return;
   e.stopPropagation();                          // the camera stays put while a mini is dragged
   const p = floorAt(e);
@@ -1449,6 +1458,15 @@ function showSelected() {
     b.onclick = () => act({ t: 'stats', id: f.id, status: (f.st?.status || []).filter(y => y !== x) });
     chips.appendChild(b);
   }
+  // players change name, colour and facing; the GM everything; in player view nothing
+  const look = gmView() || (!isHost && f.owner === clientId), all = gmView();
+  for (const id of ['selName', 'selColor', 'selTurn']) $(id).disabled = !look;
+  $('selSizeBox').style.display = all ? '' : 'none';
+  if (!all) $('selCustom').style.display = 'none';
+  for (const id of ['st_dex', 'st_alert', 'st_hp', 'st_hpMax', 'hpDown', 'hpUp', 'stStatus', 'stAdd']) $(id).disabled = !all;
+  $('stEditRow').style.display = $('stStatusRow').style.display = all ? 'flex' : 'none';
+  for (const b of chips.children) b.disabled = !all;
+  if (!all) for (const b of chips.children) b.textContent = b.textContent.replace(' ×', '');
   if (isHost) {
     const sm = $('selModel'); sm.innerHTML = '<option value="">Pawn (no model)</option>';
     for (const [id, m] of Object.entries(state.models)) { const o = document.createElement('option'); o.value = id; o.textContent = m.name; sm.appendChild(o); }
@@ -1531,10 +1549,13 @@ function renderCombat() {
     d.onclick = () => { select(canMove(f) ? f.id : null); controls.target.set(f.x, 0, f.z); };
     list.appendChild(d);
   });
-  const cur = state.figures[c.order[c.turn]?.id], mine = cur && (gmView() || (!isHost && cur.owner === clientId));
+  const me = viewerId();
+  const cur = state.figures[c.order[c.turn]?.id], mine = cur && (gmView() || (!!me && cur.owner === me));
   $('turnBtns').style.display = mine ? 'flex' : 'none';
-  $('turnWho').textContent = cur ? (cur.owner === clientId ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ' · dashed (action used)' : '') : "The GM's turn";
-  $('turnDash').disabled = !!c.dash;
+  $('turnWho').textContent = cur ? (me && cur.owner === me ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ' · dashed (action used)' : '') : "The GM's turn";
+  $('turnDash').textContent = c.dash ? 'Undo dash' : 'Dash';
+  $('turnDash').title = c.dash ? 'Take the Dash back (only if you are still within your normal move)' : 'Spend your action on extra movement (once a turn)';
+  $('turnDash').disabled = $('turnEnd').disabled = !!preview;   // looking only
 }
 
 function renderRules() {

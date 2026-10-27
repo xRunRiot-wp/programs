@@ -19,7 +19,8 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | | Players | GM |
 |---|---|---|
 | Move minis | their own | all |
-| Rename, recolour, resize (any size, e.g. 1x4), turn | their own | all |
+| Rename, recolour, turn | their own | all |
+| Resize (any size, e.g. 1x4) | | yes |
 | Attach pieces to each other (they move and turn together) | | yes |
 | Paint terrain tiles (grass, stone, wood, water, lava, walls...) | | yes |
 | Add / delete minis, give a mini to a player | | yes |
@@ -27,7 +28,7 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | Boards: add more, size, map picture, grid lines, drag them together | | yes |
 | 3D models (.glb) for minis | | yes |
 | Physics dice (d4 to d100, "only me" rolls) and chat | yes | yes |
-| Stats on a mini (Dexterity, Alert, HP, statuses) | their own | all |
+| Stats on a mini (Dexterity, Alert, HP, statuses) | see their own | set them |
 | Combat: roll initiative, next turn, end combat | end own turn, Dash | yes |
 | Hide areas, dungeon event roll, rules settings | | yes |
 
@@ -46,8 +47,8 @@ player, so their own mini gets its white ring. **Back to GM view** returns. Noth
 
 ## Dungeon play (PokéRole-style grid rules)
 
-**Stats.** Pick a mini and fill in Dexterity, Alert, HP and Max HP, and add statuses (Burn, Paralysis,
-Immobilized, Slowed, Sped Up...). The name tag shows an HP bar and the statuses.
+**Stats.** The GM picks a mini and fills in Dexterity, Alert, HP and Max HP, and adds statuses (Burn, Paralysis,
+Immobilized, Slowed, Sped Up...). Players see their own mini's stats. The name tag shows an HP bar and the statuses.
 
 **Movement range.** A picked mini with a Dexterity lights up the squares it can reach: 2 + Dexterity squares.
 Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, fences, rocks, trees and pits
@@ -57,7 +58,7 @@ Immobilized means 0. A diagonal step counts as 1 square.
 **Combat.** The GM clicks **Start combat**: everyone with stats rolls initiative (1d6 + Dexterity + Alert);
 Sped Up goes first and Slowed last. The **Turn order** list and a gold marker show whose turn it is.
 On your turn: move, take your action, **End turn**. **Dash** spends your action on another move's
-worth of squares (once a turn).
+worth of squares (once a turn); press it again to take it back if you haven't gone past a normal move.
 When the order comes round again the log reminds everyone that Burn, Poison and weather happen.
 With **Limit moves in combat** (on unless the GM turns it off) a player can only move on their own turn and
 only within range; a move that's too far snaps back.

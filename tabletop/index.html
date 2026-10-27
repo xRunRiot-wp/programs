@@ -114,7 +114,7 @@
   <div id="hint">Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom</div>
   <button id="toggleSide">Menu</button>
   <div id="previewBar">
-    <span>👁 Player view: this is what players see.</span>
+    <span>👁 Player view: this is what players see (their buttons show here but don't work).</span>
     <label style="margin:0;color:inherit">Looking as <select id="previewAs"></select></label>
     <button id="previewBack" class="primary">Back to GM view</button>
   </div>
@@ -134,7 +134,7 @@
       <input id="selName" maxlength="24" style="width:100%">
       <div class="row">
         <div class="fit"><label>Colour</label><input id="selColor" type="color"></div>
-        <div><label>Size</label>
+        <div id="selSizeBox"><label>Size</label>
           <select id="selSize"><option value="0.7">Small</option><option value="1">Medium</option><option value="2">Large</option><option value="3">Huge</option><option value="custom">Any size…</option></select>
         </div>
         <button id="selTurn" class="fit" style="margin-top:20px" title="Turn 45°">Turn ↻</button>
@@ -146,11 +146,11 @@
           <div><label>HP</label><input id="st_hp" type="number" min="0" max="99"></div>
           <div><label>Max HP</label><input id="st_hpMax" type="number" min="0" max="99"></div>
         </div>
-        <div class="row" style="margin-top:6px">
+        <div id="stEditRow" class="row" style="margin-top:6px">
           <button id="hpDown" title="Lose 1 HP">−1 HP</button>
           <button id="hpUp" title="Heal 1 HP">+1 HP</button>
         </div>
-        <div class="row" style="margin-top:6px">
+        <div id="stStatusRow" class="row" style="margin-top:6px">
           <select id="stStatus"><option value="">Add a status…</option></select>
           <button id="stAdd" class="fit">Add</button>
         </div>
