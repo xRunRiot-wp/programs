@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=18';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=18';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=19';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=19';
 
-const VERSION = 18;                              // raised by bump.py on every publish
+const VERSION = 19;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -42,8 +42,18 @@ const TILES = {
   bridge: { name: 'Bridge', group: 'Paths', color: '#9a6b3f', h: 0.16, link: 'river', piece: 'bridge', planks: true },
   tree: { name: 'Tree', group: 'Props', color: '#2f6b2a', h: 0, piece: 'tree' },
   rock: { name: 'Rock', group: 'Props', color: '#7d7c78', h: 0.45, piece: 'rock' },
-  event: { name: '? Event', group: 'Props', color: '#ffd23f', h: 0, piece: 'event' },
+  event: { name: '? Event', group: 'Events', color: '#ffd23f', h: 0, piece: 'event' },
+  hiddenTrap: { name: 'Hidden trap', group: 'Events', color: '#c0392b', h: 0, piece: 'hiddenTrap' },
+  trap: { name: 'Trap', group: 'Events', color: '#4a4d52', h: 0.03, piece: 'trap' },
+  camp: { name: 'Enemy camp', group: 'Events', color: '#9b2d2d', h: 0, piece: 'camp' },
+  chest: { name: 'Treasure chest', group: 'Events', color: '#8a5a2b', h: 0, piece: 'chest' },
+  chestOpen: { name: 'Open chest', group: 'Events', color: '#8a5a2b', h: 0, piece: 'chest', open: true },
+  guild: { name: 'Guild flag', group: 'Events', color: '#2d5f9b', h: 0, piece: 'flag' },
+  campfire: { name: 'Campfire', group: 'Events', color: '#ff8a1e', h: 0, piece: 'campfire' },
+  clue: { name: 'Clue', group: 'Events', color: '#e8d9a8', h: 0, piece: 'clue' },
+  goal: { name: 'Dungeon goal', group: 'Events', color: '#5fe0ff', h: 0, piece: 'goal' },
 };
+const INTERACT = { event: '❔ Interact', chest: '📦 Open chest', clue: '📜 Check clue', goal: '⭐ Dungeon goal' };
 const linked = (a, b) => !!(TILES[a]?.link && TILES[a].link === TILES[b]?.link);
 // squares a mini covers along the board's x (w) and z (d)
 const fp = f => ({ w: f.w || SIZE_CELLS[f.size] || 1, d: f.d || SIZE_CELLS[f.size] || 1 });
@@ -187,7 +197,7 @@ function viewFor() {
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0 };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
-const tileVisible = k => { const [i, j] = k.split(',').map(Number); return !boardAt(i + 0.5, j + 0.5)?.hidden; };
+const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
 // players' copy of the turn order leaves out hidden minis (their turn shows as "the GM's turn")
 function combatView() {
   const c = state.combat;
@@ -198,7 +208,7 @@ function combatView() {
 // tiles to players, leaving out squares on hidden boards
 function sendTiles(set, clear) {
   const vis = {};
-  for (const [k, v] of Object.entries(set)) if (tileVisible(k)) vis[k] = v;
+  for (const [k, v] of Object.entries(set)) vis[k] = tileVisible(k) ? v : null;
   sendAll({ t: 'tiles', set: vis, clear: !!clear });
 }
 // after boards are hidden or shown: give every player a fresh view of the table
@@ -337,6 +347,16 @@ function handle(msg, from) {
         }
       }
       if (msg.done) delete f._from;
+      if (msg.done && f.owner) {                  // an ally steps on a trap: a hidden one springs into view
+        for (const k of cellsOf(f.x, f.z, w, d).map(([i, j]) => i + ',' + j)) {
+          const t = state.tiles[k];
+          if (t !== 'hiddenTrap' && t !== 'trap') continue;
+          if (t === 'hiddenTrap') { state.tiles[k] = 'trap'; tilesChanged(); sendTiles({ [k]: 'trap' }); }
+          addLog({ kind: 'sys', text: `${f.name} sets off a trap!` });
+          addLog({ kind: 'sys', text: `Trap sprung by ${f.name}: resolve its effect (Trap or Hazard rules on the event card).`, to: state.gm });
+          state.event = { n: 1, who: f.name, trap: true }; renderEvent();
+        }
+      }
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
       if (msg.done) save();
@@ -413,14 +433,25 @@ function handle(msg, from) {
       break;
     }
     case 'interact': {
-      if (!mayMove || !f.owner || state.tiles[msg.key] !== 'event') return;
+      const kind = state.tiles[msg.key];
+      if (!mayMove || !f.owner || !INTERACT[kind]) return;
       if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
-      if (!nextToCell(f, msg.key)) { note(from, `${f.name} has to stand next to the ? first.`); return; }
-      delete state.tiles[msg.key]; tilesChanged(); sendTiles({ [msg.key]: null });
-      addLog({ kind: 'sys', text: `${f.name} checks the ? - something happens...` });
+      if (!nextToCell(f, msg.key)) { note(from, `${f.name} has to stand next to it first.`); return; }
       const [ki, kj] = msg.key.split(',').map(Number);
-      state.pending.push({ id: rid(6), who: f.name, x: ki + 0.5, z: kj + 0.5 });
-      addLog({ kind: 'sys', text: `${f.name} checked a ?: throw the event die (Rules & dungeon).`, to: state.gm });
+      const what = { event: 'checks the ? - something happens...', chest: 'opens the treasure chest!', clue: 'finds a clue!', goal: 'reaches the Dungeon Goal!' }[kind];
+      if (kind === 'chest') { state.tiles[msg.key] = 'chestOpen'; tilesChanged(); sendTiles({ [msg.key]: 'chestOpen' }); }
+      else if (kind !== 'goal') { delete state.tiles[msg.key]; tilesChanged(); sendTiles({ [msg.key]: null }); }
+      addLog({ kind: 'sys', text: `${f.name} ${what}` });
+      state.pending.push({ id: rid(6), kind, who: f.name, x: ki + 0.5, z: kj + 0.5 });
+      addLog({ kind: 'sys', text: `${f.name}: ${INTERACT[kind].slice(2).toLowerCase()} - see Rules & dungeon.`, to: state.gm });
+      renderEvent(); save();
+      break;
+    }
+    case 'pendingDone': {
+      if (!gm) return;
+      state.pending = state.pending.filter(x => x.id !== msg.pid);
+      if (msg.tool) handle({ t: 'eventTool', tool: msg.tool, mod: msg.mod }, from);
+      if (msg.tell) addLog({ kind: 'sys', text: msg.tell });
       renderEvent(); save();
       break;
     }
@@ -1051,13 +1082,18 @@ function tileTexture(t) {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-const LOOKS = { trunk: { color: '#5a3d22', planks: true } };
+const LOOKS = { trunk: { color: '#5a3d22', planks: true }, metal: { color: '#4a4d52', seams: true }, spike: { color: '#b9bdc4', shiny: true },
+  gold: { color: '#d8a83a', shiny: true }, pole: { color: '#5a3d22' }, flame: { color: '#ff8a1e', fire: true },
+  crystal: { color: '#5fe0ff', crystal: true }, paper: { color: '#e8d9a8' } };
 function kit(type) {
   if (!tileKit[type]) {
     const t = TILES[type] || LOOKS[type];
     const mat = new THREE.MeshStandardMaterial({ map: tileTexture(t), roughness: t.water || t.shiny ? 0.15 : 0.9 });
     if (t.water) { mat.transparent = true; mat.opacity = 0.85; mat.metalness = 0.1; }
     if (t.piece === 'event') { mat.emissive = new THREE.Color('#ffb000'); mat.emissiveIntensity = 0.9; }
+    if (t.fire) { mat.emissive = new THREE.Color('#ff6a00'); mat.emissiveIntensity = 1.2; }
+    if (t.crystal) { mat.emissive = new THREE.Color('#2fb8e0'); mat.emissiveIntensity = 0.8; mat.transparent = true; mat.opacity = 0.85; }
+    if (t.piece === 'hiddenTrap') { mat.transparent = true; mat.opacity = 0.55; }
     if (t.glow) { mat.emissive = new THREE.Color('#ff5a1a'); mat.emissiveIntensity = 0.8; mat.emissiveMap = mat.map; }
     tileKit[type] = { geo: new THREE.BoxGeometry(1, t.h || 0.05, 1), mat };
   }
@@ -1093,25 +1129,31 @@ function buildTiles() {
     im.castShadow = true; im.receiveShadow = true;
     tileGroup.add(im);
   }
-  for (const [k, t] of Object.entries(state.tiles)) {             // floating "?" over each event square
-    if (t !== 'event' || (isHost && !gmView() && !tileVisible(k))) continue;
+  const SIGNS = { event: ['?', '#ff2b2b', '#ffd23f'], clue: ['!', '#e8d9a8', '#ffffff'], goal: ['★', '#5fe0ff', '#ffffff'] };
+  for (const [k, t] of Object.entries(state.tiles)) {             // floating signs over event squares
+    if (!SIGNS[t] || (isHost && !gmView() && !tileVisible(k))) continue;
     const [i, j] = k.split(',').map(Number);
-    const q = new THREE.Sprite(qMat()); q.position.set(i + 0.5, 0.75, j + 0.5); q.scale.set(0.6, 0.6, 1); q.userData.bob = true;
+    const q = new THREE.Sprite(signMat(...SIGNS[t])); q.position.set(i + 0.5, t === 'goal' ? 1.45 : 0.75, j + 0.5); q.scale.set(0.6, 0.6, 1);
+    q.userData.bob = t === 'goal' ? 1.45 : 0.75;
     tileGroup.add(q);
   }
   for (const g of figMeshes.values()) { const f = state.figures[g.userData.id]; if (f) upsertFig(f, true); }
 }
-let qMatCache = null;
-function qMat() {
-  if (qMatCache) return qMatCache;
+const signMats = new Map();
+// round sign: a character in a coloured ring (the ? is a yellow ? in a red ring)
+function signMat(ch, ring, fill) {
+  const key = ch + ring + fill;
+  if (signMats.has(key)) return signMats.get(key);
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(30,22,0,0.75)'; g.beginPath(); g.arc(64, 64, 58, 0, 7); g.fill();
-  g.strokeStyle = '#ff2b2b'; g.lineWidth = 6; g.stroke();          // red ring
-  g.fillStyle = '#ffd23f'; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('?', 64, 70);                      // yellow ?
+  g.strokeStyle = ring; g.lineWidth = 6; g.stroke();
+  g.fillStyle = fill; g.font = 'bold 84px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(ch, 64, 70);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  return (qMatCache = new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  const m = new THREE.SpriteMaterial({ map: tex, depthWrite: false });
+  signMats.set(key, m);
+  return m;
 }
 // unit shapes, stretched into place for each part of a piece
 const SHAPES = {
@@ -1119,9 +1161,13 @@ const SHAPES = {
   post: new THREE.CylinderGeometry(0.5, 0.5, 1, 10),
   cone: new THREE.ConeGeometry(0.5, 1, 9),
   rock: new THREE.DodecahedronGeometry(0.5, 0),
+  tent: new THREE.ConeGeometry(0.5, 1, 4),
 };
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _y = new THREE.Vector3(0, 1, 0);
-const place = (x, y, z, sx, sy, sz, rot = 0) => new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromAxisAngle(_y, rot), _s.set(sx, sy, sz));
+const _e = new THREE.Euler();
+// rot turns around the up axis; tilt leans it over (logs lying down, an open lid)
+const place = (x, y, z, sx, sy, sz, rot = 0, tilt = 0) => new THREE.Matrix4().compose(_p.set(x, y, z),
+  tilt ? _q.setFromEuler(_e.set(tilt, rot, 0, 'YXZ')) : _q.setFromAxisAngle(_y, rot), _s.set(sx, sy, sz));
 
 // the parts of one connecting piece / prop. links = which neighbours it joins (n s e w). put(shape, look, matrix)
 function piecesFor(type, x, z, links, seed, put) {
@@ -1171,6 +1217,46 @@ function piecesFor(type, x, z, links, seed, put) {
     }
     case 'event':                               // a glowing disc; the floating "?" is a sprite (see buildTiles)
       put('post', 'event', place(x, 0.02, z, 0.7, 0.04, 0.7));
+      break;
+    case 'hiddenTrap':                          // only the GM sees this: a faint red cross
+      put('box', 'hiddenTrap', place(x, 0.015, z, 0.85, 0.02, 0.12, Math.PI / 4));
+      put('box', 'hiddenTrap', place(x, 0.015, z, 0.85, 0.02, 0.12, -Math.PI / 4));
+      break;
+    case 'trap':                                // a sprung spike plate
+      put('box', 'metal', place(x, 0.02, z, 0.82, 0.04, 0.82));
+      for (const [dx, dz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2], [0, 0]])
+        put('cone', 'spike', place(x + dx, 0.14, z + dz, 0.12, 0.22, 0.12));
+      break;
+    case 'camp':                                // a red tent and a banner
+      put('tent', 'camp', place(x - 0.05, 0.36, z, 0.85, 0.72, 0.85, Math.PI / 4));
+      put('post', 'pole', place(x + 0.36, 0.45, z - 0.3, 0.05, 0.9, 0.05));
+      put('box', 'camp', place(x + 0.24, 0.75, z - 0.3, 0.24, 0.2, 0.02));
+      break;
+    case 'chest': {                             // wooden chest with gold bands; open = lid standing up at the back
+      put('box', 'chest', place(x, 0.17, z, 0.62, 0.3, 0.42));
+      put('box', 'gold', place(x, 0.17, z, 0.64, 0.06, 0.44));
+      if (t.open) put('box', 'chest', place(x, 0.42, z - 0.2, 0.62, 0.24, 0.05, 0, -0.35));
+      else put('box', 'chest', place(x, 0.36, z, 0.62, 0.1, 0.42));
+      break;
+    }
+    case 'flag':                                // your guild's flag on a pole
+      put('post', 'pole', place(x, 0.6, z, 0.06, 1.2, 0.06));
+      put('box', 'guild', place(x + 0.2, 1.0, z, 0.38, 0.26, 0.02));
+      put('post', 'gold', place(x, 0.04, z, 0.3, 0.08, 0.3));
+      break;
+    case 'campfire':                            // ring of stones, crossed logs, a flame
+      for (let k = 0; k < 7; k++) { const a = k / 7 * Math.PI * 2; put('rock', 'rock', place(x + Math.cos(a) * 0.3, 0.05, z + Math.sin(a) * 0.3, 0.14, 0.1, 0.14, a)); }
+      put('post', 'trunk', place(x, 0.07, z, 0.08, 0.5, 0.08, 0.6, Math.PI / 2));
+      put('post', 'trunk', place(x, 0.1, z, 0.08, 0.5, 0.08, -0.6, Math.PI / 2));
+      put('cone', 'flame', place(x, 0.28, z, 0.22, 0.34, 0.22));
+      break;
+    case 'clue':                                // a rolled-up note on a small stone
+      put('rock', 'rock', place(x, 0.08, z, 0.4, 0.16, 0.35, rand(2) * 6));
+      put('post', 'paper', place(x, 0.2, z, 0.08, 0.32, 0.08, rand(3) * 6, Math.PI / 2));
+      break;
+    case 'goal':                                // a tall glowing crystal
+      put('rock', 'crystal', place(x, 0.55, z, 0.42, 1.1, 0.42, rand(1) * 6));
+      put('rock', 'rock', place(x, 0.06, z, 0.7, 0.14, 0.7));
       break;
     case 'rock':
       put('rock', 'rock', place(x + (rand(1) - 0.5) * 0.15, 0.2, z + (rand(2) - 0.5) * 0.15, 0.75 + rand(3) * 0.2, 0.5 + rand(4) * 0.2, 0.7 + rand(5) * 0.2, rand(6) * 6));
@@ -1447,18 +1533,18 @@ function updatePrompts() {
   if (c) mine = mine.filter(f => c.order[c.turn]?.id === f.id);          // in combat: only on your own turn
   const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
   for (const [k, t] of Object.entries(state.tiles)) {
-    if (t !== 'event') continue;
+    if (!INTERACT[t]) continue;
     const who = mine.find(f => nextToCell(f, k));
     if (!who) continue;
     seen.add(k);
     let b = box.querySelector(`[data-key="${k}"]`);
     if (!b) {
       b = document.createElement('button'); b.className = 'prompt'; b.dataset.key = k;
-      b.textContent = '❔ Interact';
       b.onclick = () => act({ t: 'interact', id: b.dataset.who, key: k });
       box.appendChild(b);
     }
     b.dataset.who = who.id;
+    b.textContent = INTERACT[t];
     b.disabled = !!preview;
     const [i, j] = k.split(',').map(Number);
     v.set(i + 0.5, 1.15, j + 0.5).project(camera);
@@ -1472,7 +1558,7 @@ function updatePrompts() {
 function tick() {
   animateDice(performance.now());
   updatePrompts();
-  if (tileGroup) { const y = 0.75 + Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = y; }
+  if (tileGroup) { const b = Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = o.userData.bob + b; }
   updateOverlays();
   // a bobbing marker over whoever's turn it is
   const shownCombat = isHost && !gmView() ? combatView() : state.combat;
@@ -1768,21 +1854,38 @@ function renderParty() {
   $('partyNext').style.display = gmView() ? '' : 'none';
 }
 
+function pickPaint(type) {
+  const b = $('tileTypes').querySelector(`[data-type=${type}]`);
+  const sec = document.querySelector('[data-fold=terrain]');
+  if (sec && !sec.classList.contains('open')) sec.firstElementChild.click();
+  b?.click();
+  status(`Click the board to place: ${TILES[type].name} (turn Paint off when done)`); setTimeout(() => status(''), 5000);
+}
+
 function renderEvent() {
   if (!isHost) return;
   const box = $('eventBox'), P = state.pending || [], E = state.event;
   box.innerHTML = '';
   for (const p of P) {
-    const d = document.createElement('div'); d.className = 'evwait';
-    d.innerHTML = '<span></span><button class="primary">Throw the event d6</button>';
-    d.firstChild.textContent = `${p.who} checked a ?`;
-    d.lastChild.onclick = () => act({ t: 'dungeonEvent', pid: p.id });
+    const kind = p.kind || 'event', d = document.createElement('div'); d.className = 'evwait';
+    const label = { event: `${p.who} checked a ?`, chest: `${p.who} opened a chest`, clue: `${p.who} found a clue`, goal: `${p.who} reached the Dungeon Goal` }[kind];
+    d.innerHTML = '<span></span><span class="evbtns"></span>';
+    d.firstChild.textContent = label;
+    const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; d.lastChild.appendChild(b); };
+    if (kind === 'event') add('Throw the event d6', () => act({ t: 'dungeonEvent', pid: p.id }), 'primary');
+    if (kind === 'chest') add('Roll loot (2d6)', () => act({ t: 'pendingDone', pid: p.id, tool: 'loot', mod: +prompt('Floor modifier? (top third -1, bottom third +1, final floor/vault +2, else 0)', '0') || 0 }), 'primary');
+    if (kind === 'clue') {
+      add('Next clue: roll where', () => act({ t: 'pendingDone', pid: p.id, tool: 'direction' }), 'primary');
+      add('It leads to the goal', () => act({ t: 'pendingDone', pid: p.id, tell: `The clue points the way to the Dungeon Goal!` }));
+    }
+    if (kind === 'goal') add('Mission complete!', () => act({ t: 'pendingDone', pid: p.id, tell: `${p.who} reached the Dungeon Goal: mission complete!` }), 'primary');
+    if (kind !== 'event') add('Dismiss', () => act({ t: 'pendingDone', pid: p.id }));
     box.appendChild(d);
   }
   if (E) {
     const info = EVENT_INFO[E.n], card = document.createElement('div'); card.className = 'evcard';
     card.innerHTML = '<div class="evt"></div><div class="evx"></div><div class="row evb"></div>';
-    card.querySelector('.evt').textContent = `${E.n} = ${info.name}` + (E.who ? ` (${E.who}'s ?)` : '');
+    card.querySelector('.evt').textContent = E.trap ? `Trap sprung by ${E.who}` : `${E.n} = ${info.name}` + (E.who ? ` (${E.who}'s ?)` : '');
     card.querySelector('.evx').textContent = info.text;
     const btns = card.querySelector('.evb');
     const add = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; btns.appendChild(b); };
@@ -1790,6 +1893,9 @@ function renderEvent() {
     if (info.tools.includes('loot')) add('Roll loot (2d6)', () => act({ t: 'eventTool', tool: 'loot', mod: +prompt('Floor modifier? (top third -1, bottom third +1, final floor/vault +2, else 0)', '0') || 0 }));
     if (info.tools.includes('threat')) { add(`Threat ${state.threat || 0}/6  +1`, () => act({ t: 'eventTool', tool: 'threat', delta: 1 })); add('−1', () => act({ t: 'eventTool', tool: 'threat', delta: -1 })); }
     if (info.tools.includes('combat') && !state.combat) add('Start combat', () => act({ t: 'combatStart' }));
+    const prop = { 1: ['hiddenTrap', 'Place a hidden trap'], 2: ['camp', 'Place enemy camp'], 3: ['chest', 'Place treasure chest'],
+      4: ['guild', 'Place guild flag'], 5: ['campfire', 'Place campfire'], 6: ['clue', 'Place clue'] }[E.n];
+    if (prop) add(prop[1], () => pickPaint(prop[0]));
     add('Tell the players', () => act({ t: 'eventTool', tool: 'tell' }));
     add('Done', () => act({ t: 'eventTool', tool: 'done' }), 'primary');
     box.appendChild(card);

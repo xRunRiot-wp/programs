@@ -77,13 +77,22 @@ only within range; a move that's too far snaps back.
 **Exploring = party turns.** Out of combat, all allies move and act in the same turn, each up to their range
 (and once each: **Dash** / **Undo dash**). When everyone is done the GM clicks **Next party turn**.
 
-**? markers.** The GM places **? Event** markers (Terrain > Props). A ? sits on its square like an object. When an
+**? markers.** The GM places **? Event** markers (Terrain > Events). A ? sits on its square like an object. When an
 ally stands next to it (sides or corners), an **Interact** button appears over it; clicking it is free (not an action;
 in combat only on that mini's turn). The marker disappears and the GM gets **Throw the event d6**: a physics d6
 only the GM sees (1 trap or hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue).
 The **event card** then shows that event's rules with helper rolls: direction (2d6) + distance (1d6, reroll 5-6) for
 treasure and clues, loot rarity (2d6 + floor modifier), the Threat Counter and Start combat for enemy teams, and
 **Tell the players** to announce it.
+
+**Event pieces** (Terrain > Events), one for each dungeon event:
+- **Hidden trap** (players can't see it; the GM sees a faint red cross). An ally stepping on it sets it off: it
+  turns into a visible **Trap** (spike plate) and the GM gets the Trap or Hazard card.
+- **Enemy camp** (tent and banner), **Guild flag**, **Campfire** (safe passage) as markers.
+- **Treasure chest**: an ally next to it clicks **Open chest**; it opens and the GM rolls the loot (2d6 + floor modifier).
+- **Clue** (!): **Check clue**; the GM rolls where the next clue is, or says it leads to the goal.
+- **Dungeon goal** (glowing crystal, ★): reaching it lets the GM announce the mission complete.
+Each event card also has a **Place ...** button that picks the matching piece so the GM can click it onto the board.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
 (nor anything on it). When a player steps onto it, it's revealed. The GM can also **Roll dungeon event** by hand.
