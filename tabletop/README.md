@@ -102,7 +102,10 @@ appears over the table for the GM, and the event card then shows in the same spo
 Each event card also has a **Place ...** button that picks the matching piece so the GM can click it onto the board.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
-(nor anything on it). When a player steps onto it, it's revealed. The GM can also **Roll dungeon event** by hand.
+(nor anything on it). Players can never walk onto a square they can't see: an area is revealed when an ally stands
+right next to one of its open squares (not diagonally, and not a wall). **Wall the edges** rings the picked board
+with walls; paint a **Door** (or erase a wall) on one edge square and that's the room's only way in, so a 7x7 room
+can have a one-square entrance. The GM can also **Roll dungeon event** by hand.
 
 ## Boards
 

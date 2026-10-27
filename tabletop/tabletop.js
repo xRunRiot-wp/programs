@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=25';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=25';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=26';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=26';
 
-const VERSION = 25;                              // raised by bump.py on every publish
+const VERSION = 26;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -334,11 +334,14 @@ function handle(msg, from) {
       if (limited && turn?.id !== f.id) { pushFig(f); note(from, `It's not ${f.name}'s turn.`); return; }
       if (f._from == null) f._from = { x: ox, z: oz };
       if (!state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
-      // a player stepping onto a hidden board explores it (or is kept off it)
+      // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
       let boards = state.boards;
-      const onHidden = !gm && boardAt(x, z)?.hidden && boardAt(x, z);
-      if (onHidden && msg.done) { if (state.rules.autoReveal) revealBoard(onHidden); }
       if (!gm) boards = state.boards.filter(b => !b.hidden);
+      if (!gm && msg.done && boardAt(x, z)?.hidden) {
+        Object.assign(f, f._from); delete f._from;
+        note(from, `${f.name} can't walk onto a square nobody can see yet.`);
+        pushFig(f); return;
+      }
       Object.assign(f, msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards));
       if (msg.done && (limited || exploring)) {   // only as far as this turn's movement allows
         const o = limited ? state.combat.from : state.party.from[f.id];
@@ -373,6 +376,7 @@ function handle(msg, from) {
       }
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
+      if (msg.done && f.owner && state.rules.autoReveal) revealNextTo(f);
       if (msg.done) save();
       break;
     }
@@ -502,6 +506,17 @@ function handle(msg, from) {
       if (msg.limit != null) state.rules.limit = !!msg.limit;
       if (msg.autoReveal != null) state.rules.autoReveal = !!msg.autoReveal;
       pushRules();
+      break;
+    }
+    case 'boardWalls': {                        // ring the board's edge with walls; the GM then paints a Door (or erases one) for the way in
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      const set = {};
+      for (let i = b.x; i < b.x + b.cols; i++) for (let j = b.z; j < b.z + b.rows; j++) {
+        if (i !== b.x && i !== b.x + b.cols - 1 && j !== b.z && j !== b.z + b.rows - 1) continue;
+        state.tiles[i + ',' + j] = 'wall'; set[i + ',' + j] = 'wall';
+      }
+      tilesChanged(); sendTiles(set); save();
       break;
     }
     case 'boardHide': {
@@ -865,7 +880,8 @@ function worldFor(f) {
   }
   const mine = isSmall(f);
   const occupied = (i, j) => { const k = i + ',' + j; return full.has(k) || (smalls.get(k) || 0) >= (mine ? 2 : 1); };
-  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied };
+  const seen = f.owner ? state.boards.filter(b => !b.hidden) : state.boards;   // allies' paths stay on what they can see
+  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied };
 }
 function pushParty() { renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
 function pushCombat() { renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
@@ -879,6 +895,18 @@ function revealBoard(b) {
     addLog({ kind: 'sys', text: `A new area is revealed (${state.explored} explored).` });
   }
   buildBoard(); updateBoardInputs(); resyncPlayers(); pushRules(); save();
+}
+
+// an ally standing right next to an open square of a hidden area (not diagonally, not a wall) reveals that area,
+// so a room walled all round with one gap or Door has a one-square entrance
+function revealNextTo(f) {
+  const { w, d } = fp(f);
+  for (const [i, j] of cellsOf(f.x, f.z, w, d)) {
+    for (const [a, c] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      const b = boardAt(a + 0.5, c + 0.5);
+      if (b?.hidden && !BLOCKS_MOVE.has(state.tiles[a + ',' + c])) revealBoard(b);
+    }
+  }
 }
 
 function turnOne(f, deg) {
@@ -2169,6 +2197,7 @@ function wirePanel() {
   $('ruleLimit').onchange = () => act({ t: 'rules', limit: $('ruleLimit').checked });
   $('ruleReveal').onchange = () => act({ t: 'rules', autoReveal: $('ruleReveal').checked });
   $('eventRoll').onclick = () => { const t = controls.target; act({ t: 'dungeonEvent', at: { x: t.x, z: t.z } }); };
+  $('wallBoard').onclick = () => { const b = curBoard(); if (b) act({ t: 'boardWalls', id: b.id }); };
   $('hideBoard').onclick = () => { const b = curBoard(); act({ t: 'boardHide', id: b.id, hidden: !b.hidden }); };
   $('addHiddenBoard').onclick = () => { const b = curBoard(); const id = handle({ t: 'boardAdd', cols: b.cols, rows: b.rows, hidden: true }, clientId); if (id) pickBoard(id); };
 

@@ -272,7 +272,7 @@
         <button id="combatEndBtn" class="danger" style="display:none">End combat</button>
       </div>
       <label style="color:var(--text);margin-top:8px"><input id="ruleLimit" type="checkbox" checked> Limit moves to each turn's range (combat and party turns)</label>
-      <label style="color:var(--text)"><input id="ruleReveal" type="checkbox" checked> Reveal a hidden board when a player steps onto it</label>
+      <label style="color:var(--text)"><input id="ruleReveal" type="checkbox" checked> Reveal a hidden area when a player stands at its open edge</label>
       <div class="row" style="margin-top:8px">
         <span>Areas explored: <b id="explored">0</b></span>
         <button id="eventRoll" class="fit" title="Throw a hidden d6: 1 trap/hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue">Roll dungeon event</button>
@@ -302,6 +302,9 @@
       <div class="row" style="margin-top:6px">
         <button id="addHiddenBoard" title="A new board players can't see yet: a dungeon area to explore">+ Add hidden area</button>
         <button id="hideBoard" class="fit">Hide from players</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="wallBoard" title="Put walls all round the picked board's edge. Then paint a Door (or use the Eraser) on one edge square: that's the room's only way in.">Wall the edges</button>
       </div>
       <div style="color:var(--dim);font-size:12px;margin:6px 0 2px">The picked board (outlined):</div>
       <div class="row">
@@ -355,6 +358,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=25"></script>
+<script type="module" src="tabletop.js?v=26"></script>
 </body>
 </html>
