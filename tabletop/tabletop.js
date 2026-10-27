@@ -117,6 +117,7 @@ async function startHost(name) {
     }
     for (const f of Object.values(state.figures)) if (f.model && !modelData.has(f.model)) f.model = '';
   }
+  state.rules.diag = 'one';                     // diagonals always count as 1 square
   state.gm = clientId;
   state.players[clientId] = { name, color: state.players[clientId]?.color || PALETTE[0], online: true, gm: true };
   openPeer(PREFIX + roomCode, 0);
@@ -354,7 +355,8 @@ function handle(msg, from) {
       const c = state.combat, cur = c && state.figures[c.order[c.turn]?.id];
       if (!c || !(gm || cur?.owner === from)) return;
       if (msg.t === 'combatDash') {
-        c.dash = (c.dash || 0) + 1;
+        if (c.dash) { note(from, 'You can only Dash once a turn (it uses your action).'); return; }
+        c.dash = 1;
         addLog({ kind: 'sys', text: `${cur?.name || '?'} dashes (an action spent on extra movement).` });
       } else {
         c.order = c.order.filter(o => state.figures[o.id]);
@@ -376,7 +378,6 @@ function handle(msg, from) {
     }
     case 'rules': {
       if (!gm) return;
-      if (['one', 'alt', 'none'].includes(msg.diag)) state.rules.diag = msg.diag;
       if (msg.limit != null) state.rules.limit = !!msg.limit;
       if (msg.autoReveal != null) state.rules.autoReveal = !!msg.autoReveal;
       pushRules();
@@ -1532,12 +1533,12 @@ function renderCombat() {
   });
   const cur = state.figures[c.order[c.turn]?.id], mine = cur && (gmView() || (!isHost && cur.owner === clientId));
   $('turnBtns').style.display = mine ? 'flex' : 'none';
-  $('turnWho').textContent = cur ? (cur.owner === clientId ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ` · dashed ×${c.dash}` : '') : "The GM's turn";
+  $('turnWho').textContent = cur ? (cur.owner === clientId ? `Your turn (${cur.name})` : `${cur.name}'s turn`) + (c.dash ? ' · dashed (action used)' : '') : "The GM's turn";
+  $('turnDash').disabled = !!c.dash;
 }
 
 function renderRules() {
   if (!isHost) return;
-  $('ruleDiag').value = state.rules.diag;
   $('ruleLimit').checked = state.rules.limit;
   $('ruleReveal').checked = state.rules.autoReveal;
   $('explored').textContent = state.explored;
@@ -1693,7 +1694,6 @@ function wirePanel() {
   $('turnDash').onclick = () => act({ t: 'combatDash' });
   $('combatStart').onclick = () => act({ t: 'combatStart' });
   $('combatEndBtn').onclick = () => { if (confirm('End combat?')) act({ t: 'combatEnd' }); };
-  $('ruleDiag').onchange = () => act({ t: 'rules', diag: $('ruleDiag').value });
   $('ruleLimit').onchange = () => act({ t: 'rules', limit: $('ruleLimit').checked });
   $('ruleReveal').onchange = () => act({ t: 'rules', autoReveal: $('ruleReveal').checked });
   $('eventRoll').onclick = () => act({ t: 'dungeonEvent' });

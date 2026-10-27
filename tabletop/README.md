@@ -52,11 +52,12 @@ Immobilized, Slowed, Sped Up...). The name tag shows an HP bar and the statuses.
 **Movement range.** A picked mini with a Dexterity lights up the squares it can reach: 2 + Dexterity squares.
 Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, fences, rocks, trees and pits
 block; you can't slip diagonally past a wall corner; you can pass other minis but not stop on them.
-Immobilized means 0. Diagonals count as 1 square (or 1-2-1, or not at all: **Rules & dungeon**).
+Immobilized means 0. A diagonal step counts as 1 square.
 
 **Combat.** The GM clicks **Start combat**: everyone with stats rolls initiative (1d6 + Dexterity + Alert);
 Sped Up goes first and Slowed last. The **Turn order** list and a gold marker show whose turn it is.
-On your turn: move, take your action, **End turn**. **Dash** adds another move's worth of squares.
+On your turn: move, take your action, **End turn**. **Dash** spends your action on another move's
+worth of squares (once a turn).
 When the order comes round again the log reminds everyone that Burn, Poison and weather happen.
 With **Limit moves in combat** (on unless the GM turns it off) a player can only move on their own turn and
 only within range; a move that's too far snaps back.
