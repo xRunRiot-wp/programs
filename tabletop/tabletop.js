@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=19';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=19';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=20';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=20';
 
-const VERSION = 19;                              // raised by bump.py on every publish
+const VERSION = 20;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -102,7 +102,7 @@ function freshState() {
   // party: exploring (no combat) - all allies move in the same turn. from = where each started this turn
   return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, party: { turn: 1, from: {}, dash: {} }, players: {}, log: [], gm: '', models: {}, tiles: {},
     combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0,
-    pending: [], event: null, threat: 0 };                                   // GM-only: events waiting / shown
+    pending: [], event: null, threat: 0, paused: false };                     // GM-only: events waiting / shown
 }
 
 // =====================================================================
@@ -194,7 +194,7 @@ function viewFor() {
   for (const f of Object.values(state.figures)) if (figVisible(f)) figures[f.id] = f;
   for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
-    models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0 };
+    models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
@@ -301,6 +301,7 @@ function onClientData(msg) {
     case 'players': state.players = msg.players; renderPlayers(); syncFigures(); break;
     case 'log': state.log.push(msg.entry); renderLogEntry(msg.entry); break;
     case 'dice': showDice(msg); break;
+    case 'paused': state.paused = msg.on; renderPause(); break;
     case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); break;
     case 'party': state.party = msg.party; renderParty(); break;
     case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); break;
@@ -323,6 +324,7 @@ function handle(msg, from) {
   switch (msg.t) {
     case 'move': {
       if (!mayMove) return;
+      if (state.paused && !gm) { pushFig(f); if (msg.done) note(from, 'Paused: the GM is resolving an event.'); return; }
       const x = +msg.x, z = +msg.z;
       if (!isFinite(x) || !isFinite(z)) return;
       const { w, d } = fp(f), ox = f.x, oz = f.z;
@@ -401,6 +403,7 @@ function handle(msg, from) {
     case 'combatNext': case 'combatDash': {
       const c = state.combat, cur = c && state.figures[c.order[c.turn]?.id];
       if (!c || !(gm || cur?.owner === from)) return;
+      if (state.paused) { note(from, 'Paused: the GM is resolving an event first.'); return; }
       if (msg.t === 'combatDash') {
         if (c.dash) {                           // undo: only while still inside the normal move
           const k = fp(cur);
@@ -457,6 +460,7 @@ function handle(msg, from) {
     }
     case 'partyNext': {
       if (!gm) return;
+      if (state.paused) { note(from, 'Resolve the event first (throw the die / Done).'); return; }
       state.party = { turn: state.party.turn + 1, from: {}, dash: {} };
       addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
       pushParty();
@@ -464,6 +468,7 @@ function handle(msg, from) {
     }
     case 'partyDash': {                         // exploring: Dash for one ally this party turn (press again to undo)
       if (!mayMove || state.combat || !f.owner) return;
+      if (state.paused && !gm) { note(from, 'Paused: the GM is resolving an event.'); return; }
       const P = state.party, k = fp(f);
       if (P.dash[f.id]) {
         const o = P.from[f.id] || { x: f.x, z: f.z };
@@ -498,6 +503,7 @@ function handle(msg, from) {
       if (!gm) return;
       const pend = msg.pid ? state.pending.find(x => x.id === msg.pid) : null;
       if (pend) state.pending = state.pending.filter(x => x !== pend);
+      rollingEvent = true;                      // still paused while the die rolls
       renderEvent();
       rollEvent(from, pend?.who, pend ? { x: pend.x, z: pend.z } : msg.at);
       break;
@@ -724,10 +730,13 @@ async function rollPhysics(msg, from, logText) {
 }
 
 // ---------- dungeon events: a ? is checked -> the GM throws a hidden d6 -> an event card with the rules ----------
+let rollingEvent = false;
 async function rollEvent(from, who, at) {
+  rollingEvent = true;                          // stay paused while the die is in the air
   const r = await rollPhysics({ sides: 6, n: 1, hidden: true, phys: true, at, dir: { x: 0, z: -1 } }, from,
     v => `rolled the dungeon event${who ? ` for ${who}'s ?` : ''}: ${v} = ${DUNGEON_EVENTS[v]}`);
   state.event = { n: r, who: who || '', at: Date.now() };
+  rollingEvent = false;
   renderEvent(); save();
 }
 
@@ -839,7 +848,7 @@ function worldFor(f) {
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
 }
 function pushParty() { renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
-function pushCombat() { renderCombat(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
+function pushCombat() { renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
 function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, explored: state.explored }); save(); figsVersion++; }
 // a hidden board comes into view; every 2 new ones the GM is reminded to roll the dungeon event
 function revealBoard(b) {
@@ -1455,7 +1464,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null;
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -1864,6 +1873,17 @@ function pickPaint(type) {
 
 function renderEvent() {
   if (!isHost) return;
+  const paused = !!((state.pending || []).length || state.event || rollingEvent);
+  if (paused !== state.paused) {
+    state.paused = paused;
+    sendAll({ t: 'paused', on: paused });
+    addLog({ kind: 'sys', text: paused ? '⏸ Paused while the GM resolves an event.' : '▶ The event is resolved: play on.' });
+  }
+  renderPause();
+  // the big throw button over the table, for the first event waiting on a die
+  const first = (state.pending || []).find(p => (p.kind || 'event') === 'event');
+  $('bigThrow').style.display = first && gmView() ? '' : 'none';
+  $('bigThrow').onclick = () => first && act({ t: 'dungeonEvent', pid: first.id });
   const box = $('eventBox'), P = state.pending || [], E = state.event;
   box.innerHTML = '';
   for (const p of P) {
@@ -1872,7 +1892,7 @@ function renderEvent() {
     d.innerHTML = '<span></span><span class="evbtns"></span>';
     d.firstChild.textContent = label;
     const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; d.lastChild.appendChild(b); };
-    if (kind === 'event') add('Throw the event d6', () => act({ t: 'dungeonEvent', pid: p.id }), 'primary');
+    if (kind === 'event') add('🎲 Throw the event d6', () => act({ t: 'dungeonEvent', pid: p.id }), 'primary big');
     if (kind === 'chest') add('Roll loot (2d6)', () => act({ t: 'pendingDone', pid: p.id, tool: 'loot', mod: +prompt('Floor modifier? (top third -1, bottom third +1, final floor/vault +2, else 0)', '0') || 0 }), 'primary');
     if (kind === 'clue') {
       add('Next clue: roll where', () => act({ t: 'pendingDone', pid: p.id, tool: 'direction' }), 'primary');
@@ -1900,6 +1920,14 @@ function renderEvent() {
     add('Done', () => act({ t: 'eventTool', tool: 'done' }), 'primary');
     box.appendChild(card);
   }
+}
+
+// everyone sees the pause; turn buttons wait
+function renderPause() {
+  $('pauseBar').style.display = state.paused ? '' : 'none';
+  $('pauseBar').textContent = isHost && gmView() ? '⏸ Paused for players until you resolve the event (throw the die, then Done on the card).'
+    : '⏸ Paused: the GM is resolving an event.';
+  for (const id of ['turnEnd', 'turnDash', 'partyDash']) if ($(id)) $(id).classList.toggle('waiting', !!state.paused);
 }
 
 function renderRules() {

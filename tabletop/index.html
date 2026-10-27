@@ -89,6 +89,15 @@
   #tileTypes button { padding: 4px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
   #tileTypes button i { width: 26px; height: 14px; border-radius: 3px; display: block; border: 1px solid #0006; }
   #tileTypes button.on, #paintBtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  #pauseBar { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); z-index: 4; background: #3a1f14;
+    border: 1px solid #ff8a1e; color: #ffd2b0; padding: 6px 12px; border-radius: 10px; font-weight: 600; max-width: calc(100% - 32px); text-align: center; }
+  #bigThrow { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 5; font-size: 22px; padding: 14px 28px;
+    border-radius: 14px; box-shadow: 0 0 0 4px #e0a64b55, 0 6px 24px #000a; animation: throwPulse 1.4s ease-in-out infinite; }
+  @keyframes throwPulse { 50% { box-shadow: 0 0 0 10px #e0a64b22, 0 6px 24px #000a; } }
+  .evwait .evbtns button.big { font-size: 16px; padding: 10px 14px; width: 100%; }
+  .evwait:has(button.big) { flex-direction: column; align-items: stretch; }
+  .evwait:has(button.big) .evbtns { justify-content: stretch; }
+  button.waiting { opacity: .45; }
   #updateBar { display: none; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); z-index: 5;
     background: #14261a; border: 1px solid #5cb85c; border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center; }
   #prompts { position: absolute; left: 0; top: 0; right: 300px; bottom: 0; pointer-events: none; overflow: hidden; }
@@ -137,6 +146,8 @@
   <div id="prompts"></div>
   <div id="hint">Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom</div>
   <button id="toggleSide">Menu</button>
+  <div id="pauseBar" style="display:none"></div>
+  <button id="bigThrow" class="primary" style="display:none">🎲 Throw the event d6</button>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
     <button id="updateReload" class="primary">Reload now</button>
@@ -339,6 +350,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=19"></script>
+<script type="module" src="tabletop.js?v=20"></script>
 </body>
 </html>

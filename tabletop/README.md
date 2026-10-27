@@ -92,6 +92,9 @@ treasure and clues, loot rarity (2d6 + floor modifier), the Threat Counter and S
 - **Treasure chest**: an ally next to it clicks **Open chest**; it opens and the GM rolls the loot (2d6 + floor modifier).
 - **Clue** (!): **Check clue**; the GM rolls where the next clue is, or says it leads to the goal.
 - **Dungeon goal** (glowing crystal, ★): reaching it lets the GM announce the mission complete.
+While an event waits for the GM (the die not thrown yet, or its card still open) the game is **paused**: players
+can't move, End turn or Dash until the GM clicks **Done** on the card. A big **🎲 Throw the event d6** button
+appears over the table for the GM.
 Each event card also has a **Place ...** button that picks the matching piece so the GM can click it onto the board.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
