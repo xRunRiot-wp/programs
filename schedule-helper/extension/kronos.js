@@ -455,8 +455,17 @@
     const ls = nameLeaves();
     const hit = ls.find(([, t]) => norm(t) === want) || ls.find(([, t]) => norm(t).startsWith(want));
     if (hit) return hit[0];
-    const p = paneNames().find((h) => sameName(name, h.name));
-    return p ? p.el : null;
+    const pane = paneNames();
+    const p = pane.find((h) => sameName(name, h.name));
+    if (p) return p.el;
+    // v3.39 (Zack 10-27: a person in the middle of the list was never found, people below them were): Kronos may
+    // write the name a little differently (two last names, middle name or initial, accents, hyphen). Match when
+    // every word of the roster name is a whole word of the Kronos name (extra words OK) -- only if exactly one row fits.
+    const words = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const w = words(name);
+    if (w.length < 2) return null;
+    const fits = pane.filter((h) => { const k = words(h.name); return w.every((x) => k.includes(x)); });
+    return fits.length === 1 ? fits[0].el : null;
   }
   // the box that scrolls the grid (real Kronos: krn_scrollable around krn_matrix)
   function gridScroller() {
@@ -540,7 +549,7 @@
   async function clickGrid(step, g) {
     let row = findRow(g.name);
     if (!row || !shown(row)) row = await scrollToRow(g.name);
-    if (!row) return { ok: false, why: `I couldn't find ${g.name}'s row on the schedule. Scroll so their name shows, then press Try again (or click their empty spot on ${g.md} yourself and press I did it).` };
+    if (!row) return { ok: false, why: `I couldn't find ${g.name}'s row on the schedule. Scroll so their name shows, then press Try again (or click their empty spot on ${g.md} yourself and press I did it). If their name shows but I still can't find it, Kronos writes it differently: type it exactly as Kronos shows it in their name box on the review screen.` };
     let band = dayBands().find((b) => b.md === g.md);
     if (!band) return { ok: false, why: `The schedule on screen doesn't show ${g.md}. Go to that week in Kronos, then press Try again.` };
     if (band.left < 0 || band.left + band.width > innerWidth) {

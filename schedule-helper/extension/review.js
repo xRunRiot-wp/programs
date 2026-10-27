@@ -36,7 +36,10 @@
     } else raw = await f.text();
     $("#week").value = R.weekFromFilename(filename) || $("#week").value;
     const named = Object.keys(prefs.locations).find((l) => locKey(l) && locKey(filename).includes(locKey(l)));
-    if (named) pickLoc(named);
+    // 3.39 (Zack 10-27: a Landry's file went in as Grotto because the box kept the last location):
+    // a new file always starts with the location box empty unless its file name says which one
+    off = new Set(); keepOn = new Set(); autoOff = new Set();
+    pickLoc(named || "");
     off = new Set(); jobEdits = {}; keepOn = new Set(); autoOff = new Set();
     build();
   }
@@ -57,7 +60,10 @@
     usual = R.markJobChanges(shifts, prefs.usualJob, { home: job(D.transferHome || "Server") }).usual;
     // only this location's jobs (settings: locationOnlyJobs, Zack 10-23): kitchen etc. start unticked, unless ticked by hand
     const only = Object.entries(D.locationOnlyJobs || {}).find(([l]) => lk && lk.includes(locKey(l)));
-    const okJob = only ? new Set(only[1].map((j) => j.trim().toLowerCase())) : null;
+    // loose (3.39, Zack 10-27 "keep Host and Bus"): a listed word at the start of any word of the job counts, so
+    // Bus = Busser / Bus Person, Host = Hostess / Host-Cashier, Bar = Bartender
+    const words = only ? only[1].map((j) => j.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "")) : null;
+    const okJob = words && { has: (j) => { const t = " " + j.replace(/[^a-z0-9]+/g, " "); return words.some((w) => t.includes(" " + w)); } };
     autoOff.forEach((id) => off.delete(id)); autoOff = new Set(); leftOut = 0;   // location changed: work it out again
     shifts.forEach((s) => {
       if (okJob && !okJob.has(String(s.kronosJob || "").trim().toLowerCase()) && !keepOn.has(s.id) && !off.has(s.id)) { off.add(s.id); autoOff.add(s.id); leftOut++; }
@@ -75,6 +81,7 @@
     shifts.forEach((s) => { const k = s.employee + s.date; if (seen[k]) doubles.add(k); seen[k] = 1; });
     const changes = kept.filter((s) => s.jobChange).length;
     $("#summary").innerHTML = `<b>${kept.length}</b> shifts for <b>${people.length}</b> people, week of <b>${esc($("#week").value)}</b>. Untick anything that shouldn't go into Kronos.`
+      + ($("#loc").value.trim() ? `<br>Location: <b>${esc($("#loc").value.trim())}</b>` : Object.keys(prefs.locations).length ? `<br><span class="tag job">Pick the location for this file</span> in the Location box (${esc(Object.keys(prefs.locations).join(" or "))}).` : "")
       + (leftOut ? `<br>${leftOut} shift${leftOut > 1 ? "s" : ""} in other jobs (kitchen and so on) start unticked for ${esc($("#loc").value)}. Tick one to keep it.` : "")
       + (changes ? `<br><span class="tag job">${changes} job-change shift${changes > 1 ? "s" : ""}</span> Kronos puts in each person's usual job, so these shifts need the job changed for that one shift (for example a server working Bar).` : "");
     const allJobs = [...new Set(shifts.map((s) => s.kronosJob).filter(Boolean))].sort();
@@ -133,6 +140,10 @@
       ? { keyMin: 140, keyMax: 300, stepMin: 1000, stepMax: 2200, shiftMin: 3000, shiftMax: 5000 } : D.pace;
     const kept = shifts.filter((s) => !off.has(s.id)).map((s) => (noXfer.has(s.employee) ? { ...s, noTransfer: true } : s));
     const location = $("#loc").value.trim(), transferAll = $("#xferall").checked;
+    if (!location && Object.keys(prefs.locations).length) {
+      alert(`Which location is this file for? Type or pick it in the Location box (${Object.keys(prefs.locations).join(" or ")}) first.`);
+      $("#loc").focus(); return;
+    }
     if (location) {
       for (const k of Object.keys(prefs.locations)) if (locKey(k) === locKey(location)) delete prefs.locations[k];
       prefs.locations[location] = { transferAll, noTransfer: [...noXfer] };

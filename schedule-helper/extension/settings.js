@@ -35,9 +35,10 @@ globalThis.SH_DEFAULTS = {
   // Which jobs this location's helper takes (Zack 10-23: the roster sometimes has the kitchen
   // staff too). Shifts in any other job start unticked on the review screen; tick one to keep it.
   // Matched on the Kronos job, after the renames above. A location not listed takes everything.
+  // A listed word at the start of any word of the job counts ("Bus" keeps "Busser" and "Bus Person").
   locationOnlyJobs: {
     grotto: ["Restaurant Server", "Bar"],
-    landrys: ["Bus", "Busser", "Bar", "Bartender", "Server", "Host"],
+    landrys: ["Bus", "Bar", "Server", "Host"],      // also Busser, Bartender, Hostess... (start of a word counts)
   },
 
   // Jobs that are always a TRANSFER in Kronos (changed on that one shift), never someone's
