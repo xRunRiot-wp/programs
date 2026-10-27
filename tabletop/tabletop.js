@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=15';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=15';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=16';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS } from './rules.js?v=16';
 
-const VERSION = 15;                              // raised by bump.py on every publish
+const VERSION = 16;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1658,6 +1658,7 @@ function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !
 
 function updateBoardInputs() {
   if (!isHost || !$('boardList')) return;
+  setTimeout(updateFoldNotes);
   if (!state.boards.some(b => b.id === selBoard)) selBoard = state.boards[0].id;
   const list = $('boardList'); list.innerHTML = '';
   state.boards.forEach((b, n) => {
@@ -1784,7 +1785,25 @@ async function checkVersion() {
   } catch { /* offline or opened from a file: nothing to check */ }
 }
 
+// Terrain and Boards fold away: click the title to open or close (remembered per browser)
+function wireFolds() {
+  for (const sec of document.querySelectorAll('section.fold')) {
+    const body = document.createElement('div'); body.className = 'foldBody';
+    for (const el of [...sec.children].slice(1)) body.appendChild(el);
+    sec.appendChild(body);
+    const key = 'tabletop.fold.' + sec.dataset.fold;
+    if (store.get(key)) sec.classList.add('open');
+    sec.firstElementChild.onclick = () => store.set(key, sec.classList.toggle('open'));
+  }
+}
+function updateFoldNotes() {
+  $('terrainNow').textContent = (paintMode ? 'painting · ' : '') + (paintType === 'erase' ? 'Eraser' : TILES[paintType]?.name || '');
+  const b = curBoard(), n = state.boards.indexOf(b) + 1;
+  $('boardsNow').textContent = b ? `Board ${n} of ${state.boards.length}` + (b.hidden ? ' · hidden' : '') : '';
+}
+
 function wirePanel() {
+  wireFolds();
   $('verLabel').textContent = 'v' + VERSION;
   $('updateReload').onclick = () => location.reload();
   checkVersion(); setInterval(checkVersion, 120000);
@@ -1854,6 +1873,7 @@ function wirePanel() {
     b.onclick = () => {
       paintType = type;
       for (const x of $('tileTypes').querySelectorAll('button')) x.classList.toggle('on', x === b);
+      updateFoldNotes();
       setPaint(true);
     };
     $('tileTypes').appendChild(b);
@@ -1864,6 +1884,7 @@ function wirePanel() {
     if (on) setMoveBoards(false);
     $('paintBtn').textContent = on ? 'Paint: ON' : 'Paint: off';
     $('paintBtn').classList.toggle('on', on);
+    updateFoldNotes();
     $('hint').textContent = on ? 'Painting: click or drag to place tiles · right-drag to rotate · scroll to zoom'
       : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
   };

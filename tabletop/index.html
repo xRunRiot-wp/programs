@@ -57,6 +57,12 @@
   #log .sys { color: var(--dim); font-style: italic; }
   #hint { position: absolute; left: 10px; bottom: 10px; color: var(--dim); font-size: 12px; background: #0009; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
   #status { position: absolute; left: 10px; top: 10px; background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 13px; display: none; }
+  /* sections that open and close by clicking their title */
+  section.fold > h3 { cursor: pointer; user-select: none; }
+  section.fold > h3::before { content: '▸ '; color: var(--dim); }
+  section.fold.open > h3::before { content: '▾ '; }
+  section.fold:not(.open) > .foldBody { display: none; }
+  .foldNow { color: var(--dim); text-transform: none; letter-spacing: 0; font-weight: 400; float: right; }
   #tileTypes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   #boardList { display: flex; flex-wrap: wrap; gap: 4px; }
   #boardList button { font-size: 12px; padding: 4px 8px; }
@@ -248,8 +254,8 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Props): when an ally next to one clicks Interact, the event is rolled and only you see the result.</div>
     </section>
 
-    <section class="gm-only">
-      <h3>Terrain</h3>
+    <section class="gm-only fold" data-fold="terrain">
+      <h3>Terrain <span class="foldNow" id="terrainNow"></span></h3>
       <div id="tileTypes"></div>
       <div class="row" style="margin-top:6px">
         <button id="paintBtn">Paint: off</button>
@@ -259,8 +265,8 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">While painting, click or drag on the board to place tiles. Minis can't be moved until you turn painting off.</div>
     </section>
 
-    <section class="gm-only">
-      <h3>Boards</h3>
+    <section class="gm-only fold" data-fold="boards">
+      <h3>Boards <span class="foldNow" id="boardsNow"></span></h3>
       <div id="boardList"></div>
       <div class="row" style="margin-top:6px">
         <button id="addBoard">+ Add board</button>
@@ -323,6 +329,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=15"></script>
+<script type="module" src="tabletop.js?v=16"></script>
 </body>
 </html>
