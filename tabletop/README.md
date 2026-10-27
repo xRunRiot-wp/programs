@@ -55,6 +55,7 @@ player, so their own mini gets its white ring. **Back to GM view** returns. Noth
 Immobilized, Slowed, Sped Up...). Players see their own mini's stats. The name tag shows an HP bar and the statuses.
 
 **Movement range.** A picked mini with a Dexterity lights up the squares it can reach: 2 + Dexterity squares.
+Minis can't stop on another mini's square, except that two **Small** minis may share one (they stand side by side).
 Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, fences, rocks, trees and pits
 block; you can't slip diagonally past a wall corner; you can pass other minis but not stop on them.
 Immobilized means 0. A diagonal step counts as 1 square.

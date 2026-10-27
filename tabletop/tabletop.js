@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=21';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=21';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=22';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=22';
 
-const VERSION = 21;                              // raised by bump.py on every publish
+const VERSION = 22;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -841,19 +841,27 @@ function note(to, text) {
 }
 const moveBudget = f => (f.st?.status || []).includes('Immobilized') ? 0 : (f.st?.move ?? (2 + (f.st?.dex || 0)));
 // the grid as one mini sees it: other minis' squares are taken (not its own, nor pieces riding on it)
+const isSmall = f => f.size === '0.7' && fp(f).w === 1 && fp(f).d === 1;
+// the grid as one mini sees it. A square is taken by any other mini, except that two Smalls may share one.
+// Its own pieces (riders, or what it rides on) never get in the way.
 function worldFor(f) {
-  const taken = new Set();
   const riders = new Set();
   for (let changed = true; changed;) {
     changed = false;
     for (const o of Object.values(state.figures)) if (!riders.has(o.id) && (o.parent === f.id || riders.has(o.parent))) { riders.add(o.id); changed = true; }
   }
+  const full = new Set(), smalls = new Map();
   for (const o of Object.values(state.figures)) {
     if (o.id === f.id || riders.has(o.id) || o.id === f.parent) continue;
     const c = fp(o);
-    for (const [i, j] of cellsOf(o.x, o.z, c.w, c.d)) taken.add(i + ',' + j);
+    for (const [i, j] of cellsOf(o.x, o.z, c.w, c.d)) {
+      const k = i + ',' + j;
+      if (isSmall(o)) smalls.set(k, (smalls.get(k) || 0) + 1); else full.add(k);
+    }
   }
-  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
+  const mine = isSmall(f);
+  const occupied = (i, j) => { const k = i + ',' + j; return full.has(k) || (smalls.get(k) || 0) >= (mine ? 2 : 1); };
+  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied };
 }
 function pushParty() { renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
 function pushCombat() { renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
@@ -1412,7 +1420,7 @@ function upsertFig(f, live) {
   if (u.modelKey !== modelKey) setModel(g, want, lw, ld, modelKey);
   const sc = small ? 0.7 : Math.min(w, d);
   u.pawn.scale.setScalar(sc);
-  u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
+  u.labelY = u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
   u.mine.visible = !!viewerId() && f.owner === viewerId();
   g.visible = !isHost || gmView() || figVisible(f);
   u.ring.visible = selectedId === f.id;
@@ -1474,17 +1482,9 @@ function syncFigures() {
 
 function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); }
 
-let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null;
+let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
-const ruleWorld = f => {                        // the same grid view the GM uses, from this browser's copy
-  const taken = new Set();
-  for (const o of Object.values(state.figures)) {
-    if (o.id === f.id || o.parent === f.id || o.id === f.parent) continue;
-    const c = fp(o);
-    for (const [i, j] of cellsOf(o.x, o.z, c.w, c.d)) taken.add(i + ',' + j);
-  }
-  return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5), tile: (i, j) => state.tiles[i + ',' + j], occupied: (i, j) => taken.has(i + ',' + j) };
-};
+const ruleWorld = f => worldFor(f);              // the same grid view the GM uses, from this browser's copy
 const box = f => ({ x: f.x, z: f.z, ...fp(f) });
 function updateOverlays() {
   const key = `${preview ? 'p' + preview.as : 'g'}|${selectedId}|${figsVersion}|${tilesVersion}|${dragging ? dragging.id : ''}|${JSON.stringify(state.combat && [state.combat.turn, state.combat.dash])}|${JSON.stringify(state.party)}|${state.rules.diag}|${hoverId}`;
@@ -1497,6 +1497,10 @@ function updateOverlays() {
     if (a !== b && !!a.owner !== !!b.owner && adjacent(box(a), box(b), state.rules.diag)) now.add(a.id);
   const changed = [...now].some(id => !engaged.has(id)) || [...engaged].some(id => !now.has(id));
   engaged = now;
+  const bySquare = new Map();
+  for (const f of Object.values(state.figures)) if (isSmall(f)) { const k = Math.floor(f.x) + ',' + Math.floor(f.z); bySquare.set(k, [...(bySquare.get(k) || []), f.id]); }
+  share = new Map();
+  for (const ids of bySquare.values()) if (ids.length > 1) ids.sort().forEach((id, n) => share.set(id, n ? 0.23 : -0.23));
   if (changed) for (const f of Object.values(state.figures)) upsertFig(f, true);
   // movement range of the picked mini (yours, or any for the GM) once it has a Dexterity
   if (rangeMesh) { scene.remove(rangeMesh); rangeMesh.dispose(); rangeMesh = null; }
@@ -1572,6 +1576,7 @@ function updatePrompts() {
   for (const b of [...box.children]) if (!seen.has(b.dataset.key)) b.remove();
 }
 
+const _shareT = new THREE.Vector3();
 function tick() {
   animateDice(performance.now());
   updatePrompts();
@@ -1592,8 +1597,11 @@ function tick() {
   } else if (turnMarker) turnMarker.visible = false;
   if (tilesDirty) buildTiles();
   for (const g of figMeshes.values()) {
-    const t = g.userData.target;
-    g.position.lerp(t, dragging?.id === g.userData.id ? 1 : 0.25);
+    const t = g.userData.target, off = dragging?.id === g.userData.id ? 0 : share.get(g.userData.id) || 0;
+    _shareT.set(t.x + off, t.y, t.z);
+    g.position.lerp(_shareT, dragging?.id === g.userData.id ? 1 : 0.25);
+    g.scale.setScalar(g.scale.x + ((off ? 0.8 : 1) - g.scale.x) * 0.25);   // squeezed in next to another Small
+    if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off > 0 ? 0.45 : 0);   // name tags one above the other
   }
   controls.update();
   renderer.render(scene, camera);
