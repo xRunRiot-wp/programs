@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=32';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=32';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=33';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=33';
 
-const VERSION = 32;                              // raised by bump.py on every publish
+const VERSION = 33;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -103,7 +103,7 @@ function freshState() {
   return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, party: { turn: 1, from: {}, dash: {} }, players: {}, log: [], gm: '', models: {}, tiles: {},
     combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0,
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
-    attack: null, warp: null, warpUsed: {}, library: {} };                     // attack in progress, warp-out vote, GM's saved minis
+    attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {} };       // attack in progress, warp-out vote, GM's saved minis and boards
 }
 
 // =====================================================================
@@ -196,7 +196,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {} };
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {} };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
@@ -414,6 +414,7 @@ function handle(msg, from) {
       const shown = combatView().order.map(o => `${state.figures[o.id].name} ${o.init}`).join(', ');
       addLog({ kind: 'sys', text: `Combat! Initiative (1d6 + Dexterity + Alert): ${shown}.` });
       pushCombat();
+      setTab('combat');
       break;
     }
     case 'combatJoin': {                         // GM: add a mini to the fight, or take it out
@@ -537,7 +538,7 @@ function handle(msg, from) {
     case 'libSave': {                           // GM: keep a copy of a mini in the saved list (players never see it)
       if (!gm || !f) return;
       const { id: _id, x: _x, z: _z, parent: _p, ...rest } = f;
-      state.library[rid(8)] = JSON.parse(JSON.stringify(rest));
+      state.library[rid(8)] = { ...JSON.parse(JSON.stringify(rest)), group: clean(msg.group, 30) || 'Ungrouped' };
       renderLibrary(); save();
       note(from, `${f.name} saved to your minis list.`);
       break;
@@ -546,9 +547,18 @@ function handle(msg, from) {
       const L = gm && state.library[msg.lib];
       if (!L) return;
       const id = rid(8), c = fp(L);
-      state.figures[id] = { ...JSON.parse(JSON.stringify(L)), id, owner: null, hidden: true, ...freeSpot(+msg.x || 0, +msg.z || 0, c.w, c.d) };
+      const { group: _g, ...look } = L;
+      state.figures[id] = { ...JSON.parse(JSON.stringify(look)), id, owner: null, hidden: true, ...freeSpot(+msg.x || 0, +msg.z || 0, c.w, c.d) };
       pushFig(state.figures[id]); save();
       return id;
+    }
+    case 'libEdit': {
+      const L = gm && state.library[msg.lib];
+      if (!L) return;
+      if (msg.name != null) L.name = clean(msg.name) || L.name;
+      if (msg.group != null) L.group = clean(msg.group, 30) || 'Ungrouped';
+      renderLibrary(); save();
+      break;
     }
     case 'libDel': {
       if (!gm || !state.library[msg.lib]) return;
@@ -774,6 +784,64 @@ function handle(msg, from) {
       tilesChanged();
       sendTiles(set);
       boardsChanged();
+      break;
+    }
+    case 'boardSave': {                         // GM: keep a copy of a board (size, grid, picture, terrain, GM minis on it) in a labelled group
+      const b = gm && state.boards.find(x => x.id === msg.id);
+      if (!b) return;
+      state.boardLib ||= {};
+      const id = rid(8), tiles = {}, figs = [];
+      for (const [k, t] of Object.entries(state.tiles)) {
+        const [i, j] = k.split(',').map(Number);
+        if (boardAt(i + 0.5, j + 0.5) === b) tiles[(i - b.x) + ',' + (j - b.z)] = t;
+      }
+      for (const f of Object.values(state.figures)) {
+        if (f.owner || boardAt(f.x, f.z) !== b) continue;
+        const { id: fid, x, z, ...rest } = f;
+        figs.push({ ...JSON.parse(JSON.stringify(rest)), old: fid, dx: x - b.x, dz: z - b.z });
+      }
+      state.boardLib[id] = { name: clean(msg.name, 40) || `Board ${b.cols}x${b.rows}`, group: clean(msg.group, 30) || 'Ungrouped',
+        cols: b.cols, rows: b.rows, grid: b.grid, tiles, figs, map: !!state.maps[b.id] };
+      if (state.maps[b.id]) blobs.set('boardlib:' + id, state.maps[b.id]);
+      renderBoardLib(); save();
+      note(from, `Saved "${state.boardLib[id].name}" in ${state.boardLib[id].group}.`);
+      break;
+    }
+    case 'boardPlace': {                        // put a saved board on the table, to the right of the others
+      const L = gm && state.boardLib?.[msg.lib];
+      if (!L) return;
+      const box = boardsBox();
+      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols: L.cols, rows: L.rows, grid: L.grid !== false, hidden: !!msg.hidden };
+      state.boards.push(b);
+      const set = {};
+      for (const [k, t] of Object.entries(L.tiles || {})) { const [i, j] = k.split(',').map(Number); set[(i + b.x) + ',' + (j + b.z)] = t; }
+      Object.assign(state.tiles, set);
+      const ids = new Map((L.figs || []).map(f => [f.old, rid(8)]));
+      for (const sf of L.figs || []) {
+        const { old, dx, dz, ...rest } = sf;
+        const f = { ...JSON.parse(JSON.stringify(rest)), id: ids.get(old), x: b.x + dx, z: b.z + dz, owner: null };
+        if (f.parent) f.parent = ids.get(f.parent) || null;
+        state.figures[f.id] = f;
+      }
+      boardsChanged();
+      tilesChanged(); sendTiles(Object.fromEntries(Object.entries(set).filter(([k]) => tileVisible(k))));
+      for (const id of ids.values()) pushFig(state.figures[id]);
+      if (L.map) blobs.get('boardlib:' + msg.lib).then(map => map && handle({ t: 'map', id: b.id, map }, state.gm));
+      save();
+      return b.id;
+    }
+    case 'boardLibEdit': {
+      const L = gm && state.boardLib?.[msg.lib];
+      if (!L) return;
+      if (msg.name != null) L.name = clean(msg.name, 40) || L.name;
+      if (msg.group != null) L.group = clean(msg.group, 30) || 'Ungrouped';
+      renderBoardLib(); save();
+      break;
+    }
+    case 'boardLibDel': {
+      if (!gm || !state.boardLib?.[msg.lib]) return;
+      delete state.boardLib[msg.lib]; blobs.set('boardlib:' + msg.lib, null);
+      renderBoardLib(); save();
       break;
     }
     case 'boardDel': {
@@ -1804,7 +1872,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -2088,22 +2156,73 @@ function renderWarp() {
   else if (w.result) btn('OK', '', () => { box.style.display = 'none'; });
 }
 
+// ---------- the GM's saved boards, in labelled groups ----------
+const openGroups = new Set();
+function renderBoardLib() {
+  const box = $('boardLibList');
+  if (!box || !isHost) return;
+  const L = Object.entries(state.boardLib || {}), groups = [...new Set(L.map(([, b]) => b.group))].sort();
+  const dl = $('boardGroups'); dl.innerHTML = '';
+  for (const g of groups) { const o = document.createElement('option'); o.value = g; dl.appendChild(o); }
+  box.innerHTML = '';
+  if (!L.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px">None yet. Pick a board, give it a name and a group, and click <b>Save picked board</b>.</div>'; return; }
+  for (const g of groups) {
+    const items = L.filter(([, b]) => b.group === g).sort((a, b) => a[1].name.localeCompare(b[1].name));
+    const head = document.createElement('div'); head.className = 'libgroup';
+    head.textContent = `${openGroups.has(g) ? '▾' : '▸'} ${g} (${items.length})`;
+    head.onclick = () => { openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g); renderBoardLib(); };
+    box.appendChild(head);
+    if (!openGroups.has(g)) continue;
+    for (const [id, b] of items) {
+      const r = document.createElement('div'); r.className = 'row librow';
+      const n = document.createElement('span'); n.style.flex = '1'; n.textContent = `${b.name} `;
+      const sz = document.createElement('span'); sz.style.color = 'var(--dim)'; sz.textContent = `${b.cols}x${b.rows}`; n.appendChild(sz);
+      const bt = (t, title, fn, cls = 'fit') => { const x = document.createElement('button'); x.className = cls; x.textContent = t; x.title = title; x.onclick = fn; return x; };
+      r.append(n,
+        bt('Place', 'Put it on the table, to the right of the other boards', () => { const nid = handle({ t: 'boardPlace', lib: id }, clientId); if (nid) pickBoard(nid); }),
+        bt('Hidden', 'Put it on the table as a hidden area players have to find', () => { const nid = handle({ t: 'boardPlace', lib: id, hidden: true }, clientId); if (nid) pickBoard(nid); }),
+        bt('✎', 'Rename or move to another group', () => {
+          const name = prompt('Name', b.name); if (name == null) return;
+          const group = prompt('Group (type a new one to make it)', b.group); if (group == null) return;
+          openGroups.add(group.trim() || 'Ungrouped'); act({ t: 'boardLibEdit', lib: id, name, group });
+        }),
+        bt('×', 'Remove from saved boards', () => confirm(`Remove "${b.name}" from your saved boards?`) && act({ t: 'boardLibDel', lib: id }), 'fit danger'));
+      box.appendChild(r);
+    }
+  }
+}
+
 // ---------- the GM's saved minis ----------
 function renderLibrary() {
   const box = $('libList');
   if (!box || !isHost) return;
+  const L = Object.entries(state.library || {}), grp = m => m.group || 'Ungrouped', groups = [...new Set(L.map(([, m]) => grp(m)))].sort();
+  const dl = $('miniGroups'); dl.innerHTML = '';
+  for (const g of groups) { const o = document.createElement('option'); o.value = g; dl.appendChild(o); }
   box.innerHTML = '';
-  const L = Object.entries(state.library || {});
-  if (!L.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px">None yet. Pick a mini and click <b>Save to list</b>.</div>'; return; }
-  for (const [id, m] of L.sort((a, b) => a[1].name.localeCompare(b[1].name))) {
-    const r = document.createElement('div'); r.className = 'row librow';
-    const dot = document.createElement('span'); dot.style.cssText = `width:12px;height:12px;border-radius:50%;flex:0 0 12px;background:${okColor(m.color)}`;
-    const n = document.createElement('span'); n.textContent = m.name; n.style.flex = '1';
-    const place = document.createElement('button'); place.className = 'fit'; place.textContent = 'Place'; place.title = 'Put a copy on the table, hidden from players until you show it';
-    place.onclick = () => { const t = controls.target, nid = handle({ t: 'libPlace', lib: id, x: t.x, z: t.z }, clientId); if (nid) select(nid); };
-    const del = document.createElement('button'); del.className = 'fit danger'; del.textContent = '×'; del.title = 'Remove from the list';
-    del.onclick = () => confirm(`Remove ${m.name} from your saved minis?`) && act({ t: 'libDel', lib: id });
-    r.append(dot, n, place, del); box.appendChild(r);
+  if (!L.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px">None yet. Pick a mini and click <b>Save to list</b> (it goes in the group typed above).</div>'; return; }
+  for (const g of groups) {
+    const items = L.filter(([, m]) => grp(m) === g).sort((a, b) => a[1].name.localeCompare(b[1].name)), key = 'm:' + g;
+    const head = document.createElement('div'); head.className = 'libgroup';
+    head.textContent = `${openGroups.has(key) ? '▾' : '▸'} ${g} (${items.length})`;
+    head.onclick = () => { openGroups.has(key) ? openGroups.delete(key) : openGroups.add(key); renderLibrary(); };
+    box.appendChild(head);
+    if (!openGroups.has(key)) continue;
+    for (const [id, m] of items) {
+      const r = document.createElement('div'); r.className = 'row librow';
+      const dot = document.createElement('span'); dot.style.cssText = `width:12px;height:12px;border-radius:50%;flex:0 0 12px;background:${okColor(m.color)}`;
+      const n = document.createElement('span'); n.textContent = m.name + (m.st?.species ? ` (${m.st.species})` : ''); n.style.flex = '1';
+      const bt = (t, title, fn, cls = 'fit') => { const x = document.createElement('button'); x.className = cls; x.textContent = t; x.title = title; x.onclick = fn; return x; };
+      r.append(dot, n,
+        bt('Place', 'Put a copy on the table, hidden from players until you show it', () => { const t = controls.target, nid = handle({ t: 'libPlace', lib: id, x: t.x, z: t.z }, clientId); if (nid) select(nid); }),
+        bt('✎', 'Rename or move to another group', () => {
+          const name = prompt('Name', m.name); if (name == null) return;
+          const group = prompt('Group (type a new one to make it)', grp(m)); if (group == null) return;
+          openGroups.add('m:' + (group.trim() || 'Ungrouped')); act({ t: 'libEdit', lib: id, name, group });
+        }),
+        bt('×', 'Remove from the list', () => confirm(`Remove ${m.name} from your saved minis?`) && act({ t: 'libDel', lib: id }), 'fit danger'));
+      box.appendChild(r);
+    }
   }
 }
 
@@ -2443,7 +2562,17 @@ function renderParty() {
   $('partyNext').style.display = gmView() ? '' : 'none';
 }
 
+// the GM's panel tabs (remembered per browser)
+let gmTab = 'minis';
+function setTab(t) {
+  gmTab = t;
+  for (const b of document.querySelectorAll('#gmTabs button')) b.classList.toggle('on', b.dataset.tab === t);
+  for (const sec of document.querySelectorAll('section[data-tab]')) sec.classList.toggle('tabOn', sec.dataset.tab.split(' ').includes(t));
+  try { localStorage.setItem('tabletop.gmTab', t); } catch {}
+}
+
 function pickPaint(type) {
+  setTab('terrain');
   const b = $('tileTypes').querySelector(`[data-type=${type}]`);
   const sec = document.querySelector('[data-fold=terrain]');
   if (sec && !sec.classList.contains('open')) sec.firstElementChild.click();
@@ -2568,6 +2697,8 @@ async function checkVersion() {
   } catch { /* offline or opened from a file: nothing to check */ }
 }
 
+for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
+{ let t = 'minis'; try { t = localStorage.getItem('tabletop.gmTab') || t; } catch {} setTab(t); }
 // Terrain and Boards fold away: click the title to open or close (remembered per browser)
 function wireFolds() {
   for (const sec of document.querySelectorAll('section.fold')) {
@@ -2649,7 +2780,19 @@ function wirePanel() {
   $('atkAcc').onclick = () => attackMsg('acc');
   $('atkDmg').onclick = () => attackMsg('dmg');
   $('atkClose').onclick = () => closeAttack();
-  $('libSave').onclick = () => selectedId && act({ t: 'libSave', id: selectedId });
+  $('libSave').onclick = () => {
+    if (!selectedId) return;
+    const group = $('miniGroup').value.trim() || 'Ungrouped';
+    openGroups.add('m:' + group);
+    act({ t: 'libSave', id: selectedId, group });
+  };
+  $('boardSave').onclick = () => {
+    const b = curBoard(), group = $('boardGroup').value.trim() || 'Ungrouped';
+    if (!b) return;
+    openGroups.add(group);
+    act({ t: 'boardSave', id: b.id, name: $('boardSaveName').value, group });
+    $('boardSaveName').value = '';
+  };
   $('selSpecies').onfocus = async () => {
     const dl = $('speciesList');
     if (dl.childElementCount) return;

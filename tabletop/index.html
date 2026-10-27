@@ -72,6 +72,15 @@
   section.fold > h3::before { content: '▸ '; color: var(--dim); }
   section.fold.open > h3::before { content: '▾ '; }
   section.fold:not(.open) > .foldBody { display: none; }
+  /* the GM's panel is split into tabs: only the picked tab's sections show (players see everything) */
+  #gmTabs { display: none; gap: 4px; flex-wrap: wrap; margin-top: 10px; }
+  body.gm:not(.previewing) #gmTabs { display: flex; }
+  #gmTabs button { flex: 1 1 auto; padding: 6px 8px; font-size: 13px; }
+  #gmTabs button.on { background: var(--accent); color: #1a1408; border-color: var(--accent); font-weight: 700; }
+  body.gm:not(.previewing) section[data-tab]:not(.tabOn) { display: none !important; }
+  body.gm:not(.previewing) section.fold > .foldBody { display: block; }
+  body.gm:not(.previewing) section.fold > h3 { cursor: default; }
+  body.gm:not(.previewing) section.fold > h3::before { content: ''; }
   .foldNow { color: var(--dim); text-transform: none; letter-spacing: 0; font-weight: 400; float: right; }
   #tileTypes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   #boardList { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -112,6 +121,7 @@
   #atkRows input { width: 100%; }
   .typechip { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #111; font-weight: 700; font-size: 12px; }
   .librow { align-items: center; margin-top: 4px; }
+  .libgroup { margin-top: 8px; font-weight: 700; color: var(--accent); cursor: pointer; user-select: none; }
   #updateBar { display: none; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); z-index: 5;
     background: #14261a; border: 1px solid #5cb85c; border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center; }
   #prompts { position: absolute; left: 0; top: 0; right: 300px; bottom: 0; pointer-events: none; overflow: hidden; }
@@ -198,9 +208,12 @@
         <button id="previewBtn" title="Opens a window where you play as a test player: everything works there">👁 Play as a test player</button>
         <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
       </div>
+      <nav id="gmTabs" class="gm-only">
+        <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="boards">Boards</button><button data-tab="table">Table</button>
+      </nav>
     </section>
 
-    <section id="selSec" style="display:none">
+    <section id="selSec" data-tab="minis combat" style="display:none">
       <h3>Selected mini</h3>
       <label>Name</label>
       <input id="selName" maxlength="24" style="width:100%">
@@ -265,7 +278,7 @@
       </div>
     </section>
 
-    <section class="gm-only">
+    <section class="gm-only" data-tab="minis">
       <h3>Add a mini</h3>
       <div class="row">
         <input id="newName" maxlength="24" placeholder="Name (e.g. Goblin)">
@@ -277,10 +290,12 @@
       </div>
       <label style="color:var(--text);margin-top:6px"><input id="newHidden" type="checkbox"> Hidden from players while I work on it</label>
       <h3 style="margin-top:12px">Saved minis</h3>
+      <input id="miniGroup" maxlength="30" list="miniGroups" placeholder="Group for Save to list (e.g. Floor 1 enemies)" style="width:100%">
+      <datalist id="miniGroups"></datalist>
       <div id="libList"></div>
     </section>
 
-    <section id="partySec" style="display:none">
+    <section id="partySec" data-tab="combat" style="display:none">
       <h3>Exploring <span id="partyTurn" style="color:var(--text);float:right;text-transform:none;letter-spacing:0"></span></h3>
       <div style="color:var(--dim);font-size:12px">All allies move and act in the same turn, each up to their range. Stand next to a <b style="color:#ffd23f">?</b> and click <b>Interact</b> to see what it is (free: it doesn't use your action).</div>
       <div class="row" style="margin-top:6px">
@@ -289,7 +304,7 @@
       </div>
     </section>
 
-    <section id="combatSec" style="display:none">
+    <section id="combatSec" data-tab="combat" style="display:none">
       <h3>Turn order <span id="combatRound" style="color:var(--text);float:right;text-transform:none;letter-spacing:0"></span></h3>
       <div id="turnList"></div>
       <div id="turnWho" style="margin-top:6px;font-weight:600"></div>
@@ -299,7 +314,7 @@
       </div>
     </section>
 
-    <section class="gm-only">
+    <section class="gm-only" data-tab="combat">
       <h3>Rules &amp; dungeon</h3>
       <div class="row">
         <button id="combatStart" class="primary">Start combat (roll initiative)</button>
@@ -315,7 +330,7 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Events). When an ally next to one clicks Interact, a big throw button pops up over the table (only you see it and the die); the event card with the rules and helper rolls then shows in the same spot.</div>
     </section>
 
-    <section class="gm-only fold" data-fold="terrain">
+    <section class="gm-only fold" data-fold="terrain" data-tab="terrain">
       <h3>Terrain <span class="foldNow" id="terrainNow"></span></h3>
       <div id="tileTypes"></div>
       <div class="row" style="margin-top:6px">
@@ -326,7 +341,19 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">While painting, click or drag on the board to place tiles. Minis can't be moved until you turn painting off.</div>
     </section>
 
-    <section class="gm-only fold" data-fold="boards">
+    <section class="gm-only" data-tab="boards">
+      <h3>Saved boards</h3>
+      <div style="color:var(--dim);font-size:12px">Keeps the picked board's size, picture, terrain and GM minis. Players never see this list.</div>
+      <div class="row" style="margin-top:6px">
+        <input id="boardSaveName" maxlength="40" placeholder="Name (e.g. Mossy cave)">
+        <input id="boardGroup" maxlength="30" list="boardGroups" placeholder="Group (e.g. Floor 1)">
+        <datalist id="boardGroups"></datalist>
+      </div>
+      <button id="boardSave" style="width:100%;margin-top:6px">Save picked board</button>
+      <div id="boardLibList" style="margin-top:4px"></div>
+    </section>
+
+    <section class="gm-only fold" data-fold="boards" data-tab="boards">
       <h3>Boards <span class="foldNow" id="boardsNow"></span></h3>
       <div id="boardList"></div>
       <div class="row" style="margin-top:6px">
@@ -358,12 +385,12 @@
       </div>
     </section>
 
-    <section>
+    <section data-tab="table">
       <h3>Players</h3>
       <div id="players"></div>
     </section>
 
-    <section>
+    <section data-tab="table">
       <h3>Dice</h3>
       <div id="dice"></div>
       <div class="row" style="margin-top:6px">
@@ -374,7 +401,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-tab="table">
       <h3>Log</h3>
       <div id="log"></div>
       <div class="row" style="margin-top:6px">
@@ -393,6 +420,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=32"></script>
+<script type="module" src="tabletop.js?v=33"></script>
 </body>
 </html>

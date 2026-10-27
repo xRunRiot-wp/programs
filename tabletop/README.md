@@ -126,6 +126,15 @@ unanimous yes warps the team out; one "Stay" and the chance is gone (one per goa
 
 **Working on minis in secret.** Tick **Hidden from players while I work on it** before adding a mini. **Save to list**
 keeps a copy of any mini in the GM's **Saved minis** list (players never see it); **Place** puts a hidden copy on the table.
+Saved minis go in the labelled group typed above the list (e.g. "Floor 1 enemies"); **✎** renames one or moves it to
+another group. Click a group's name to open or close it.
+
+**The GM's panel** is split into tabs: **Minis**, **Combat**, **Terrain**, **Boards** and **Table** (players, dice, log).
+Players see the plain panel as before.
+
+**Saved boards** (Boards tab): give the picked board a name and a group and click **Save picked board**. It keeps the
+board's size, grid, map picture, terrain and the GM's minis on it. **Place** puts a copy on the table to the right of the
+other boards; **Hidden** places it as a hidden area for the players to find.
 
 ## Boards
 
