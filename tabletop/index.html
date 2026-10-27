@@ -55,6 +55,7 @@
   #log div { margin-bottom: 3px; word-wrap: break-word; }
   #log .roll { color: var(--accent); }
   #log .sys { color: var(--dim); font-style: italic; }
+  @media (max-width: 700px) { #hint { right: 70px; font-size: 11px; } }
   #hint { position: absolute; left: 10px; bottom: 10px; color: var(--dim); font-size: 12px; background: #0009; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
   #status { position: absolute; left: 10px; top: 10px; background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 13px; display: none; }
   .evwait .evbtns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
@@ -91,10 +92,14 @@
   #tileTypes button.on, #paintBtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
   #pauseBar { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); z-index: 4; background: #3a1f14;
     border: 1px solid #ff8a1e; color: #ffd2b0; padding: 6px 12px; border-radius: 10px; font-weight: 600; max-width: calc(100% - 32px); text-align: center; }
-  #bigThrow { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 5; font-size: 22px; padding: 14px 28px;
-    border-radius: 14px; box-shadow: 0 0 0 4px #e0a64b55, 0 6px 24px #000a; animation: throwPulse 1.4s ease-in-out infinite; }
-  @keyframes throwPulse { 50% { box-shadow: 0 0 0 10px #e0a64b22, 0 6px 24px #000a; } }
-  .evwait .evbtns button.big { font-size: 16px; padding: 10px 14px; width: 100%; }
+  /* GM's events float over the table: the big throw button, then the event card in the same spot */
+  #eventBox { position: absolute; bottom: 46px; left: 50%; transform: translateX(-50%); z-index: 5; width: min(520px, calc(100% - 32px));
+    max-height: 60%; overflow-y: auto; filter: drop-shadow(0 6px 20px #000c); }
+  #eventBox .evwait, #eventBox .evcard { margin-top: 6px; }
+  .evwait .evbtns button.big { font-size: 22px; padding: 14px 20px; width: 100%; border-radius: 12px;
+    box-shadow: 0 0 0 4px #e0a64b55; animation: throwPulse 1.4s ease-in-out infinite; }
+  @keyframes throwPulse { 50% { box-shadow: 0 0 0 10px #e0a64b22; } }
+  #eventBox .evcard .evx { font-size: 13px; }
   .evwait:has(button.big) { flex-direction: column; align-items: stretch; }
   .evwait:has(button.big) .evbtns { justify-content: stretch; }
   button.waiting { opacity: .45; }
@@ -111,6 +116,7 @@
   body.previewing #previewBar { display: flex; }
   body.previewing #view { right: 300px; }
   @media (max-width: 700px) { body.previewing #view { right: 0; } }
+  @media (min-width: 701px) { #eventBox { left: calc(50% - 150px); } #pauseBar { left: calc(50% - 150px); } }
   #toggleSide { display: none; position: absolute; right: 10px; top: 10px; z-index: 3; }
 
   @media (max-width: 700px) {
@@ -144,10 +150,10 @@
   <div id="view"></div>
   <div id="status"></div>
   <div id="prompts"></div>
-  <div id="hint">Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom</div>
+  <div id="hint"></div>
   <button id="toggleSide">Menu</button>
   <div id="pauseBar" style="display:none"></div>
-  <button id="bigThrow" class="primary" style="display:none">🎲 Throw the event d6</button>
+  <div id="eventBox" style="display:none"></div>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
     <button id="updateReload" class="primary">Reload now</button>
@@ -271,8 +277,7 @@
         <span>Areas explored: <b id="explored">0</b></span>
         <button id="eventRoll" class="fit" title="Throw a hidden d6: 1 trap/hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue">Roll dungeon event</button>
       </div>
-      <div id="eventBox"></div>
-      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Events). When an ally next to one clicks Interact, you get a hidden d6 to throw here; only you see it, then the event card shows the rules and helper rolls.</div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Events). When an ally next to one clicks Interact, a big throw button pops up over the table (only you see it and the die); the event card with the rules and helper rolls then shows in the same spot.</div>
     </section>
 
     <section class="gm-only fold" data-fold="terrain">
@@ -350,6 +355,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=22"></script>
+<script type="module" src="tabletop.js?v=24"></script>
 </body>
 </html>

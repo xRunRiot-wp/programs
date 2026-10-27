@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=22';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=22';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=24';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=24';
 
-const VERSION = 22;                              // raised by bump.py on every publish
+const VERSION = 24;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -357,6 +357,10 @@ function handle(msg, from) {
         }
       }
       if (msg.done) delete f._from;
+      if (msg.done && isSmall(f)) {               // sharing a square with another Small: face the same way
+        const mate = Object.values(state.figures).find(o => o.id !== f.id && isSmall(o) && Math.floor(o.x) === Math.floor(f.x) && Math.floor(o.z) === Math.floor(f.z));
+        if (mate && (mate.rot || 0) !== (f.rot || 0)) f.rot = mate.rot || 0;
+      }
       if (msg.done && f.owner) {                  // an ally steps on a trap: a hidden one springs into view
         for (const k of cellsOf(f.x, f.z, w, d).map(([i, j]) => i + ',' + j)) {
           const t = state.tiles[k];
@@ -1002,6 +1006,7 @@ function initView() {
   controls.maxPolarAngle = Math.PI * 0.47;
   controls.minDistance = 3; controls.maxDistance = 120;
   controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
   controls.screenSpacePanning = false;          // pan across the table, not up into the air
 
   scene.add(new THREE.HemisphereLight('#dfe6ff', '#3a3226', 0.9));
@@ -1500,7 +1505,7 @@ function updateOverlays() {
   const bySquare = new Map();
   for (const f of Object.values(state.figures)) if (isSmall(f)) { const k = Math.floor(f.x) + ',' + Math.floor(f.z); bySquare.set(k, [...(bySquare.get(k) || []), f.id]); }
   share = new Map();
-  for (const ids of bySquare.values()) if (ids.length > 1) ids.sort().forEach((id, n) => share.set(id, n ? 0.23 : -0.23));
+  for (const ids of bySquare.values()) if (ids.length > 1) ids.sort().forEach((id, n) => share.set(id, n ? 0.2 : -0.2));
   if (changed) for (const f of Object.values(state.figures)) upsertFig(f, true);
   // movement range of the picked mini (yours, or any for the GM) once it has a Dexterity
   if (rangeMesh) { scene.remove(rangeMesh); rangeMesh.dispose(); rangeMesh = null; }
@@ -1598,10 +1603,10 @@ function tick() {
   if (tilesDirty) buildTiles();
   for (const g of figMeshes.values()) {
     const t = g.userData.target, off = dragging?.id === g.userData.id ? 0 : share.get(g.userData.id) || 0;
-    _shareT.set(t.x + off, t.y, t.z);
+    _shareT.set(t.x + off, t.y, t.z + off);       // side by side across the square's diagonal
     g.position.lerp(_shareT, dragging?.id === g.userData.id ? 1 : 0.25);
     g.scale.setScalar(g.scale.x + ((off ? 0.8 : 1) - g.scale.x) * 0.25);   // squeezed in next to another Small
-    if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off > 0 ? 0.45 : 0);   // name tags one above the other
+    if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off < 0 ? 0.5 : 0);   // name tags one above the other (the back one higher)
   }
   controls.update();
   renderer.render(scene, camera);
@@ -1639,6 +1644,10 @@ function paintAt(e) {
 }
 
 let rightClick = null;
+const touchy = matchMedia('(pointer: coarse)').matches;
+const hintText = () => touchy
+  ? 'Drag a mini to move it · hold a mini to turn it · tap an enemy for line of sight · one finger pans · two fingers zoom and rotate'
+  : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
 function onDown(e) {
   if (e.button === 2 && e.target === renderer.domElement) {
     const id = figAt(e);
@@ -1663,12 +1672,23 @@ function onDown(e) {
   const id = figAt(e);
   if (!id) { select(null); return; }
   const f = state.figures[id];
-  select(canMove(f) || (preview && preview.as && f.owner === preview.as) ? id : null);
+  const yours = canMove(f) || (preview && preview.as && f.owner === preview.as);
+  if (!yours && selectedId && state.figures[selectedId]) { hoverId = hoverId === id ? null : id; return; }
+  select(yours ? id : null);
   if (!canMove(f)) return;
   e.stopPropagation();                          // the camera stays put while a mini is dragged
   const p = floorAt(e);
-  dragging = { id, dx: p ? f.x - p.x : 0, dz: p ? f.z - p.z : 0, moved: false, from: { x: f.x, z: f.z } };
+  dragging = { id, dx: p ? f.x - p.x : 0, dz: p ? f.z - p.z : 0, moved: false, from: { x: f.x, z: f.z }, sx: e.clientX, sy: e.clientY };
   figMeshes.get(id).userData.target.y += 0.35;  // lift it a little while held
+  if (e.pointerType === 'touch') dragging.hold = setTimeout(() => {
+    const d = dragging;
+    if (!d || d.id !== id || d.far) return;
+    dragging = null;                            // held still: turn it instead of moving it
+    const g = figMeshes.get(id), c = fp(f);
+    if (g) g.userData.target.set(f.x, groundAt(f.x, f.z, c.w, c.d), f.z);
+    act({ t: 'edit', id, turn: true });
+    navigator.vibrate?.(25);
+  }, 550);
 }
 
 function onMove(e) {
@@ -1681,8 +1701,12 @@ function onMove(e) {
     return;
   }
   if (!dragging) {
-    if (e.target === renderer?.domElement) { const h = figAt(e); if (h !== hoverId) hoverId = h; }
+    if (e.pointerType === 'mouse' && e.target === renderer?.domElement) { const h = figAt(e); if (h !== hoverId) hoverId = h; }
     return;
+  }
+  if (!dragging.far) {                          // a little wobble isn't a drag (matters for hold-to-turn)
+    if (Math.hypot(e.clientX - dragging.sx, e.clientY - dragging.sy) < 8) return;
+    dragging.far = true; clearTimeout(dragging.hold);
   }
   const p = floorAt(e);
   if (!p) return;
@@ -1702,6 +1726,7 @@ function onUp(e) {
   }
   painting = false; boardDrag = null;
   if (!dragging) return;
+  clearTimeout(dragging.hold);
   const d = dragging, g = figMeshes.get(d.id);
   dragging = null;
   if (!g) return;
@@ -1896,10 +1921,7 @@ function renderEvent() {
     addLog({ kind: 'sys', text: paused ? '⏸ Paused while the GM resolves an event.' : '▶ The event is resolved: play on.' });
   }
   renderPause();
-  // the big throw button over the table, for the first event waiting on a die
-  const first = (state.pending || []).find(p => (p.kind || 'event') === 'event');
-  $('bigThrow').style.display = first && gmView() ? '' : 'none';
-  $('bigThrow').onclick = () => first && act({ t: 'dungeonEvent', pid: first.id });
+  $('eventBox').style.display = gmView() && ((state.pending || []).length || state.event) ? '' : 'none';
   const box = $('eventBox'), P = state.pending || [], E = state.event;
   box.innerHTML = '';
   for (const p of P) {
@@ -1990,6 +2012,7 @@ function readMap(file) {
 function enterGame() {
   $('lobby').style.display = 'none';
   $('game').style.display = 'block';
+  $('hint').textContent = hintText();
   document.body.classList.toggle('gm', isHost);
   $('roomCode').textContent = roomCode;
   $('whoAmI').textContent = isHost ? `You are the GM (${myName}). You can move everything.` : `You are ${myName}. You can move your own mini (white ring).`;
@@ -2105,8 +2128,8 @@ function wirePanel() {
     $('paintBtn').textContent = on ? 'Paint: ON' : 'Paint: off';
     $('paintBtn').classList.toggle('on', on);
     updateFoldNotes();
-    $('hint').textContent = on ? 'Painting: click or drag to place tiles · right-drag to rotate · scroll to zoom'
-      : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
+    $('hint').textContent = on ? (touchy ? 'Painting: tap or drag to place tiles · two fingers to zoom and rotate' : 'Painting: click or drag to place tiles · right-drag to rotate · scroll to zoom')
+      : hintText();
   };
   $('paintBtn').onclick = () => setPaint(!paintMode);
   $('fillTiles').onclick = () => {
@@ -2159,8 +2182,8 @@ function wirePanel() {
     $('moveBoards').textContent = on ? 'Move boards: ON' : 'Move boards: off';
     $('moveBoards').classList.toggle('on', on);
     if (on && paintMode) $('paintBtn').click();
-    $('hint').textContent = on ? 'Moving boards: drag a board to move it (it snaps to whole squares) · right-drag to rotate · scroll to zoom'
-      : 'Drag a mini to move it · right-click a mini to turn it · right-drag to rotate · drag empty space to pan · scroll to zoom';
+    $('hint').textContent = on ? 'Moving boards: drag a board to move it (it snaps to whole squares) · ' + (touchy ? 'two fingers to zoom and rotate' : 'right-drag to rotate · scroll to zoom')
+      : hintText();
   }
   $('moveBoards').onclick = () => setMoveBoards(!moveBoards);
   $('mapFile').onchange = async () => {

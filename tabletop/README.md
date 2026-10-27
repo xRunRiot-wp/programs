@@ -47,6 +47,8 @@ player, so their own mini gets its white ring. **Back to GM view** returns. Noth
 - Drag a mini to move it (it snaps to the squares; turn **Snap to squares** off for free placement).
 - Right-click a mini to turn it.
 - Right-drag to rotate the view, drag empty space to pan, scroll to zoom.
+- **Phones and tablets:** drag a mini with your finger, hold a mini to turn it, tap someone else's mini (with yours
+  picked) for line of sight, one finger pans, two fingers pinch to zoom and twist/drag to rotate. **Menu** opens the panel.
 - GM: select a mini and press **Delete** to remove it.
 
 ## Dungeon play (PokéRole-style grid rules)
@@ -55,7 +57,8 @@ player, so their own mini gets its white ring. **Back to GM view** returns. Noth
 Immobilized, Slowed, Sped Up...). Players see their own mini's stats. The name tag shows an HP bar and the statuses.
 
 **Movement range.** A picked mini with a Dexterity lights up the squares it can reach: 2 + Dexterity squares.
-Minis can't stop on another mini's square, except that two **Small** minis may share one (they stand side by side).
+Minis can't stop on another mini's square, except that two **Small** minis may share one (they stand diagonally
+across it, facing the same way).
 Difficult ground (swamp, water, river, snow) costs 2 per square; walls, hedges, fences, rocks, trees and pits
 block; you can't slip diagonally past a wall corner; you can pass other minis but not stop on them.
 Immobilized means 0. A diagonal step counts as 1 square.
@@ -95,7 +98,7 @@ treasure and clues, loot rarity (2d6 + floor modifier), the Threat Counter and S
 - **Dungeon goal** (glowing crystal, ★): reaching it lets the GM announce the mission complete.
 While an event waits for the GM (the die not thrown yet, or its card still open) the game is **paused**: players
 can't move, End turn or Dash until the GM clicks **Done** on the card. A big **🎲 Throw the event d6** button
-appears over the table for the GM.
+appears over the table for the GM, and the event card then shows in the same spot.
 Each event card also has a **Place ...** button that picks the matching piece so the GM can click it onto the board.
 
 **Hidden areas.** Each board is one dungeon area. **+ Add hidden area** makes a board the players can't see
