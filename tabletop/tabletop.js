@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=45';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=45';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=46';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=46';
 
-const VERSION = 45;                              // raised by bump.py on every publish
+const VERSION = 46;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3082,7 +3082,13 @@ function renderLibrary() {
 }
 
 const _shareT = new THREE.Vector3();
-function tick() {
+// keep the graphics card free for everything else (Adam: a video on his other monitor stalled with the GM and test windows open):
+// at most 60 frames a second, 30 in a window without focus while dice or moves play, 12 while it just sits there
+let lastFrame = 0;
+function tick(now) {
+  const fps = document.hasFocus() ? 60 : rolls.length || fxList.length || dragging ? 30 : 12;
+  if (now - lastFrame < 1000 / fps - 2) return;
+  lastFrame = now;
   animateDice(performance.now());
   animateFx(performance.now());
   updatePrompts();
@@ -3885,7 +3891,7 @@ $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('j
 if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('joinBtn').click(); }   // straight in
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
+window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
   hover(id) { hoverId = id; },
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
