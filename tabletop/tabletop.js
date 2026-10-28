@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=47';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=47';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=48';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=48';
 
-const VERSION = 47;                              // raised by bump.py on every publish
+const VERSION = 48;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -634,10 +634,18 @@ function handle(msg, from) {
     case 'partyNext': {
       if (!gm) return;
       if (state.paused) { note(from, 'Resolve the event first (throw the die / Done).'); return; }
-      state.party = { turn: state.party.turn + 1, from: {}, dash: {} };
-      addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
-      countDown(); clearAreas();
-      pushParty();
+      nextPartyTurn();
+      break;
+    }
+    case 'partyDone': {                         // exploring: a player ends their turn; when every ally is done, the next party turn starts
+      if (!mayMove || state.combat || !f.owner) return;
+      const P = state.party, done = P.done ||= {};
+      if (done[f.id]) { delete done[f.id]; addLog({ kind: 'sys', text: `${f.name} isn't done after all.` }); pushParty(); return; }
+      done[f.id] = true;
+      addLog({ kind: 'sys', text: `${f.name} ends their turn.` });
+      const team = Object.values(state.figures).filter(x => x.owner && !x.parent && figVisible(x));
+      if (!state.paused && team.every(x => done[x.id])) nextPartyTurn();
+      else pushParty();
       break;
     }
     case 'partyDash': {                         // exploring: Dash for one ally this party turn (press again to undo)
@@ -1494,6 +1502,10 @@ function renderActBar() {
   const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0);
   $('actBag').textContent = `🎒 Bag${n ? ` (${n})` : ''}`;
   $('actMore').disabled = !!preview;
+  const over = !c && P.done?.[f.id];
+  $('actEnd').disabled = !!preview || (c && !myTurn);
+  $('actEnd').textContent = over ? '↩ Not done' : '⏭ End turn';
+  $('actEnd').title = c ? (myTurn ? `End ${f.name}'s turn` : `Wait for ${f.name}'s turn`) : over ? 'Take it back: you still want to move or act' : 'Done for this party turn: when every player is done, the next one starts';
   renderActions();
 }
 
@@ -1757,6 +1769,12 @@ function worldFor(f) {
   const occupied = (i, j) => { const k = i + ',' + j; return full.has(k) || (smalls.get(k) || 0) >= (mine ? 2 : 1); };
   const seen = f.owner ? state.boards.filter(shown) : state.boards;   // allies' paths stay on what they can see
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied, wall: edgeWall };
+}
+function nextPartyTurn() {
+  state.party = { turn: state.party.turn + 1, from: {}, dash: {}, done: {} };
+  addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
+  countDown(); clearAreas();
+  pushParty();
 }
 function pushParty() { renderActBar(); renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
 function pushCombat() { renderActBar(); renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
@@ -3731,6 +3749,7 @@ function wirePanel() {
     status(`${touchy ? 'Tap' : 'Click'} the mini ${f.name} attacks (Esc to cancel)`);
   };
   $('actDash').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatDash' } : { t: 'partyDash', id: f.id }); };
+  $('actEnd').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatNext' } : { t: 'partyDone', id: f.id }); };
   $('actBag').onclick = () => { const b = $('bagPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('actPanel').style.display = 'none'; renderBag(); };
   $('bagClose').onclick = () => { $('bagPanel').style.display = 'none'; };
   $('actMore').onclick = () => { const b = $('actPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('bagPanel').style.display = 'none'; renderActions(); };
