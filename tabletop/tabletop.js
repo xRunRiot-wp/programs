@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=51';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=51';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=52';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=52';
 
-const VERSION = 51;                              // raised by bump.py on every publish
+const VERSION = 52;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -52,7 +52,7 @@ const TILES = {
   campfire: { name: 'Campfire', group: 'Events', color: '#ff8a1e', h: 0, piece: 'campfire' },
   clue: { name: 'Clue', group: 'Events', color: '#e8d9a8', h: 0, piece: 'clue' },
   goal: { name: 'Dungeon goal', group: 'Events', color: '#5fe0ff', h: 0, piece: 'goal' },
-  stairs: { name: 'Stairs', group: 'Events', color: '#9a958c', h: 0, piece: 'stairs', seams: true },
+  stairs: { name: 'Stairs', group: 'Events', color: '#9a958c', h: 0.19, piece: 'stairs', seams: true },   // h = the top step: minis and the move range sit on it
 };
 const INTERACT = { event: '❔ Interact', chest: '📦 Open chest', clue: '📜 Check clue', goal: '⭐ Dungeon goal' };
 const linked = (a, b) => !!(TILES[a]?.link && TILES[a].link === TILES[b]?.link);
@@ -2307,9 +2307,9 @@ function piecesFor(type, x, z, links, seed, put) {
       put('rock', 'rock', place(x, 0.08, z, 0.4, 0.16, 0.35, rand(2) * 6));
       put('post', 'paper', place(x, 0.2, z, 0.08, 0.32, 0.08, rand(3) * 6, Math.PI / 2));
       break;
-    case 'stairs':                              // a stone slab with steps climbing to the north
-      put('box', 'stairs', place(x, 0.03, z, 0.96, 0.06, 0.96));
-      for (let k = 0; k < 3; k++) put('box', 'stairs', place(x, 0.04 + k * 0.04, z + 0.27 - k * 0.27, 0.8, 0.08 + k * 0.08, 0.26));
+    case 'stairs':                              // a stone slab standing clear of any floor (0.06), with steps climbing to the north
+      put('box', 'stairs', place(x, 0.05, z, 0.96, 0.1, 0.96));
+      for (let k = 0; k < 3; k++) put('box', 'stairs', place(x, 0.1 + (k + 1) * 0.015, z + 0.27 - k * 0.27, 0.8, (k + 1) * 0.03, 0.26));
       break;
     case 'goal':                                // a tall glowing crystal
       put('rock', 'crystal', place(x, 0.55, z, 0.42, 1.1, 0.42, rand(1) * 6));
@@ -3935,7 +3935,7 @@ $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('j
 if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('joinBtn').click(); }   // straight in
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
+window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, select: id => select(id), get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
   hover(id) { hoverId = id; },
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
