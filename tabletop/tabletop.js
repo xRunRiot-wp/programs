@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=40';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=40';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=41';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=41';
 
-const VERSION = 40;                              // raised by bump.py on every publish
+const VERSION = 41;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1050,7 +1050,7 @@ async function rollPhysics(msg, from, logText) {
   const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
   const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: box, random: rnd });
   const parts = diceTotal(kinds, values), total = parts.reduce((a, c) => a + c, 0);
-  const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames, pool: !!msg.pool && sides === 6 };
+  const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames, pool: !!msg.pool && sides === 6, chance: !!msg.chance && sides === 6 };
   const to = msg.hidden ? from : null;
   showDice(roll);
   sendAll(roll, to ? cid => cid === to : null);
@@ -1170,7 +1170,7 @@ async function chanceRoll(f, tg, mv, from, at, dir) {
   if (!m) return;
   const n = Math.max(1, Math.min(10, +m[1])), what = m[2].trim();
   await new Promise(ok => setTimeout(ok, 600));
-  await rollPhysics({ sides: 6, n, at, dir }, from, (t, parts) =>
+  await rollPhysics({ sides: 6, n, chance: true, at, dir }, from, (t, parts) =>
     `${mv.name} chance dice (${n}, a 6 triggers it): ${parts.join(', ')} - ${parts.includes(6) ? `yes! ${what}` : 'no effect'}`);
 }
 
@@ -1291,6 +1291,11 @@ function animateDice(now) {
         let ok = 0;
         r.meshes.forEach((m, d) => { const v = readDie(dieKit('d6'), last[d].slice(3)); if (v >= 4) ok++; m.material = dieMaterials(dieKit('d6'), v >= 4 ? '#2fae4f' : '#c8382f'); });
         text = `${ok} success${ok === 1 ? '' : 'es'}`;
+      } else if (r.chance) {                    // chance dice: only a 6 counts, so 6s turn green and the badge says if one came up
+        const last = r.frames[n - 1];
+        let six = 0;
+        r.meshes.forEach((m, d) => { const v = readDie(dieKit('d6'), last[d].slice(3)); if (v === 6) six++; m.material = dieMaterials(dieKit('d6'), v === 6 ? '#2fae4f' : '#8a8a8a'); });
+        text = six ? 'a 6: it works!' : 'no 6: no effect';
       }
       r.badge = labelSprite(text); r.badge.position.set(c.x, 1.1, c.z); r.badge.scale.set(2.4, 0.6, 1);
       scene.add(r.badge);
