@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=48';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=48';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=49';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=49';
 
-const VERSION = 48;                              // raised by bump.py on every publish
+const VERSION = 49;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -364,7 +364,7 @@ function handle(msg, from) {
       const exploring = !gm && state.rules.limit && !state.combat && !!f.owner;    // party turn: from where it started
       if (limited && turn?.id !== f.id) { pushFig(f); note(from, `It's not ${f.name}'s turn.`); return; }
       if (f._from == null) f._from = { x: ox, z: oz };
-      if (!state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
+      if (!gm && !state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
       let boards = state.boards;
       if (!gm) boards = state.boards.filter(shown);
@@ -375,10 +375,12 @@ function handle(msg, from) {
         pushFig(f); return;
       }
       Object.assign(f, msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards));
+      let step = null;                            // movement this move used up (walking back costs too, Adam)
       if (msg.done && (limited || exploring)) {   // only as far as this turn's movement allows
         const o = limited ? state.combat.from : state.party.from[f.id];
         const budget = moveBudget(f) * (1 + (limited ? state.combat.dash || 0 : state.party.dash[f.id] ? 1 : 0)) - (o.used || 0);
-        if (!reachable(worldFor(f), o.x, o.z, w, d, budget, state.rules.diag).has(`${f.x},${f.z}`)) {
+        step = reachable(worldFor(f), o.x, o.z, w, d, budget, state.rules.diag).get(`${f.x},${f.z}`) ?? null;
+        if (step == null) {
           const taken = cellsOf(f.x, f.z, w, d).some(([i, j]) => worldFor(f).occupied(i, j));
           Object.assign(f, f._from);
           note(from, taken ? `${f.name} can't stand on another mini's square.` : `${f.name} can't reach that square this turn (${budget} movement).`);
@@ -389,7 +391,17 @@ function handle(msg, from) {
         if (cellsOf(f.x, f.z, w, d).some(([i, j]) => W.occupied(i, j))) {
           Object.assign(f, f._from);
           note(from, `${f.name} can't stand on another mini's square.`);
+          step = null;
         }
+      }
+      if (gm && msg.done && f.owner) {            // the GM puts a player's mini somewhere: the rest of its move starts there
+        const P = state.party.from[f.id], C = state.combat?.order[state.combat.turn]?.id === f.id && state.combat.from;
+        if (P && !state.combat) { state.party.from[f.id] = { ...P, x: f.x, z: f.z }; pushParty(); }
+        if (C) { state.combat.from = { ...C, x: f.x, z: f.z }; pushCombat(); }
+      }
+      if (step) {                                 // the move counts: the rest of the turn starts from here
+        const o = limited ? state.combat.from : state.party.from[f.id], now = { x: f.x, z: f.z, used: (o.used || 0) + step };
+        if (limited) { state.combat.from = now; pushCombat(); } else { state.party.from[f.id] = now; pushParty(); }
       }
       if (msg.done) delete f._from;
       if (msg.done && isSmall(f)) {               // sharing a square with another Small: face the same way
@@ -409,15 +421,7 @@ function handle(msg, from) {
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
       if (msg.done && (f.owner || sideOf(f) === 'player')) revealFog(f);
-      if (msg.done && f.owner && state.rules.autoReveal) {
-        // revealing an area locks in the movement spent so far: walking back doesn't hand it out again
-        const o = (limited || exploring) && (limited ? state.combat.from : state.party.from[f.id]);
-        const spent = o && reachable(worldFor(f), o.x, o.z, w, d, Infinity, state.rules.diag).get(`${f.x},${f.z}`);
-        if (revealNextTo(f) && spent) {
-          const now = { x: f.x, z: f.z, used: (o.used || 0) + spent };
-          if (limited) { state.combat.from = now; pushCombat(); } else { state.party.from[f.id] = now; pushParty(); }
-        }
-      }
+      if (msg.done && f.owner && state.rules.autoReveal) revealNextTo(f);
       if (msg.done) save();
       break;
     }
