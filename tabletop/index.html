@@ -125,6 +125,51 @@
   #turnList .turn .nm { flex: 1; }
   #turnList .turn .ini { color: var(--dim); font-variant-numeric: tabular-nums; }
   #turnList .turn.now { background: #3a3220; outline: 1px solid var(--accent); }
+  /* ===== Voice of the Forest / Mystery Dungeon look (Adam 10-28): warm wood panels, pixel font, navy PMD windows on the board ===== */
+  @font-face { font-family: 'PixelOp'; src: url('fonts/PixelOperator.ttf') format('truetype'); font-display: swap; }
+  @font-face { font-family: 'PixelOp'; src: url('fonts/PixelOperator-Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+  :root {
+    --bg: #24170b; --panel: #3a2618; --panel2: #4a2f17; --line: #6b4423;
+    --text: #f7eed6; --dim: #c9a66b; --accent: #f2c14e; --orange: #e07b1f; --danger: #d8412f;
+    --navy: #1b2340; --navy2: #283463; --pix: 'PixelOp', ui-monospace, monospace;
+  }
+  html, body { background: var(--bg); }
+  input, select { background: #24170b; }
+  #side h3, #lobby h1, #gmTabs button, #actBar button, #floorTag, #floorBanner, #hud, #msgBox, .prompt, #status { font-family: var(--pix); }
+  #side h3 { font-size: 15px; letter-spacing: .04em; color: var(--accent); }
+  button.primary { background: var(--orange); border-color: #b85f12; color: #fffaf0; box-shadow: 0 2px 0 #8a4a10; }
+  button.primary:active { transform: translateY(1px); box-shadow: none; }
+  #gmTabs button.on { background: var(--orange); color: #fffaf0; border-color: #b85f12; }
+  #log { background: #24170b; }
+  /* the PMD window: navy, a light inner frame, a dark outer edge */
+  .pmd, #actBar, #floorTag, #status, #hud, #msgBox, #actPanel, #bagPanel, #atkPanel, .prompt {
+    background: linear-gradient(180deg, var(--navy2), var(--navy)) !important; color: #fff;
+    border: 2px solid #dfe6ff; border-radius: 10px; box-shadow: 0 0 0 2px #0b1020, inset 0 0 0 2px #3b4a8a, 0 6px 16px #000a;
+  }
+  #actBar button { background: #2f3d78; border-color: #6f82d0; color: #fff; font-size: 18px; }
+  #actBar button:hover:not(:disabled) { border-color: var(--accent); }
+  #actBar button.primary { background: var(--orange); border-color: #ffd28a; }
+  #actBar button[data-key]::after { content: attr(data-key); font: 700 12px var(--pix); color: var(--accent); margin-left: 6px; opacity: .8; vertical-align: super; }
+  @media (hover: none) { #actBar button[data-key]::after { content: none; } }
+  #floorTag { color: var(--accent); font-size: 18px; padding: 4px 14px; }
+  #floorBanner { font-family: var(--pix); background: radial-gradient(#000c, #000e); }
+  #floorBanner .fl { color: var(--accent); }
+  /* the player's mini at the top left, like the dungeon HUD */
+  #hud { position: absolute; left: 10px; top: 10px; z-index: 4; padding: 6px 12px 8px; min-width: 190px; pointer-events: none; display: none; }
+  #hud .hn { font-size: 18px; font-weight: 700; display: flex; justify-content: space-between; gap: 10px; }
+  #hud .hn small { color: var(--accent); font-size: 14px; }
+  #hud .hpb { height: 9px; background: #0b1020; border: 1px solid #6f82d0; border-radius: 5px; margin-top: 4px; overflow: hidden; }
+  #hud .hpb i { display: block; height: 100%; background: #3fbf4f; transition: width .3s; }
+  #hud .ht { font-size: 14px; color: #cfd8ff; margin-top: 3px; }
+  #status { top: auto; bottom: 120px; left: 50%; transform: translateX(-50%); font-size: 16px; padding: 6px 14px; z-index: 7; }
+  @media (min-width: 701px) { #status { left: calc(50% - 150px); } }
+  /* newest log lines over the board, like the dungeon's message box */
+  #msgBox { position: absolute; left: 10px; bottom: 44px; z-index: 3; width: min(360px, calc(100% - 20px)); padding: 6px 12px; font-size: 16px; line-height: 1.3;
+    pointer-events: none; opacity: 0; transition: opacity .5s; }
+  #msgBox.on { opacity: 1; }
+  #msgBox div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body:not(.gm) #msgBox, body.previewing #msgBox { bottom: 118px; }    /* players: above the button bar */
+  @media (max-width: 1100px) { #msgBox { display: none; } }
   #tileTypes .tilehead { grid-column: 1 / -1; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 0; }
   #tileTypes button { padding: 4px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
   #tileTypes button i { width: 26px; height: 14px; border-radius: 3px; display: block; border: 1px solid #0006; }
@@ -201,6 +246,8 @@
 <div id="game">
   <div id="view"></div>
   <div id="status"></div>
+<div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div></div>
+<div id="msgBox"></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
   <div id="prompts"></div>
@@ -241,11 +288,11 @@
     <div class="row evb"><button id="actClose" class="fit">Close</button></div>
   </div>
   <div id="actBar" style="display:none">
-    <button id="actAttack" class="primary">⚔ Attack</button>
-    <button id="actDash">💨 Dash</button>
-    <button id="actMore">🎯 Actions</button>
-    <button id="actBag">🎒 Bag</button>
-    <button id="actEnd">&#9197; End turn</button>
+    <button id="actAttack" class="primary" data-key="A" title="Attack (A)">⚔ Attack</button>
+    <button id="actDash" data-key="D" title="Dash (D)">💨 Dash</button>
+    <button id="actMore" data-key="Q" title="Actions (Q)">🎯 Actions</button>
+    <button id="actBag" data-key="B" title="Bag (B)">🎒 Bag</button>
+    <button id="actEnd" data-key="E">&#9197; End turn</button>
   </div>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
@@ -541,6 +588,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=54"></script>
+<script type="module" src="tabletop.js?v=55"></script>
 </body>
 </html>

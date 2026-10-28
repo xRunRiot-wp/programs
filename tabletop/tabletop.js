@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=54';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=54';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=55';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=55';
 
-const VERSION = 54;                              // raised by bump.py on every publish
+const VERSION = 55;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2613,6 +2613,7 @@ function updateOverlays() {
   const key = `${preview ? 'p' + preview.as : 'g'}|${selectedId}|${figsVersion}|${tilesVersion}|${dragging ? dragging.id : ''}|${JSON.stringify(state.combat && [state.combat.turn, state.combat.dash])}|${JSON.stringify(state.party)}|${state.rules.diag}|${hoverId}`;
   if (key === overlayKey) return;
   overlayKey = key;
+  renderHud();
   // Engaged: a player's mini next to a GM mini (both with stats)
   const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null && (!isHost || gmView() || figVisible(f)));
   const now = new Set();
@@ -3444,6 +3445,36 @@ function renderLogEntry(e) {
   el.appendChild(d);
   while (el.children.length > 200) el.firstChild.remove();
   if (atEnd) el.scrollTop = el.scrollHeight;
+  if (e.kind !== 'chat') showMsg(d.cloneNode(true));
+}
+// the newest lines also show over the board for a few seconds, like the dungeon's message box
+let msgTimer = 0;
+function showMsg(line) {
+  const box = $('msgBox');
+  if (!box || !$('game') || $('game').style.display !== 'block') return;
+  box.appendChild(line);
+  while (box.children.length > 3) box.firstChild.remove();
+  box.classList.add('on');
+  clearTimeout(msgTimer);
+  msgTimer = setTimeout(() => { box.classList.remove('on'); setTimeout(() => { if (!box.classList.contains('on')) box.innerHTML = ''; }, 600); }, 7000);
+}
+// the player's own mini at the top left: name, HP, statuses and whose turn it is
+function renderHud() {
+  const hud = $('hud'), f = !gmView() && actMini();
+  if (!hud) return;
+  hud.style.display = f ? 'block' : 'none';
+  if (!f) return;
+  const st = f.st || {}, hp = st.hp, max = st.hpMax;
+  $('hudName').textContent = f.name;
+  $('hudHp').textContent = max ? `HP ${hp ?? max}/${max}` : '';
+  const k = max ? Math.max(0, Math.min(1, (hp ?? max) / max)) : 1;
+  $('hudBar').style.width = (k * 100) + '%';
+  $('hudBar').style.background = k > 0.5 ? '#3fbf4f' : k > 0.25 ? '#e5b62c' : '#d8412f';
+  $('hudBar').parentNode.style.display = max ? '' : 'none';
+  const c = isHost && !gmView() ? combatView() : state.combat, D = state.dungeon;
+  const cur = c && state.figures[c.order[c.turn]?.id];
+  const turn = c ? (cur?.id === f.id ? 'Your turn!' : `${cur && figVisible(cur) ? cur.name : 'Enemy'}'s turn`) : state.party?.done?.[f.id] ? 'Waiting for the others' : 'Exploring';
+  $('hudTurn').textContent = [D ? `B${D.floor}F` : '', turn, (st.status || []).join(', ')].filter(Boolean).join(' · ');
 }
 function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !isHost || gmView() || e.to === viewerId()).forEach(renderLogEntry); }
 
@@ -3778,6 +3809,12 @@ function wirePanel() {
   };
   $('actDash').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatDash' } : { t: 'partyDash', id: f.id }); };
   $('actEnd').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatNext' } : { t: 'partyDone', id: f.id }); };
+  addEventListener('keydown', e => {            // the bar's buttons from the keyboard: A attack, D dash, Q actions, B bag, E end turn
+    if (e.ctrlKey || e.metaKey || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+    if ($('actBar').style.display === 'none') return;
+    const b = $({ a: 'actAttack', d: 'actDash', q: 'actMore', b: 'actBag', e: 'actEnd' }[e.key.toLowerCase()]);
+    if (b && !b.disabled) { e.preventDefault(); b.click(); }
+  });
   $('actBag').onclick = () => { const b = $('bagPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('actPanel').style.display = 'none'; renderBag(); };
   $('bagClose').onclick = () => { $('bagPanel').style.display = 'none'; };
   $('actMore').onclick = () => { const b = $('actPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('bagPanel').style.display = 'none'; renderActions(); };

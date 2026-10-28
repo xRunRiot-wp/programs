@@ -241,3 +241,8 @@ It's four static files (`index.html`, `tabletop.js`, `dice.js` and `rules.js`) w
 - **Rooms are bigger:** fewer rooms (3-6), each at least 6 x 5. Floor sizes are 20 x 14, 28 x 20 and 36 x 26.
 - **Layers** (Boards tab): each layer is its own set of boards, 200 squares apart on the table. The GM looks at one layer at a time (**Layer** list, **+ New layer**). Players only see the layer the team is on. A random floor made on another layer waits there. Stairs on the team's layer take everyone to the next layer (into a waiting floor's first room); otherwise they make a fresh floor as before. **Move the team to this layer** does it by hand.
 
+
+## Look (v55)
+
+Voice of the Forest / Mystery Dungeon style: warm wood panels, navy dungeon windows on the board, a top-left HUD (name, HP, turn, statuses), a message box with the newest log lines, keyboard shortcuts on the player bar (A attack, D dash, Q actions, B bag, E end turn).
+Font: Pixel Operator by Jayvee Enaguas (CC0), in fonts/.
