@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=57';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=57';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=58';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=58';
 
-const VERSION = 57;                              // raised by bump.py on every publish
+const VERSION = 58;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1156,8 +1156,8 @@ function matchup(type, foeTypes) {
   if (foeTypes.some(t => imm.includes(t))) return { immune: true, mod: 0 };
   return { immune: false, mod: foeTypes.filter(t => sup.includes(t)).length - foeTypes.filter(t => nve.includes(t)).length };
 }
-// pain: at half HP or less 1 success is lost, at 1 HP 2
-const painOf = f => { const h = f.st?.hp, m = f.st?.hpMax; return h == null || !m || h <= 0 ? 0 : h <= 1 ? 2 : h <= m / 2 ? 1 : 0; };
+// pain: at half HP or less 1 success is lost, at 1 HP 2 -- only when hurt (a mini with 1 max HP at full health feels no pain)
+const painOf = f => { const h = f.st?.hp, m = f.st?.hpMax; return h == null || !m || h <= 0 || h >= m ? 0 : h <= 1 ? 2 : h <= m / 2 ? 1 : 0; };
 function cleanMove(m) {
   if (!m || typeof m !== 'object') return null;
   const name = clean(m.name, 40);
