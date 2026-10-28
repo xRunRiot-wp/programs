@@ -180,6 +180,9 @@ Blender, Sketchfab and most free mini packs can export .glb.
 Built-in models come with the site and show up in the same **3D model** list: right now **Golett**.
 A mini linked to a Golett on the Voice of the Forest site gets the Golett model by itself (if it has no model yet).
 
+Credits: the Golett model is ["Golett"](https://sketchfab.com/3d-models/golett-0d239c883bc54a4f94a3e15ac789e378) by nguyenlouis32,
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (material converted to standard glTF, otherwise unchanged).
+
 ## Putting it on another website
 
 It's four static files (`index.html`, `tabletop.js`, `dice.js` and `rules.js`) with no build step. Copy them to any web host
