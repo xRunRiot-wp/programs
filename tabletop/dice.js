@@ -180,7 +180,7 @@ export function readDie(kit, q) {
 // Run a throw. kinds: list of die kinds. from/dir: where it's thrown from and which way (board units).
 // bounds: the table's edges { x0, x1, z0, z1 }; the dice bounce off them.
 // Returns recorded frames (30 per second) of [x,y,z,qx,qy,qz,qw] per die, and each die's number.
-export function simulate(CANNON, kinds, { from, dir, bounds, random = Math.random }) {
+export function simulate(CANNON, kinds, { from, dir, bounds, random = Math.random, blocks = [] }) {
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -38, 0) });
   world.allowSleep = true;
   world.broadphase = new CANNON.NaiveBroadphase();
@@ -196,6 +196,20 @@ export function simulate(CANNON, kinds, { from, dir, bounds, random = Math.rando
   wall([0, 1, 0], 0);
   wall([1, 0, 0], -bounds.x0); wall([-1, 0, 0], bounds.x1);
   wall([0, 0, 1], -bounds.z0); wall([0, 0, -1], bounds.z1);
+  // minis and walls on the table are solid, so dice bounce off them instead of landing inside (x, z = middle, w x d squares, h tall)
+  // a mini (round) = straight sides, so a die settles flat next to it, with a ball on top, so a die rolls off instead of resting up there
+  for (const k of blocks) {
+    const b = new CANNON.Body({ mass: 0 });
+    if (k.round) {
+      b.addShape(new CANNON.Box(new CANNON.Vec3(0.42, 0.35, 0.42)), new CANNON.Vec3(0, 0.35, 0));
+      b.addShape(new CANNON.Sphere(0.45), new CANNON.Vec3(0, 0.75, 0));
+      b.position.set(k.x, 0, k.z);
+    } else {
+      b.addShape(new CANNON.Box(new CANNON.Vec3(k.w / 2, k.h / 2, k.d / 2)));
+      b.position.set(k.x, k.h / 2, k.z);
+    }
+    world.addBody(b);
+  }
 
   const len = Math.hypot(dir.x, dir.z) || 1, dx = dir.x / len, dz = dir.z / len;
   const bodies = kinds.map((kind, i) => {

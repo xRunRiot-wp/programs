@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=52';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=52';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=53';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=53';
 
-const VERSION = 52;                              // raised by bump.py on every publish
+const VERSION = 53;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1097,7 +1097,14 @@ async function rollPhysics(msg, from, logText) {
   const at = { x: num(msg.at?.x, box.x0, box.x1), z: num(msg.at?.z, box.z0, box.z1) };
   const dir = { x: num(msg.dir?.x, -1, 1), z: num(msg.dir?.z, -1, 1) || -1 };
   const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
-  const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: box, random: rnd });
+  const near = (x, z) => Math.abs(x - at.x) < 10 && Math.abs(z - at.z) < 10;
+  const blocks = Object.values(state.figures).filter(f => near(f.x, f.z) && !f.hidden).flatMap(f => { const c = fp(f); return cellsOf(f.x, f.z, c.w, c.d).map(([i, j]) => ({ x: i + 0.5, z: j + 0.5, w: 1, d: 1, h: 1, round: true })); });
+  for (const [k, t] of Object.entries(state.tiles)) {
+    if (!['wall', 'hedge', 'rock', 'tree', 'thin', 'fence'].includes(t)) continue;
+    const [i, j] = k.split(',').map(Number);
+    if (near(i + 0.5, j + 0.5)) blocks.push({ x: i + 0.5, z: j + 0.5, w: 1, d: 1, h: 1 });
+  }
+  const { frames, values } = simulate(CANNON, kinds, { from: at, dir, bounds: box, random: rnd, blocks });
   const parts = diceTotal(kinds, values), total = parts.reduce((a, c) => a + c, 0);
   const roll = { t: 'dice', id: rid(6), by: from, color: state.players[from]?.color || '#e0a64b', kinds, frames, pool: !!msg.pool && sides === 6, chance: !!msg.chance && sides === 6 };
   const to = msg.hidden ? from : null;
@@ -1346,7 +1353,8 @@ function animateDice(now) {
         r.meshes.forEach((m, d) => { const v = readDie(dieKit('d6'), last[d].slice(3)); if (v === 6) six++; m.material = dieMaterials(dieKit('d6'), v === 6 ? '#2fae4f' : '#8a8a8a'); });
         text = six ? 'a 6: it works!' : 'no 6: no effect';
       }
-      r.badge = labelSprite(text); r.badge.position.set(c.x, 1.1, c.z); r.badge.scale.set(2.4, 0.6, 1);
+      r.badge = labelSprite(text); r.badge.position.set(c.x, 1.4, c.z); r.badge.scale.set(2.4, 0.6, 1);
+      r.badge.material.depthTest = false; r.badge.renderOrder = 10;   // never hidden behind a mini or a wall
       scene.add(r.badge);
       r.doneAt = now;
     }
