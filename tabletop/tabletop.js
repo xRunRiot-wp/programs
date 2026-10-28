@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=34';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=34';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=35';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=35';
 
-const VERSION = 34;                              // raised by bump.py on every publish
+const VERSION = 35;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -81,6 +81,8 @@ const blobs = (() => {
   return { get: k => run('readonly', s => s.get(k)), set: (k, v) => run('readwrite', s => s.put(v, k)) };
 })();
 const MAX_MODEL = 15 * 1024 * 1024;
+// models that come with the site; a mini linked to a site character of that species gets it by itself
+const BUILTIN = { golett: { name: 'Golett', file: 'models/golett.glb', species: 'Golett' } };
 const modelData = new Map();                    // model id -> .glb bytes (ArrayBuffer)
 const okColor = c => /^#[0-9a-f]{6}$/i.test(c) ? c : '#888888';
 
@@ -480,11 +482,35 @@ function handle(msg, from) {
       renderEvent(); save();
       break;
     }
+    case 'siteLink': {                          // GM: this mini follows a character from the Voice of the Forest site
+      if (!gm || !f) return;
+      if (msg.char) { f.link = clean(msg.char, 40); f.sync = {}; if (!SIDES[f.side]) f.side = 'player'; }
+      else { delete f.link; delete f.sync; }
+      pushFig(f); save();
+      syncSite();
+      break;
+    }
+    case 'siteCode': {
+      if (!gm) return;
+      state.siteCode = clean(msg.code, 24).toUpperCase() || 'VOICE';
+      save(); siteFeed();
+      break;
+    }
+    case 'talk': {                              // a player's mini next to an NPC talks to them: everyone sees it, the GM answers
+      const npc = state.figures[msg.npc];
+      if (!mayMove || !f.owner || !npc || sideOf(npc) !== 'npc' || !figVisible(npc)) return;
+      if (!nextToFig(f, npc)) { note(from, `${f.name} has to stand next to ${npc.name} first.`); return; }
+      addLog({ kind: 'sys', text: `${f.name} talks to ${npc.name}${npc.job ? ` (${npc.job})` : ''}.` });
+      note(state.gm, `${f.name} is talking to ${npc.name}${npc.job ? ` the ${npc.job}` : ''}: answer them in the chat.`);
+      save();
+      break;
+    }
     case 'attack': {                            // a move: accuracy roll, then (on a hit) damage
       const tg = state.figures[msg.target];
       if (!mayMove || !tg || tg.id === f.id || attackBusy) return;
       if (state.paused && !gm) { note(from, 'Paused: the GM is resolving an event.'); return; }
       if (!gm && state.combat && state.combat.order[state.combat.turn]?.id !== f.id) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (!gm && sideOf(tg) === 'npc') { note(from, `${tg.name} is an NPC: stand next to them and click Talk instead.`); return; }
       const mv = cleanMove(msg.move);
       if (!mv) return;
       const num = v => Math.max(0, Math.min(20, Math.round(+v) || 0));
@@ -686,7 +712,13 @@ function handle(msg, from) {
         carry(f.id, f.x - ox, f.z - oz, 0, f);
       }
       if (turned) carry(f.id, 0, 0, turned, f);
-      if (gm && msg.owner !== undefined) { f.owner = msg.owner && state.players[msg.owner] ? msg.owner : null; if (f.owner) joinCombat(f); }
+      if (gm && msg.owner !== undefined) { f.owner = msg.owner && state.players[msg.owner] ? msg.owner : null; if (f.owner) { f.side = 'player'; joinCombat(f); } }
+      if (gm && SIDES[msg.side]) {
+        f.side = msg.side;
+        if (f.side !== 'player') f.owner = null;
+        if (state.combat && !fights(f)) { state.combat.order = state.combat.order.filter(o => o.id !== f.id); pushCombat(); }
+      }
+      if (gm && msg.job != null) f.job = clean(msg.job, 30);
       if (gm && msg.hidden != null) f.hidden = !!msg.hidden;
       if (gm && msg.model !== undefined) f.model = msg.model && state.models[msg.model] ? msg.model : '';
       pushFig(f); save();
@@ -695,9 +727,10 @@ function handle(msg, from) {
     case 'add': {
       if (!gm) return;
       const id = rid(8);
-      const owner = msg.owner && state.players[msg.owner] ? msg.owner : null;
-      state.figures[id] = { id, name: clean(msg.name) || 'Mini', color: okColor(msg.color), size: '1', w: 1, d: 1, owner, hidden: false,
-        ...freeSpot(+msg.x || 0, +msg.z || 0, 1, 1) };
+      const side = SIDES[msg.side] ? msg.side : msg.owner ? 'player' : 'enemy';
+      const owner = side === 'player' && msg.owner && state.players[msg.owner] ? msg.owner : null;
+      state.figures[id] = { id, name: clean(msg.name) || 'Mini', color: okColor(msg.color), size: '1', w: 1, d: 1, owner, hidden: false, side,
+        job: side === 'npc' ? clean(msg.job, 30) : '', ...freeSpot(+msg.x || 0, +msg.z || 0, 1, 1) };
       pushFig(state.figures[id]); save();
       return id;
     }
@@ -1030,6 +1063,75 @@ async function chanceRoll(f, tg, mv, from, at, dir) {
     `${mv.name} chance dice (${n}, a 6 triggers it): ${parts.join(', ')} - ${parts.includes(6) ? `yes! ${what}` : 'no effect'}`);
 }
 
+// ---------- characters from the Voice of the Forest site: read only, the site is never changed from here ----------
+const SITE_DB = 'https://voiceoftheforest-e071c-default-rtdb.firebaseio.com';
+let siteParty = {}, siteES = null, siteCodeOn = '';
+function siteFeed() {
+  const code = (state.siteCode || 'VOICE').toUpperCase();
+  if (!isHost || (siteES && siteCodeOn === code)) return;
+  siteES?.close(); siteParty = {}; siteCodeOn = code;
+  siteES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/party.json`);
+  const apply = (ev, merge) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    const parts = (d.path || '/').split('/').filter(Boolean);
+    const setAt = (path, v) => {
+      if (!path.length) { siteParty = v && typeof v === 'object' ? v : {}; return; }
+      let o = siteParty;
+      for (const k of path.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
+      if (v == null) delete o[path.at(-1)]; else o[path.at(-1)] = v;
+    };
+    if (merge) for (const [k, v] of Object.entries(d.data || {})) setAt([...parts, ...k.split('/')], v);
+    else setAt(parts, d.data);
+    syncSite(); renderSiteChars();
+  };
+  siteES.addEventListener('put', e => apply(e, false));
+  siteES.addEventListener('patch', e => apply(e, true));
+}
+// what the tabletop takes from a site character
+function siteVals(c) {
+  const n = v => Math.max(0, Math.min(99, Math.round(+v) || 0));
+  const attr = {};
+  for (const k of ATTRS) if (c[k] != null && isFinite(+c[k])) attr[k] = n(c[k]);
+  const hpMax = n(c.baseHp) + n(c.Vitality);
+  return { name: clean(c.nickname || c.pokemon, 24) || 'Mini', attr, hpMax, hp: c.hp == null ? hpMax : n(c.hp),
+    dex: attr.Dexterity ?? 0, alert: attr.Alert ?? 0, species: clean(c.pokemon, 40),
+    types: [c.type1, c.type2].filter(t => TYPES[t]), learn: (Array.isArray(c.moves) ? c.moves : []).map(x => clean(x, 40)).filter(Boolean).slice(0, 40),
+    status: (Array.isArray(c.status) ? c.status : []).filter(x => STATUSES.includes(x)).slice(0, 10) };
+}
+// only what changed on the site since last time is copied, so HP the GM changes here stays until the site changes it
+function syncSite() {
+  if (!isHost) return;
+  for (const f of Object.values(state.figures)) {
+    const c = f.link && siteParty[f.link];
+    if (!c) continue;
+    const v = siteVals(c), old = f.sync || {};
+    let changed = false;
+    for (const k of Object.keys(v)) {
+      if (JSON.stringify(v[k]) === JSON.stringify(old[k])) continue;
+      changed = true;
+      if (k === 'name') f.name = v.name;
+      else { f.st = { ...(f.st || {}) }; f.st[k] = v[k]; }
+    }
+    const auto = !f.model && v.species !== old.species && Object.keys(BUILTIN).find(k => BUILTIN[k].species === v.species);
+    if (auto) useBuiltin(auto, f.id);
+    f.sync = v;
+    if (!changed) continue;
+    pushFig(f);
+    if (state.combat && fights(f)) { joinCombat(f); pushCombat(); }
+    save();
+  }
+}
+function renderSiteChars() {
+  const sel = $('selSite'), f = selectedId && state.figures[selectedId];
+  if (!sel || !isHost) return;
+  sel.innerHTML = '<option value="">Not linked</option>';
+  const list = Object.entries(siteParty).filter(([, c]) => c && typeof c === 'object').sort((a, b) => String(a[1].nickname).localeCompare(String(b[1].nickname)));
+  for (const [id, c] of list) { const o = document.createElement('option'); o.value = id; o.textContent = `${c.nickname || '?'}${c.pokemon && c.pokemon !== c.nickname ? ` (${c.pokemon})` : ''}`; sel.appendChild(o); }
+  if (f?.link && !siteParty[f.link]) { const o = document.createElement('option'); o.value = f.link; o.textContent = 'Linked (not found on the site)'; sel.appendChild(o); }
+  sel.value = f?.link || '';
+  if (document.activeElement !== $('siteCode')) $('siteCode').value = state.siteCode || 'VOICE';
+}
+
 // ---------- warp out: once the Dungeon Goal is done, every player votes; all yes = the team warps out ----------
 function startWarp(key) {
   const voters = Object.entries(state.players).filter(([id, p]) => id !== state.gm && p.online !== false && Object.values(state.figures).some(f => f.owner === id)).map(([id]) => id);
@@ -1117,8 +1219,16 @@ function nextToCell(f, key) {
   if (cells.some(([i, j]) => i === ci && j === cj)) return false;
   return cells.some(([i, j]) => Math.abs(i - ci) <= 1 && Math.abs(j - cj) <= 1);
 }
-// in a fight: every player's mini, and GM minis once they have a Dexterity
-const fights = x => !!x.owner || (x.st && x.st.dex != null);
+// enemy, NPC or player (older minis: a player's if someone controls it, else an enemy)
+const SIDES = { enemy: { name: 'Enemy', color: '#e0503c' }, npc: { name: 'NPC', color: '#4aa3e0' }, player: { name: 'Player', color: '#46c46a' } };
+const sideOf = f => (SIDES[f?.side] ? f.side : f?.owner ? 'player' : 'enemy');
+// standing next to another mini (touching, diagonals count)
+function nextToFig(a, b) {
+  const ca = fp(a), cb = fp(b), B = cellsOf(b.x, b.z, cb.w, cb.d);
+  return cellsOf(a.x, a.z, ca.w, ca.d).some(([i, j]) => B.some(([p, q]) => Math.max(Math.abs(i - p), Math.abs(j - q)) === 1));
+}
+// in a fight: every player's mini, and GM minis once they have a Dexterity (NPCs stay out unless the GM adds them)
+const fights = x => sideOf(x) !== 'npc' && (!!x.owner || (x.st && x.st.dex != null));
 function rollInit(x) {
   const st = x.st || {}, roll = rollDie(6), sts = st.status || [];
   return { id: x.id, roll, init: roll + (st.dex || 0) + (st.alert || 0), speed: sts.includes('Sped Up') ? 1 : sts.includes('Slowed') ? -1 : 0, dex: st.dex || 0, tie: Math.random() };
@@ -1774,7 +1884,7 @@ function buildBase(u, w, d, small) {
     const r = 0.42 * (small ? 0.7 : w);
     add(new THREE.CylinderGeometry(r, r + 0.03, 0.1, 40), u.dark, 0.05);
     add(new THREE.CylinderGeometry(r + 0.01, r + 0.01, 0.025, 40), u.col, 0.1);
-    for (const [a, b, color, op, y, key] of [[r + 0.05, r + 0.13, '#ffd23f', 0.95, 0.012, 'ring'], [r + 0.05, r + 0.09, '#ffffff', 0.6, 0.01, 'mine']]) {
+    for (const [a, b, color, op, y, key] of [[r + 0.05, r + 0.13, '#ffd23f', 0.95, 0.012, 'ring'], [r + 0.05, r + 0.09, '#ffffff', 0.6, 0.01, 'mine'], [r + 0.03, r + 0.08, '#ffffff', 0.9, 0.008, 'side']]) {
       const m = new THREE.Mesh(new THREE.RingGeometry(a, b, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, side: THREE.DoubleSide }));
       m.rotation.x = -Math.PI / 2; m.position.y = y; u.base.add(m); u[key] = m;
     }
@@ -1783,6 +1893,7 @@ function buildBase(u, w, d, small) {
     add(new THREE.BoxGeometry(w - 0.16, 0.025, d - 0.16), u.col, 0.1);
     u.ring = frame(w - 0.02, d - 0.02, 0.08, '#ffd23f', 0.95); u.ring.position.y = 0.012; u.base.add(u.ring);
     u.mine = frame(w - 0.02, d - 0.02, 0.04, '#ffffff', 0.6); u.mine.position.y = 0.01; u.base.add(u.mine);
+    u.side = frame(w - 0.06, d - 0.06, 0.05, '#ffffff', 0.9); u.side.position.y = 0.008; u.base.add(u.side);
   }
 }
 
@@ -1794,7 +1905,7 @@ function upsertFig(f, live) {
   const u = g.userData;
   if (dragging?.id !== f.id) { const c = fp(f); u.target.set(f.x, groundAt(f.x, f.z, c.w, c.d), f.z); }
   u.col.color.set(f.color);
-  const text = f.name + (f.hidden ? ' (hidden)' : ''), extra = labelExtra(f), key = text + JSON.stringify(extra);
+  const text = f.name + (sideOf(f) === 'npc' && f.job ? ` · ${f.job}` : '') + (f.hidden ? ' (hidden)' : ''), extra = labelExtra(f), key = text + JSON.stringify(extra);
   if (u.labelText !== key) {
     g.remove(u.label); u.label.material.map.dispose(); u.label.material.dispose();
     u.label = labelSprite(text, extra); u.labelText = key; g.add(u.label);
@@ -1814,6 +1925,7 @@ function upsertFig(f, live) {
   u.pawn.scale.setScalar(sc);
   u.labelY = u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
   u.mine.visible = !!viewerId() && f.owner === viewerId();
+  u.side.material.color.set(SIDES[sideOf(f)].color);
   g.visible = !isHost || gmView() || figVisible(f);
   u.ring.visible = selectedId === f.id;
   for (const m of [u.col, u.dark]) { m.transparent = !!f.hidden; m.opacity = f.hidden ? 0.4 : 1; }
@@ -1851,6 +1963,15 @@ function setModel(g, id, lw, ld, key) {
   }).catch(() => { if (u.modelKey === key) { u.pawn.visible = true; status('A 3D model could not be loaded.'); setTimeout(() => status(''), 4000); } });
 }
 
+async function useBuiltin(key, figId) {
+  const b = BUILTIN[key];
+  if (!b) return;
+  try {
+    const data = await (await fetch(b.file)).arrayBuffer();
+    act({ t: 'model', id: await modelId(data), name: b.name, data, figId });
+  } catch { status('That model could not be loaded.'); setTimeout(() => status(''), 4000); }
+}
+
 async function modelId(buf) {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
   return Array.from(h.slice(0, 8), b => b.toString(16).padStart(2, '0')).join('');
@@ -1872,7 +1993,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -1961,6 +2082,26 @@ function updatePrompts() {
     b.disabled = !!preview;
     const [i, j] = k.split(',').map(Number);
     v.set(i + 0.5, 1.15, j + 0.5).project(camera);
+    b.style.left = (r.width * (v.x + 1) / 2) + 'px';
+    b.style.top = (r.height * (1 - v.y) / 2) + 'px';
+    b.style.display = v.z < 1 ? '' : 'none';
+  }
+  for (const npc of Object.values(state.figures)) {
+    if (sideOf(npc) !== 'npc' || (isHost && !gmView() && !figVisible(npc))) continue;
+    const who = mine.find(f => f.id !== npc.id && nextToFig(f, npc));
+    if (!who) continue;
+    const k = 'npc:' + npc.id;
+    seen.add(k);
+    let b = box.querySelector(`[data-key="${k}"]`);
+    if (!b) {
+      b = document.createElement('button'); b.className = 'prompt talk'; b.dataset.key = k;
+      b.onclick = () => act({ t: 'talk', id: b.dataset.who, npc: npc.id });
+      box.appendChild(b);
+    }
+    b.dataset.who = who.id;
+    b.textContent = `💬 Talk to ${npc.name}${npc.job ? ` (${npc.job})` : ''}`;
+    b.disabled = !!preview;
+    v.set(npc.x, 1.9, npc.z).project(camera);
     b.style.left = (r.width * (v.x + 1) / 2) + 'px';
     b.style.top = (r.height * (1 - v.y) / 2) + 'px';
     b.style.display = v.z < 1 ? '' : 'none';
@@ -2451,6 +2592,8 @@ function showSelected() {
   if (isHost) {
     const sm = $('selModel'); sm.innerHTML = '<option value="">Pawn (no model)</option>';
     for (const [id, m] of Object.entries(state.models)) { const o = document.createElement('option'); o.value = id; o.textContent = m.name; sm.appendChild(o); }
+    const have = new Set(Object.values(state.models).map(m => m.name));
+    for (const [key, b] of Object.entries(BUILTIN)) if (!have.has(b.name)) { const o = document.createElement('option'); o.value = 'builtin:' + key; o.textContent = b.name; sm.appendChild(o); }
     sm.value = f.model || '';
   }
   if (isHost) {
@@ -2464,6 +2607,14 @@ function showSelected() {
     $('selFight').textContent = inFight ? 'Take out of turn order' : 'Add to turn order';
   }
   if (isHost) { ownerOptions($('selOwner'), f.owner); $('selHide').textContent = f.hidden ? 'Show to players' : 'Hide from players'; }
+  if (isHost) renderSiteChars();
+  if (isHost) {
+    const sd = sideOf(f);
+    $('selSide').value = sd;
+    $('selJobRow').style.display = sd === 'npc' ? '' : 'none';
+    $('selOwnerRow').style.display = sd === 'player' ? '' : 'none';
+    if (document.activeElement !== $('selJob')) $('selJob').value = f.job || '';
+  }
 }
 
 function renderPlayers() {
@@ -2755,9 +2906,24 @@ function wirePanel() {
   };
   $('selW').onchange = $('selD').onchange = () => selectedId && act({ t: 'edit', id: selectedId, w: $('selW').value, d: $('selD').value });
   $('selOwner').onchange = () => selectedId && act({ t: 'edit', id: selectedId, owner: $('selOwner').value || null });
+  $('selSide').onchange = () => selectedId && act({ t: 'edit', id: selectedId, side: $('selSide').value });
+  $('selSite').onchange = () => selectedId && act({ t: 'siteLink', id: selectedId, char: $('selSite').value });
+  $('siteCode').onchange = () => act({ t: 'siteCode', code: $('siteCode').value });
+  $('selJob').onchange = () => selectedId && act({ t: 'edit', id: selectedId, job: $('selJob').value });
+  const newSide = () => {
+    const sd = $('newSide').value;
+    $('newJob').style.display = sd === 'npc' ? '' : 'none';
+    $('newOwner').style.display = sd === 'player' ? '' : 'none';
+  };
+  $('newSide').onchange = newSide; newSide();
   $('selHide').onclick = () => selectedId && act({ t: 'edit', id: selectedId, hidden: !state.figures[selectedId].hidden });
   $('selTurn').onclick = () => selectedId && act({ t: 'edit', id: selectedId, turn: true });
-  $('selModel').onchange = () => selectedId && act({ t: 'edit', id: selectedId, model: $('selModel').value });
+  $('selModel').onchange = () => {
+    const v = $('selModel').value;
+    if (!selectedId) return;
+    if (v.startsWith('builtin:')) useBuiltin(v.slice(8), selectedId);
+    else act({ t: 'edit', id: selectedId, model: v });
+  };
   $('modelFile').onchange = async () => {
     const file = $('modelFile').files[0];
     $('modelFile').value = '';
@@ -2878,7 +3044,8 @@ function wirePanel() {
 
   $('addFig').onclick = () => {
     const t = controls.target;
-    const id = handle({ t: 'add', name: $('newName').value, color: $('newColor').value, owner: $('newOwner').value || null, x: t.x, z: t.z }, clientId);
+    const id = handle({ t: 'add', name: $('newName').value, color: $('newColor').value, side: $('newSide').value, job: $('newJob').value,
+      owner: $('newOwner').value || null, x: t.x, z: t.z }, clientId);
     if (id && $('newHidden').checked) handle({ t: 'edit', id, hidden: true }, clientId);
     if (id) select(id);
   };

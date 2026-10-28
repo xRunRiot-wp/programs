@@ -133,6 +133,8 @@
   #prompts .prompt { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; background: #3a2f0a;
     border: 1px solid #ffd23f; color: #ffe9a6; font-weight: 600; padding: 4px 10px; border-radius: 14px; white-space: nowrap; }
   #prompts .prompt:hover { background: #57460f; }
+  #prompts .prompt.talk { background: #0f2f46; border-color: #4aa3e0; }
+  #prompts .prompt.talk:hover { background: #17435f; }
   @media (max-width: 700px) { #prompts { right: 0; } }
   #previewBar { display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4;
     background: #2a2414; border: 1px solid var(--accent); border-radius: 10px; padding: 6px 10px; gap: 10px; align-items: center;
@@ -272,8 +274,18 @@
           <select id="selModel"></select>
           <label class="fit" style="margin:0"><span class="btnlike">Upload .glb</span><input id="modelFile" type="file" accept=".glb,model/gltf-binary" hidden></label>
         </div>
-        <label>Controlled by</label>
-        <select id="selOwner" style="width:100%"></select>
+        <label>Kind</label>
+        <select id="selSide" style="width:100%"><option value="enemy">Enemy</option><option value="npc">NPC</option><option value="player">Player</option></select>
+        <div id="selJobRow"><label>NPC role (shown on its name; players can talk to it)</label>
+          <input id="selJob" maxlength="30" placeholder="e.g. Shopkeeper, Healer, Quest giver" style="width:100%"></div>
+        <label>Character on the Voice of the Forest site</label>
+        <div class="row">
+          <select id="selSite"></select>
+          <input id="siteCode" class="fit" maxlength="24" style="width:76px" title="The site's table code (VOICE unless the GM moved it)">
+        </div>
+        <div style="color:var(--dim);font-size:12px">Linked minis follow the site: name, HP, attributes, skills, types, moves and statuses update here when they change there.</div>
+        <div id="selOwnerRow"><label>Controlled by</label>
+        <select id="selOwner" style="width:100%"></select></div>
         <div class="row" style="margin-top:8px">
           <button id="selHide">Hide from players</button>
           <button id="libSave" class="fit" title="Keep a copy in your saved minis list (players never see the list)">Save to list</button>
@@ -290,9 +302,12 @@
         <input id="newColor" type="color" value="#7a9e3f" class="fit">
       </div>
       <div class="row" style="margin-top:6px">
+        <select id="newSide" class="fit"><option value="enemy">Enemy</option><option value="npc">NPC</option><option value="player">Player</option></select>
+        <input id="newJob" maxlength="30" placeholder="Role (e.g. Shopkeeper)">
         <select id="newOwner"></select>
         <button id="addFig" class="primary fit">Add</button>
       </div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px"><b style="color:#e0503c">Enemies</b> fight. <b style="color:#4aa3e0">NPCs</b> can't be attacked by players; a player standing next to one gets a <b>Talk</b> button. <b style="color:#46c46a">Players</b> are controlled by whoever you pick.</div>
       <label style="color:var(--text);margin-top:6px"><input id="newHidden" type="checkbox"> Hidden from players while I work on it</label>
       <h3 style="margin-top:12px">Saved minis</h3>
       <input id="miniGroup" maxlength="30" list="miniGroups" placeholder="Group for Save to list (e.g. Floor 1 enemies)" style="width:100%">
@@ -425,6 +440,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=34"></script>
+<script type="module" src="tabletop.js?v=35"></script>
 </body>
 </html>

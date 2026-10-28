@@ -177,6 +177,9 @@ Select a mini, then **Upload .glb**. The model is fitted onto the mini's base an
 so many minis can share one model. Keep models under about 5 MB so they load quickly (15 MB is the limit).
 Blender, Sketchfab and most free mini packs can export .glb.
 
+Built-in models come with the site and show up in the same **3D model** list: right now **Golett**.
+A mini linked to a Golett on the Voice of the Forest site gets the Golett model by itself (if it has no model yet).
+
 ## Putting it on another website
 
 It's four static files (`index.html`, `tabletop.js`, `dice.js` and `rules.js`) with no build step. Copy them to any web host
