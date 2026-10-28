@@ -119,6 +119,9 @@ GM decides what it does. Evade and Clash can be used outside your turn.
 **Bag.** One shared team bag: anyone can add items (with the usual Mystery Dungeon items suggested), take one out,
 or press **Use** for their mini: the log says who used what (and what the item usually does); the GM applies it.
 
+**3D models from Sketchfab.** Download the model as **glTF Binary (.glb)** and use **Upload .glb** on the mini. Older
+Sketchfab files with "specular-glossiness" materials (which three.js no longer reads) are converted automatically.
+
 **Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
 (walls, thin walls, hedges, doors and trees block the view), with the distance in squares.
 

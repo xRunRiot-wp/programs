@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=39';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=39';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=40';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=40';
 
-const VERSION = 39;                              // raised by bump.py on every publish
+const VERSION = 40;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2370,6 +2370,32 @@ async function useBuiltin(key, figId) {
   } catch { status('That model could not be loaded.'); setTimeout(() => status(''), 4000); }
 }
 
+// many Sketchfab .glb files need the old "specular-glossiness" materials, which three.js no longer reads:
+// turn them into normal ones (diffuse colour/texture -> base colour) so the upload just works
+function fixGlb(buf) {
+  const dv = new DataView(buf);
+  if (buf.byteLength < 20 || dv.getUint32(0, true) !== 0x46546c67 || dv.getUint32(16, true) !== 0x4e4f534a) return buf;
+  const n = dv.getUint32(12, true), SG = 'KHR_materials_pbrSpecularGlossiness';
+  let j;
+  try { j = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, n))); } catch { return buf; }
+  if (!(j.extensionsUsed || []).includes(SG)) return buf;
+  for (const m of j.materials || []) {
+    const sg = m.extensions?.[SG];
+    if (!sg) continue;
+    m.pbrMetallicRoughness = { baseColorFactor: sg.diffuseFactor || [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 - (sg.glossinessFactor ?? 0.2) };
+    if (sg.diffuseTexture) m.pbrMetallicRoughness.baseColorTexture = sg.diffuseTexture;
+    delete m.extensions[SG];
+    if (!Object.keys(m.extensions).length) delete m.extensions;
+  }
+  for (const k of ['extensionsUsed', 'extensionsRequired']) if (j[k]) { j[k] = j[k].filter(x => x !== SG); if (!j[k].length) delete j[k]; }
+  let text = new TextEncoder().encode(JSON.stringify(j));
+  const pad = (4 - text.length % 4) % 4, rest = new Uint8Array(buf, 20 + n);
+  const out = new Uint8Array(20 + text.length + pad + rest.length), ov = new DataView(out.buffer);
+  ov.setUint32(0, 0x46546c67, true); ov.setUint32(4, 2, true); ov.setUint32(8, out.length, true);
+  ov.setUint32(12, text.length + pad, true); ov.setUint32(16, 0x4e4f534a, true);
+  out.set(text, 20); out.fill(0x20, 20 + text.length, 20 + text.length + pad); out.set(rest, 20 + text.length + pad);
+  return out.buffer;
+}
 async function modelId(buf) {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
   return Array.from(h.slice(0, 8), b => b.toString(16).padStart(2, '0')).join('');
@@ -3499,7 +3525,7 @@ function wirePanel() {
     $('modelFile').value = '';
     if (!file || !selectedId) return;
     if (file.size > MAX_MODEL) { alert('That model is too big (over 15 MB). Try a smaller or simplified one.'); return; }
-    const data = await file.arrayBuffer();
+    const data = fixGlb(await file.arrayBuffer());
     try { await new Promise((ok, bad) => new GLTFLoader().parse(data.slice(0), '', ok, bad)); }
     catch { alert('That file could not be read as a 3D model. Use a .glb file.'); return; }
     act({ t: 'model', id: await modelId(data), name: file.name.replace(/\.glb$/i, ''), data, figId: selectedId });
@@ -3709,4 +3735,5 @@ window.tabletop = { get state() { return state; }, act, get isHost() { return is
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
   attackPanel(id, target) { return openAttack(id, target); },
+  pick(id) { select(id); },
   async addModel(data, name, figId) { act({ t: 'model', id: await modelId(data), name, data, figId }); } };
