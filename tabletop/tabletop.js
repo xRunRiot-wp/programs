@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=50';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=50';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=51';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=51';
 
-const VERSION = 50;                              // raised by bump.py on every publish
+const VERSION = 51;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3888,6 +3888,12 @@ function wirePanel() {
       : hintText();
   }
   $('moveBoards').onclick = () => setMoveBoards(!moveBoards);
+  addEventListener('keydown', e => {            // Esc: stop painting / moving boards (Adam)
+    if (e.key !== 'Escape' || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+    painting = false; boardDrag = null;
+    if (paintMode) setPaint(false);
+    if (moveBoards) setMoveBoards(false);
+  });
   $('mapFile').onchange = async () => {
     const file = $('mapFile').files[0];
     if (!file) return;
