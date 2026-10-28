@@ -56,6 +56,19 @@
   #log .roll { color: var(--accent); }
   #log .sys { color: var(--dim); font-style: italic; }
   @media (max-width: 700px) { #hint { right: 70px; font-size: 11px; } }
+  #actPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(460px, calc(100% - 32px)); max-height: 55vh; overflow: auto; }
+  @media (min-width: 701px) { #actPanel { left: calc(50% - 150px); } }
+  #actList { display: flex; flex-wrap: wrap; gap: 4px; }
+  #actList .chip { font-size: 13px; padding: 4px 10px; }
+  .actGroup { width: 100%; color: var(--accent); font-size: 12px; font-weight: 700; margin-top: 6px; text-transform: uppercase; }
+  #bagPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(400px, calc(100% - 32px)); max-height: 50vh; overflow: auto; }
+  @media (min-width: 701px) { #bagPanel { left: calc(50% - 150px); } }
+  #actBar { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); gap: 8px; z-index: 4; background: #000a; padding: 8px; border-radius: 12px; }
+  #actBar button { font-size: 16px; padding: 10px 14px; min-width: 88px; }
+  @media (max-width: 700px) { #actBar button { font-size: 14px; padding: 8px 8px; min-width: 0; } }
+  @media (min-width: 701px) { #actBar { left: calc(50% - 150px); } }
+  .bagRow { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .bagRow span { flex: 1; }
   #floorTag { position: absolute; left: 50%; transform: translateX(-50%); top: 10px; z-index: 3; background: #000a; padding: 4px 12px; border-radius: 6px; font-weight: 700; letter-spacing: .5px; color: #ffd27a; pointer-events: none; }
   @media (min-width: 701px) { #floorTag { left: calc(50% - 150px); } }
   @media (max-width: 700px) { #floorTag { top: 44px; } }
@@ -106,6 +119,8 @@
   .areaRow span:nth-child(2) { flex: 1; }
   #stChips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; background: #3a2f1a; border-color: #7a5a20; }
+  #atkOwn .chip { font-size: 13px; padding: 4px 10px; border-width: 2px; }
+  #atkOwn .chip.on { background: #6b5320; color: #fff; }
   #turnList .turn { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
   #turnList .turn .nm { flex: 1; }
   #turnList .turn .ini { color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -195,7 +210,8 @@
   <div id="eventBox" style="display:none"></div>
   <div id="atkPanel" class="evcard" style="display:none">
     <div class="evt" id="atkTitle"></div>
-    <input id="atkMove" list="atkMoves" placeholder="Move (type to search)" style="width:100%" autocomplete="off">
+    <div id="atkOwn" class="row" style="flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
+    <input id="atkMove" list="atkMoves" placeholder="Or type any move to search" style="width:100%" autocomplete="off">
     <datalist id="atkMoves"></datalist>
     <div class="evx" id="atkInfo" style="margin-top:4px"></div>
     <div id="atkRows"></div>
@@ -207,6 +223,29 @@
     </div>
   </div>
   <div id="warpBox" class="evcard" style="display:none"></div>
+  <div id="bagPanel" class="evcard" style="display:none">
+    <div class="evt">🎒 Team bag</div>
+    <div id="bagList"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="bagName" list="bagItems" maxlength="30" placeholder="Add an item (e.g. Oran Berry)" autocomplete="off">
+      <datalist id="bagItems"></datalist>
+      <input id="bagN" type="number" min="1" max="99" value="1" class="fit" style="width:56px">
+      <button id="bagAddBtn" class="fit">Add</button>
+    </div>
+    <div class="row evb"><button id="bagClose" class="fit">Close</button></div>
+  </div>
+  <div id="actPanel" class="evcard" style="display:none">
+    <div class="evt" id="actTitle">🎯 Actions</div>
+    <div id="actList"></div>
+    <div class="evx" style="color:var(--dim);margin-top:6px">Dice = attribute + skill (hover a button to see which); 4, 5 and 6 are successes. Evade and Clash work outside your turn.</div>
+    <div class="row evb"><button id="actClose" class="fit">Close</button></div>
+  </div>
+  <div id="actBar" style="display:none">
+    <button id="actAttack" class="primary">⚔ Attack</button>
+    <button id="actDash">💨 Dash</button>
+    <button id="actMore">🎯 Actions</button>
+    <button id="actBag">🎒 Bag</button>
+  </div>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
     <button id="updateReload" class="primary">Reload now</button>
@@ -496,6 +535,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=38"></script>
+<script type="module" src="tabletop.js?v=39"></script>
 </body>
 </html>

@@ -103,6 +103,22 @@ A big banner shows the floor ("Golett Cave B1F") and a small tag stays at the to
 turn): the whole team goes down to a fresh floor of the same dungeon. The GM can also press **Next floor**, or paint
 Stairs by hand (Terrain > Events). Hidden traps on a random floor look like ordinary floor to players.
 
+**Player bar** (bottom middle of a player's screen, for their picked mini or their first one):
+**⚔ Attack** (then click the target: the attack panel opens with the mini's own moves as buttons),
+**💨 Dash** / Undo dash, **🎯 Actions** and **🎒 Bag**. In combat Attack, Dash and most actions wait for your turn.
+
+**Attacks.** A miss plays the move and shows "Miss!" over the target. A hit waits for the damage roll; then the
+move plays and the HP drops as it lands.
+
+**Actions** (from the Voice of the Forest rules): Evade, Clash (physical / special), Grapple (a maneuver, Dexterity +
+Clash), Search for cover, Run away, Hold, Help another, and the quick explore / talk rolls (Search, Climb, Carry,
+Sneak, Keep watch, Navigate, Persuade, Comfort, Respectful talk, Inspire, Distract, Command, Deceive). Each rolls the
+mini's attribute + skill as a dice pool (4-6 = a success, pain penalties apply) and writes the result in the log; the
+GM decides what it does. Evade and Clash can be used outside your turn.
+
+**Bag.** One shared team bag: anyone can add items (with the usual Mystery Dungeon items suggested), take one out,
+or press **Use** for their mini: the log says who used what (and what the item usually does); the GM applies it.
+
 **Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
 (walls, thin walls, hedges, doors and trees block the view), with the distance in squares.
 

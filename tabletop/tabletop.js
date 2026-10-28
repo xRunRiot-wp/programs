@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=38';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=38';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=39';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=39';
 
-const VERSION = 38;                              // raised by bump.py on every publish
+const VERSION = 39;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -108,7 +108,7 @@ function freshState() {
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
     attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
     areas: {},                                                               // area shapes on the table (burst / cone / line)
-    dungeon: null };                                                         // the random dungeon: name, floor number, settings, its board
+    dungeon: null, bag: {} };                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
 }
 
 // =====================================================================
@@ -201,7 +201,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon };
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
@@ -318,13 +318,14 @@ function onClientData(msg) {
     case 'attack': state.attack = msg.attack; renderAttack(); break;
     case 'fx': playFx(msg); break;
     case 'warp': state.warp = msg.warp; renderWarp(); break;
-    case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); break;
-    case 'party': state.party = msg.party; renderParty(); break;
+    case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); renderActBar(); break;
+    case 'party': state.party = msg.party; renderParty(); renderActBar(); break;
     case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); buildBoard(); break;
     case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
     case 'areas': state.areas = msg.areas; renderAreas(); break;
     case 'ping': playPing(msg); break;
     case 'dungeon': state.dungeon = msg.dungeon; renderFloor(msg.fresh); tilesChanged(); break;
+    case 'bag': state.bag = msg.bag; renderBag(); break;
   }
   figsVersion++;
 }
@@ -949,6 +950,39 @@ function handle(msg, from) {
       pushAreas();
       break;
     }
+    case 'bagAdd': {                            // anyone: put items in the team's bag (or take them out with a minus n)
+      const name = clean(msg.name, 30), n = Math.max(-99, Math.min(99, Math.round(+msg.n) || 1));
+      if (!name) return;
+      const B = state.bag ||= {}, had = B[name] || 0, now = Math.max(0, Math.min(999, had + n));
+      if (now === had) return;
+      if (now) B[name] = now; else delete B[name];
+      addLog({ kind: 'sys', text: n > 0 ? `${state.players[from]?.name || '?'} puts ${n} ${name} in the bag.` : `${state.players[from]?.name || '?'} takes ${had - now} ${name} out of the bag.` });
+      pushBag();
+      break;
+    }
+    case 'action': {                            // a non-move action: rolled for the mini, written in the log
+      const a = ACTIONS.find(x => x.key === msg.key);
+      if (!a || !mayMove) return;
+      if (!a.react && state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (state.paused && !gm) { note(from, 'Paused: the GM is resolving an event.'); return; }
+      if (!a.roll) { addLog({ kind: 'sys', text: `${f.name}: ${a.name} - ${a.info}.` }); return; }
+      const n = poolOf(f, a), pain = painOf(f);
+      rollPhysics({ sides: 6, n, pool: true, at: { x: f.x, z: f.z + 1 }, dir: { x: 0, z: -1 } }, from, (t, parts) => {
+        const hits = Math.max(0, parts.filter(v => v >= 4).length - pain);
+        return `${f.name}: ${a.name} (${a.roll.join(' + ')}) ${n} ${n === 1 ? 'die' : 'dice'} - ${hits} success${hits === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${a.info ? `. ${a.info[0].toUpperCase() + a.info.slice(1)}.` : ''}`;
+      });
+      break;
+    }
+    case 'bagUse': {                            // a player's mini uses an item (the GM applies what it does)
+      const name = clean(msg.name, 30), B = state.bag || {};
+      if (!mayMove || !B[name]) return;
+      if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (--B[name] <= 0) delete B[name];
+      const what = ITEMS[name];
+      addLog({ kind: 'sys', text: `${f.name} uses ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}!${what ? ` (${what})` : ''}` });
+      pushBag();
+      break;
+    }
     case 'floorGen': {                          // GM: rooms and corridors on a board, a new floor of the dungeon
       const b = gm && state.boards.find(x => x.id === msg.board);
       if (!b) return;
@@ -1096,8 +1130,7 @@ async function attackRoll(f, tg, mv, msg, from) {
         return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}` +
           `${pain ? ` (pain: -${pain})` : ''}, ${hits ? (hits >= 4 && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : 'miss.'}`;
       });
-      const fx = { t: 'fx', kind: hits ? mv.cat : 'miss', type: mv.type, from: f.id, to: tg.id };
-      sendAll(fx); playFx(fx);
+      if (!hits || mv.cat === 'Status') { const fx = { t: 'fx', kind: mv.cat, miss: !hits, type: mv.type, from: f.id, to: tg.id }; sendAll(fx); playFx(fx); }
       state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from, crit: hits >= 4 } : null;
       pushAttack();
       if (hits && mv.cat === 'Status') await chanceRoll(f, tg, mv, from, at, dir);
@@ -1116,14 +1149,15 @@ async function attackRoll(f, tg, mv, msg, from) {
         const eff = mu.immune ? `, but ${tg.name} is immune` : mu.mod > 0 ? `, super effective +${mu.mod}` : mu.mod < 0 ? `, not very effective ${mu.mod}` : '';
         return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)} ${def}${extra ? ', ' + extra : ''}) - ${rolled} success${rolled === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${eff}: ${dmg} damage to ${tg.name}`;
       });
+      const fx = { t: 'fx', kind: mv.cat, type: mv.type, from: f.id, to: tg.id, text: dmg ? `-${dmg}` : 'No damage' };
+      sendAll(fx); playFx(fx);
+      await new Promise(ok => setTimeout(ok, FX_HIT[mv.cat] || 300));
       if (tg.st?.hp != null && dmg) {
         const hp = Math.max(0, tg.st.hp - dmg);
         tg.st = { ...tg.st, hp };
         pushFig(tg);
         if (!hp) addLog({ kind: 'sys', text: `${tg.name} faints!` });
       }
-      const fx = { t: 'fx', kind: 'dmg', text: dmg ? `-${dmg}` : 'No damage', to: tg.id };
-      sendAll(fx); playFx(fx);
       state.attack = null; pushAttack();
       await chanceRoll(f, tg, mv, from, at, dir);
     }
@@ -1333,6 +1367,96 @@ function countDown() {
   save();
 }
 
+// ---------- actions besides moves (from the Voice of the Forest rules): a dice pool of attribute + skill, 4-6 = a success ----------
+const ACTIONS = [
+  { group: 'Combat', key: 'evade', name: 'Evade', roll: ['Dexterity', 'Evasion'], react: true, info: 'more successes than the attacker\'s accuracy = the attack misses. Once a round, costs an action' },
+  { group: 'Combat', key: 'clashP', name: 'Clash (physical)', roll: ['Strength', 'Clash'], react: true, info: 'beat the attacker\'s accuracy to cancel it, otherwise both lose 1 HP. Once a round, costs an action' },
+  { group: 'Combat', key: 'clashS', name: 'Clash (special)', roll: ['Special', 'Clash'], react: true, info: 'beat the attacker\'s accuracy to cancel it, otherwise both lose 1 HP. Once a round, costs an action' },
+  { group: 'Combat', key: 'grapple', name: 'Grapple', roll: ['Dexterity', 'Clash'], info: 'a maneuver to hold or block a foe; the GM decides what happens' },
+  { group: 'Combat', key: 'cover', name: 'Search for cover', roll: ['Insight', 'Alert'], info: 'find cover from attacks' },
+  { group: 'Combat', key: 'run', name: 'Run away', roll: ['Dexterity', 'Athletic'], info: 'against the foe\'s Dexterity + Athletic' },
+  { group: 'Combat', key: 'hold', name: 'Hold', info: 'waits to act later in the round' },
+  { group: 'Combat', key: 'help', name: 'Help another', info: 'helps an ally: +1 die on their roll (+2 at most)' },
+  { group: 'Explore', key: 'search', name: 'Search / notice clues', roll: ['Insight', 'Alert'] },
+  { group: 'Explore', key: 'climb', name: 'Climb, cross, balance', roll: ['Dexterity', 'Athletic'] },
+  { group: 'Explore', key: 'lift', name: 'Carry, lift, build', roll: ['Strength', 'Athletic'] },
+  { group: 'Explore', key: 'sneak', name: 'Sneak / set an ambush', roll: ['Dexterity', 'Stealth'] },
+  { group: 'Explore', key: 'watch', name: 'Endure / keep watch', roll: ['Vitality', 'Alert'] },
+  { group: 'Explore', key: 'nature', name: 'Navigate / plants', roll: ['Insight', 'Nature'] },
+  { group: 'Talk', key: 'persuade', name: 'Friendly persuasion', roll: ['Beauty', 'Allure'] },
+  { group: 'Talk', key: 'comfort', name: 'Comforting appeal', roll: ['Cute', 'Allure'] },
+  { group: 'Talk', key: 'polite', name: 'Respectful talk', roll: ['Clever', 'Etiquette'] },
+  { group: 'Talk', key: 'inspire', name: 'Inspire / lead', roll: ['Cool', 'Etiquette'] },
+  { group: 'Talk', key: 'distract', name: 'Entertain / distract', roll: ['Cool', 'Perform'] },
+  { group: 'Talk', key: 'command', name: 'Command / intimidate', roll: ['Tough', 'Intimidate'] },
+  { group: 'Talk', key: 'deceive', name: 'Deceive by acting', roll: ['Clever', 'Perform'] },
+];
+const poolOf = (f, a) => Math.max(1, a.roll.reduce((n, k) => n + (f.st?.attr?.[k] || 0), 0));
+function renderActions() {
+  const el = $('actList'); if (!el || $('actPanel').style.display === 'none') return;
+  const f = actMini(); el.innerHTML = '';
+  if (!f) return;
+  $('actTitle').textContent = `🎯 Actions: ${f.name}`;
+  let group = '';
+  for (const a of ACTIONS) {
+    if (a.group !== group) { group = a.group; const h = document.createElement('div'); h.className = 'actGroup'; h.textContent = group; el.appendChild(h); }
+    const b = document.createElement('button'); b.className = 'fit chip';
+    b.textContent = a.roll ? `${a.name} · ${poolOf(f, a)} 🎲` : a.name;
+    b.title = (a.roll ? a.roll.join(' + ') : 'no roll') + (a.info ? ': ' + a.info : '');
+    b.disabled = !!preview;
+    b.onclick = () => { act({ t: 'action', id: f.id, key: a.key }); $('actPanel').style.display = 'none'; };
+    el.appendChild(b);
+  }
+}
+
+// ---------- the team's bag (Mystery Dungeon items; what they do is up to the GM) ----------
+const ITEMS = { 'Oran Berry': 'restores some HP', 'Sitrus Berry': 'restores a lot of HP', 'Apple': 'fills the belly', 'Big Apple': 'fills the belly a lot',
+  'Pecha Berry': 'cures Poison', 'Cheri Berry': 'cures Paralysis', 'Rawst Berry': 'cures Burn', 'Chesto Berry': 'cures Sleep', 'Aspear Berry': 'cures Frozen',
+  'Heal Seed': 'cures every status', 'Reviver Seed': 'revives a fainted ally', 'Blast Seed': 'damages the foe in front', 'Sleep Seed': 'puts a foe to Sleep',
+  'Escape Orb': 'the team escapes the dungeon', 'Gravelerock': 'thrown at a foe', 'Max Elixir': 'restores the moves\' PP' };
+function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag }); save(); }
+function renderBag() {
+  const el = $('bagList'); if (!el) return;
+  el.innerHTML = '';
+  const items = Object.entries(state.bag || {}).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!items.length) { el.innerHTML = '<div style="color:var(--dim)">The bag is empty.</div>'; }
+  const me = actMini();
+  for (const [name, n] of items) {
+    const d = document.createElement('div'); d.className = 'bagRow';
+    const t = document.createElement('span'); t.textContent = `${name} ×${n}`; t.title = ITEMS[name] || '';
+    const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
+    use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it` : 'Pick your mini first';
+    use.onclick = () => { const f = actMini(); if (f) act({ t: 'bagUse', id: f.id, name }); };
+    const out = document.createElement('button'); out.className = 'fit'; out.textContent = '−'; out.title = 'Take one out (dropped or given away)';
+    out.disabled = !!preview;
+    out.onclick = () => act({ t: 'bagAdd', name, n: -1 });
+    d.append(t, use, out); el.appendChild(d);
+  }
+  renderActBar();
+}
+// the mini the bottom bar acts for: your picked mini, else your first one
+function actMini() {
+  const sel = selectedId && state.figures[selectedId], me = viewerId();
+  if (sel && (sel.owner === me || (gmView() && sel.owner))) return sel;
+  return Object.values(state.figures).find(f => f.owner && f.owner === me) || null;
+}
+function renderActBar() {
+  const bar = $('actBar'); if (!bar) return;
+  const f = actMini();
+  bar.style.display = f && !gmView() ? 'flex' : 'none';
+  if (!f) return;
+  const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { dash: {} };
+  const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
+  $('actAttack').disabled = !!preview || (c && !myTurn);
+  $('actDash').disabled = !!preview || (c && !myTurn);
+  $('actDash').textContent = dashed ? '↩ Undo dash' : '💨 Dash';
+  $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : `Pick who ${f.name} attacks`;
+  const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0);
+  $('actBag').textContent = `🎒 Bag${n ? ` (${n})` : ''}`;
+  $('actMore').disabled = !!preview;
+  renderActions();
+}
+
 // ---------- random dungeon floors: rooms joined by corridors, walls round them, darkness beyond ----------
 const FLOOR_LOOKS = {
   cave: { name: 'Cave', floor: 'dirt', wall: 'wall', props: ['rock'] },
@@ -1526,8 +1650,8 @@ function worldFor(f) {
   const seen = f.owner ? state.boards.filter(b => !b.hidden) : state.boards;   // allies' paths stay on what they can see
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied, wall: edgeWall };
 }
-function pushParty() { renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
-function pushCombat() { renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
+function pushParty() { renderActBar(); renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
+function pushCombat() { renderActBar(); renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
 function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, explored: state.explored }); save(); figsVersion++; }
 // a hidden board comes into view; every 2 new ones the GM is reminded to roll the dungeon event
 function revealBoard(b) {
@@ -2267,7 +2391,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); if (isHost) { siteFeed(); renderSiteChars(); } }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); renderBag(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -2410,10 +2534,12 @@ function fxMesh(geo, color, opacity = 1) {
   scene.add(m); return m;
 }
 const dropMesh = m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); };
+const FX_HIT = { Physical: 150, Special: 450, Status: 250 };   // ms until the move reaches the target
 function playFx(fx) {
   const tg = state.figures[fx.to], src = state.figures[fx.from], color = TYPES[fx.type] || '#ffffff';
   if (!tg || !scene) return;
   const T = new THREE.Vector3(tg.x, 0.6, tg.z), t0 = performance.now();
+  const lb = figMeshes.get(tg.id)?.userData.label, head = lb ? lb.position.y + lb.scale.y * (1 - lb.center.y) + 0.2 : 1.6;
   const add = (ms, step, end) => fxList.push({ t0, ms, step, end });
   const burst = (delay, n = 10) => {
     const bits = Array.from({ length: n }, () => {
@@ -2426,13 +2552,17 @@ function playFx(fx) {
       for (const b of bits) { b.visible = u > 0; b.position.copy(T).addScaledVector(b.userData.v, u * 0.6); b.position.y -= u * u * 0.4; b.material.opacity = 1 - u; b.rotation.x += 0.2; }
     }, () => bits.forEach(dropMesh));
   };
-  const floatText = (text, col) => {
-    const sp = labelSprite(text); sp.position.copy(T).setY(1.6); scene.add(sp);
+  const floatText = (text, col, delay = 0) => {                         // over the target's name tag
+    const sp = labelSprite(text); sp.position.copy(T).setY(head); sp.visible = !delay; scene.add(sp);
     if (col) sp.material.color.set(col);
-    add(1500, k => { sp.position.y = 1.6 + k * 0.8; sp.material.opacity = 1 - Math.max(0, k - 0.6) / 0.4; }, () => { scene.remove(sp); sp.material.map.dispose(); sp.material.dispose(); });
+    const ms = 1500 + delay;
+    add(ms, k => { const u = Math.max(0, (k * ms - delay) / 1500); sp.visible = k * ms >= delay; sp.position.y = head + u * 0.8; sp.material.opacity = 1 - Math.max(0, u - 0.6) / 0.4; },
+      () => { scene.remove(sp); sp.material.map.dispose(); sp.material.dispose(); });
   };
-  if (fx.kind === 'miss') { floatText('Miss!'); return; }
-  if (fx.kind === 'dmg') { floatText(fx.text, '#ff8a80'); return; }
+  if (fx.miss) floatText('Miss!', null, FX_HIT[fx.kind] || 300);
+  else if (fx.text) floatText(fx.text, '#ff8a80', FX_HIT[fx.kind] || 300);
+  if (fx.kind === 'miss') { floatText('Miss!'); return; }   // sent by an older version
+  if (fx.kind === 'dmg') return;
   if (fx.kind === 'Physical') {
     const g = src && figMeshes.get(src.id);
     if (g) g.position.lerp(new THREE.Vector3(tg.x, g.position.y, tg.z), 0.45);   // lunge; it glides back by itself
@@ -2612,16 +2742,23 @@ async function openAttack(id, target) {
   const list = await loadMoves(), f = state.figures[id];
   const dl = $('atkMoves'); dl.innerHTML = '';
   const recent = [...new Set([...(f?.st?.moves || []), ...(f?.st?.learn || [])])];
-  for (const m of [...recent.map(n => list.find(x => x.name === n)).filter(Boolean), ...list.filter(x => !recent.includes(x.name))]) {
-    const o = document.createElement('option'); o.value = m.name; dl.appendChild(o);
+  for (const m of list) { const o = document.createElement('option'); o.value = m.name; dl.appendChild(o); }
+  const own = $('atkOwn'); own.innerHTML = '';
+  for (const n of recent) {
+    const m = list.find(x => x.name.toLowerCase() === n.toLowerCase());
+    const b = document.createElement('button'); b.className = 'fit chip'; b.textContent = m ? m.name : `${n} (not found)`;
+    b.disabled = !m;
+    if (m) { b.style.borderColor = TYPES[m.type] || ''; b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
+    own.appendChild(b);
   }
   if (!list.length) $('atkInfo').textContent = 'Could not load the moves from the Voice of the Forest site. Check the connection and try again.';
-  else if (recent[0]) { $('atkMove').value = recent[0]; pickMove(); }
+  else if (recent[0]) { $('atkMove').value = list.find(x => x.name.toLowerCase() === recent[0].toLowerCase())?.name || ''; pickMove(); }
 }
 async function pickMove() {
   const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
   if (!atk || (atk.move?.name === m?.name && m)) return;
   atk.move = m || null;
+  for (const b of $('atkOwn').children) b.classList.toggle('on', b.textContent === m?.name);
   renderAttack();
 }
 function renderAttack() {
@@ -2977,7 +3114,7 @@ function select(id) {
   if (typeof renderParty === 'function' && $('partySec')) renderParty();
   if (prev && figMeshes.get(prev)) figMeshes.get(prev).userData.ring.visible = false;
   if (id && figMeshes.get(id)) figMeshes.get(id).userData.ring.visible = true;
-  showSelected();
+  showSelected(); renderBag();
 }
 
 function ownerOptions(sel, value) {
@@ -3040,6 +3177,7 @@ function showSelected() {
   }
   if (isHost) { ownerOptions($('selOwner'), f.owner); $('selHide').textContent = f.hidden ? 'Show to players' : 'Hide from players'; }
   if (isHost) renderSiteChars();
+  renderActBar();
   if (isHost) {
     const sd = sideOf(f);
     $('selSide').value = sd;
@@ -3397,6 +3535,18 @@ function wirePanel() {
     status(`${touchy ? 'Tap' : 'Click'} the mini ${state.figures[selectedId].name} attacks (Esc to cancel)`);
   };
   $('atkMove').oninput = () => pickMove();
+  $('actAttack').onclick = () => {
+    const f = actMini(); if (!f) return;
+    select(f.id); attackFor = f.id;
+    status(`${touchy ? 'Tap' : 'Click'} the mini ${f.name} attacks (Esc to cancel)`);
+  };
+  $('actDash').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatDash' } : { t: 'partyDash', id: f.id }); };
+  $('actBag').onclick = () => { const b = $('bagPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('actPanel').style.display = 'none'; renderBag(); };
+  $('bagClose').onclick = () => { $('bagPanel').style.display = 'none'; };
+  $('actMore').onclick = () => { const b = $('actPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('bagPanel').style.display = 'none'; renderActions(); };
+  $('actClose').onclick = () => { $('actPanel').style.display = 'none'; };
+  for (const name of Object.keys(ITEMS)) { const o = document.createElement('option'); o.value = name; $('bagItems').appendChild(o); }
+  $('bagAddBtn').onclick = () => { const name = $('bagName').value.trim(); if (name) act({ t: 'bagAdd', name, n: +$('bagN').value || 1 }); $('bagName').value = ''; $('bagN').value = '1'; };
   $('atkAcc').onclick = () => attackMsg('acc');
   $('atkDmg').onclick = () => attackMsg('dmg');
   $('atkClose').onclick = () => closeAttack();
@@ -3558,4 +3708,5 @@ window.tabletop = { get state() { return state; }, act, get isHost() { return is
   hover(id) { hoverId = id; },
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
+  attackPanel(id, target) { return openAttack(id, target); },
   async addModel(data, name, figId) { act({ t: 'model', id: await modelId(data), name, data, figId }); } };
