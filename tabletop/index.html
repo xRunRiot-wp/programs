@@ -412,7 +412,7 @@
       </div>
       <div class="row">
         <div><label>Look</label><select id="floorLook"><option value="cave">Cave</option><option value="forest">Forest</option><option value="ice">Ice</option><option value="ruins">Ruins</option><option value="volcano">Volcano</option><option value="beach">Beach cave</option></select></div>
-        <div><label>Size</label><select id="floorSize"><option value="">Keep the board's size</option><option value="small">Small (16 x 12)</option><option value="medium" selected>Medium (24 x 16)</option><option value="large">Large (32 x 22)</option></select></div>
+        <div><label>Size</label><select id="floorSize"><option value="">Keep the board's size</option><option value="small">Small (20 x 14)</option><option value="medium" selected>Medium (28 x 20)</option><option value="large">Large (36 x 26)</option></select></div>
       </div>
       <div class="row">
         <div><label>Enemies</label><input id="floorFoes" type="number" min="0" max="12" value="3"></div>
@@ -425,8 +425,9 @@
       <div class="row" style="margin-top:8px">
         <button id="floorMake" class="primary" title="Rooms and corridors on the board picked in the Boards tab">🎲 Make floor</button>
         <button id="floorNext" title="Same dungeon, one floor deeper">⬇ Next floor</button>
+        <button id="floorShow" title="Players only see rooms an ally has reached: this shows them the whole floor">&#128065; Show whole floor</button>
       </div>
-      <div style="color:var(--dim);font-size:12px;margin-top:4px">Builds rooms joined by corridors on the picked board, with stairs in the room furthest from the team. A player standing on the <b>Stairs</b> gets a "Go to the next floor" button: the whole team goes down to a fresh floor. Pokémon names that match the site get their stats.</div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Builds rooms joined by corridors on the picked board, with stairs in the room furthest from the team. Players only see the room they start in: corridors light up as allies walk, and a room appears when someone reaches its doorway. A player standing on the <b>Stairs</b> gets a "Go to the next floor" button: the whole team goes down to a fresh floor. Pokémon names that match the site get their stats.</div>
     </section>
 
     <section class="gm-only fold" data-fold="terrain" data-tab="terrain">
@@ -535,6 +536,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=42"></script>
+<script type="module" src="tabletop.js?v=43"></script>
 </body>
 </html>

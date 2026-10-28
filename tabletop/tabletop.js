@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=42';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=42';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=43';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=43';
 
-const VERSION = 42;                              // raised by bump.py on every publish
+const VERSION = 43;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -108,7 +108,7 @@ function freshState() {
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
     attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
     areas: {},                                                               // area shapes on the table (burst / cone / line)
-    dungeon: null, bag: {} };                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
+    dungeon: null, bag: {}, fog: null };          // fog = the random floor's squares players haven't seen yet (host only)                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
 }
 
 // =====================================================================
@@ -203,11 +203,14 @@ function viewFor() {
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
     attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag };
 }
-const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
-const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
-// what players get for a square: a hidden trap on a random floor looks like the floor round it
+// a random floor's rooms and corridors stay dark to players until an ally gets there (fog.hid: square -> room number, -1 = corridor or wall)
+const fogged = k => state.fog?.hid[k] != null;
+const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden && !fogged(Math.floor(f.x) + ',' + Math.floor(f.z));
+const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden && !fogged(k); };
+// what players get for a square: a hidden trap on a random floor looks like the floor round it, an unseen square is darkness
 function playerTile(k, t) {
   if (tileVisible(k)) return t;
+  if (fogged(k)) return 'pit';
   const D = state.dungeon, [i, j] = k.split(',').map(Number), b = boardAt(i + 0.5, j + 0.5);
   return t === 'hiddenTrap' && D && b && !b.hidden && b.id === D.board ? FLOOR_LOOKS[D.look].floor : null;
 }
@@ -357,7 +360,7 @@ function handle(msg, from) {
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
       let boards = state.boards;
       if (!gm) boards = state.boards.filter(b => !b.hidden);
-      if (!gm && msg.done && boardAt(x, z)?.hidden) {
+      if (!gm && msg.done && (boardAt(x, z)?.hidden || fogged(Math.floor(x) + ',' + Math.floor(z)))) {
         Object.assign(f, f._from); delete f._from;
         note(from, `${f.name} can't walk onto a square nobody can see yet.`);
         pushFig(f); return;
@@ -396,6 +399,7 @@ function handle(msg, from) {
       }
       pushFig(f, from, !msg.done);
       carry(f.id, f.x - ox, f.z - oz, 0, f);
+      if (msg.done && (f.owner || sideOf(f) === 'player')) revealFog(f);
       if (msg.done && f.owner && state.rules.autoReveal) {
         // revealing an area locks in the movement spent so far: walking back doesn't hand it out again
         const o = (limited || exploring) && (limited ? state.combat.from : state.party.from[f.id]);
@@ -903,7 +907,14 @@ function handle(msg, from) {
       delete state.maps[b.id]; blobs.set('map:' + b.id, null);
       sendAll({ t: 'map', id: b.id, map: null });
       dropTilesOutside(b);
+      if (state.dungeon?.board === b.id) state.fog = null;
       boardsChanged(true);
+      break;
+    }
+    case 'fogOff': {                            // GM: show players the whole floor at once
+      if (!gm || !state.fog) return;
+      state.fog = null;
+      tilesChanged(); resyncPlayers(); save();
       break;
     }
     case 'map': {
@@ -1471,13 +1482,15 @@ const FLOOR_LOOKS = {
   volcano: { name: 'Volcano', floor: 'cobble', wall: 'wall', props: ['rock'], pools: 'lava' },
   beach: { name: 'Beach cave', floor: 'sand', wall: 'wall', props: ['rock'], pools: 'water' },
 };
-const FLOOR_SIZES = { small: [16, 12], medium: [24, 16], large: [32, 22] };
+const FLOOR_SIZES = { small: [20, 14], medium: [28, 20], large: [36, 26] };
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 function floorPlan(W, H) {
-  const rooms = [], want = Math.max(3, Math.min(9, Math.round(W * H / 50)));
-  for (let t = 0; t < 400 && rooms.length < want; t++) {
-    const w = rint(3, Math.min(7, W - 4)), h = rint(3, Math.min(6, H - 4)), x = rint(1, W - w - 1), y = rint(1, H - h - 1);
+  const rooms = [], want = Math.max(3, Math.min(6, Math.round(W * H / 110)));  // fewer, bigger rooms (Adam)
+  const wLo = Math.min(6, W - 4), hLo = Math.min(5, H - 4), wHi = Math.max(wLo, Math.min(11, Math.floor(W / 2.6))), hHi = Math.max(hLo, Math.min(9, Math.floor(H / 2.3)));
+  for (let t = 0; t < 800 && rooms.length < want; t++) {
+    const w = rint(wLo, wHi), h = rint(hLo, hHi);
+    const x = rint(1, W - w - 1), y = rint(1, H - h - 1);
     if (rooms.some(r => x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y)) continue;
     rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) });
   }
@@ -1535,6 +1548,14 @@ function makeFloor(b) {
   put(rint(0, 2), pick(look.props), () => inner(pick(others)));
   if (look.pools) put(rint(1, 3), look.pools, () => inner(pick(others)));
   for (const [k, v] of Object.entries(set)) { if (v) state.tiles[k] = v; else delete state.tiles[k]; }
+  // players only see the team's room at first: the rest stays dark until an ally gets there
+  const hid = {};
+  for (let i = 0; i < W; i++) for (let j = 0; j < H; j++) {
+    const k = at(i, j);
+    if (set[k] && set[k] !== 'pit') hid[k] = rooms.findIndex(r => i >= r.x && i < r.x + r.w && j >= r.y && j < r.y + r.h);
+  }
+  state.fog = { hid, rooms: rooms.map(r => ({ x: b.x + r.x, z: b.z + r.y, w: r.w, h: r.h })) };
+  revealRoom(rooms.indexOf(start), {});
   tilesChanged(); sendTiles(set, false);
   // everything that isn't on the team leaves the board; the team stands together in the first room
   for (const f of Object.values(state.figures)) {
@@ -1549,6 +1570,7 @@ function makeFloor(b) {
     const dx = x - f.x, dz = z - f.z;
     f.x = x; f.z = z; pushFig(f); carry(f.id, dx, dz);
   });
+  for (const f of team) revealFog(f);
   // wild Pokémon in the other rooms
   const names = D.foes.split(',').map(x => x.trim()).filter(Boolean), foes = [];
   for (let k = 0; k < D.enemies; k++) {
@@ -1681,6 +1703,34 @@ function revealNextTo(f) {
     }
   }
   return any;
+}
+
+// an ally lights up the corridor squares within 2 of it; stepping into (or next to) a room shows the whole room and its walls
+function revealRoom(n, set) {
+  const F = state.fog, R = F.rooms[n];
+  for (let i = R.x - 1; i <= R.x + R.w; i++) for (let j = R.z - 1; j <= R.z + R.h; j++) {
+    const k = i + ',' + j;
+    if (F.hid[k] != null) { delete F.hid[k]; set[k] = state.tiles[k] || null; }
+  }
+}
+function revealFog(f) {
+  const F = state.fog;
+  if (!F) return false;
+  const { w, d } = fp(f), set = {};
+  for (const [i, j] of cellsOf(f.x, f.z, w, d)) {
+    for (const [a, c] of [[i, j], [i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) { const r = F.hid[a + ',' + c]; if (r >= 0) revealRoom(r, set); }
+    for (let a = i - 2; a <= i + 2; a++) for (let c = j - 2; c <= j + 2; c++) {
+      const k = a + ',' + c;
+      if (F.hid[k] === -1) { delete F.hid[k]; set[k] = state.tiles[k] || null; }
+    }
+  }
+  if (!Object.keys(set).length) return false;
+  if (!Object.keys(F.hid).length) state.fog = null;
+  tilesChanged(); sendTiles(set);
+  for (const g of Object.values(state.figures)) if ((Math.floor(g.x) + ',' + Math.floor(g.z)) in set) pushFig(g);
+  if (state.combat) pushCombat();
+  save();
+  return true;
 }
 
 function turnOne(f, deg) {
@@ -3558,6 +3608,10 @@ function wirePanel() {
     const D = state.dungeon;
     if (!D) { alert('Make a floor first.'); return; }
     act({ t: 'floorGen', board: D.board, opts: { ...floorOpts(), floor: D.floor + 1 } });
+  };
+  $('floorShow').onclick = () => {
+    if (!state.fog) { alert('The players can already see the whole floor.'); return; }
+    if (confirm('Show the players every room on this floor now?')) act({ t: 'fogOff' });
   };
   $('areaClear').onclick = () => act({ t: 'areaClear' });
   $('pingBtn').onclick = () => { endAreaDraft(); pingArm = true; status('Click a square to ping it for everyone (Esc to cancel)'); };
