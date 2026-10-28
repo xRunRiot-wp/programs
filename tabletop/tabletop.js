@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=58';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=58';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=59';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=59';
 
-const VERSION = 58;                              // raised by bump.py on every publish
+const VERSION = 59;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -204,7 +204,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
   return { boards: state.boards.filter(shown), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag };
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag, siteBag: state.siteBag || [] };
 }
 // layers: each board sits on one (far apart on the table); players only ever see the team's layer, the GM looks at one at a time
 const LAYER_GAP = 200;
@@ -339,7 +339,7 @@ function onClientData(msg) {
     case 'areas': state.areas = msg.areas; renderAreas(); break;
     case 'ping': playPing(msg); break;
     case 'dungeon': state.dungeon = msg.dungeon; renderFloor(msg.fresh); tilesChanged(); break;
-    case 'bag': state.bag = msg.bag; renderBag(); break;
+    case 'bag': state.bag = msg.bag; state.siteBag = msg.siteBag || []; renderBag(); break;
   }
   figsVersion++;
 }
@@ -526,7 +526,7 @@ function handle(msg, from) {
       if (msg.char) { f.link = clean(msg.char, 40); f.sync = {}; if (!SIDES[f.side]) f.side = 'player'; }
       else { delete f.link; delete f.sync; }
       pushFig(f); save();
-      syncSite();
+      syncSite(); syncSiteBag();
       break;
     }
     case 'siteCode': {
@@ -1018,6 +1018,17 @@ function handle(msg, from) {
       });
       break;
     }
+    case 'siteUse': {                           // a player's mini uses an item from a character's bag on the site
+      const it = (state.siteBag || []).find(x => x.id === msg.item);
+      if (!mayMove || !it || it.key) return;
+      if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      const raw = siteBagRaw[it.id], U = state.siteUsed ||= {};
+      U[it.id] = { qty: Math.round(+raw?.qty) || 0, n: (U[it.id]?.n || 0) + 1 };
+      const what = ITEMS[it.name];
+      addLog({ kind: 'sys', text: `${f.name} uses ${/^[aeiou]/i.test(it.name) ? 'an' : 'a'} ${it.name} from ${it.owner === f.name ? 'their' : it.owner + "'s"} bag!${what ? ` (${what})` : ''} Take it off on the site too.` });
+      syncSiteBag();
+      break;
+    }
     case 'bagUse': {                            // a player's mini uses an item (the GM applies what it does)
       const name = clean(msg.name, 30), B = state.bag || {};
       if (!mayMove || !B[name]) return;
@@ -1235,12 +1246,15 @@ async function chanceRoll(f, tg, mv, from, at, dir) {
 
 // ---------- characters from the Voice of the Forest site: read only, the site is never changed from here ----------
 const SITE_DB = 'https://voiceoftheforest-e071c-default-rtdb.firebaseio.com';
-let siteParty = {}, siteES = null, siteCodeOn = '';
+let siteParty = {}, siteBagRaw = {}, siteES = null, siteBagES = null, siteCodeOn = '';
 function siteFeed() {
   const code = (state.siteCode || 'VOICE').toUpperCase();
   if (!isHost || (siteES && siteCodeOn === code)) return;
-  siteES?.close(); siteParty = {}; siteCodeOn = code;
+  siteES?.close(); siteBagES?.close(); siteParty = {}; siteBagRaw = {}; siteCodeOn = code;
   siteES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/party.json`);
+  // the site's bag is only read: each character's items show in the tabletop bag
+  siteBagES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/bag.json`);
+  siteStream(siteBagES, () => siteBagRaw, v => { siteBagRaw = v; }, syncSiteBag);
   const apply = (ev, merge) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
     const parts = (d.path || '/').split('/').filter(Boolean);
@@ -1256,6 +1270,41 @@ function siteFeed() {
   };
   siteES.addEventListener('put', e => apply(e, false));
   siteES.addEventListener('patch', e => apply(e, true));
+}
+// a Firebase live stream into one object
+function siteStream(es, get, set, done) {
+  const apply = (ev, merge) => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    const parts = (d.path || '/').split('/').filter(Boolean);
+    const setAt = (path, v) => {
+      if (!path.length) { set(v && typeof v === 'object' ? v : {}); return; }
+      let o = get();
+      for (const k of path.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
+      if (v == null) delete o[path.at(-1)]; else o[path.at(-1)] = v;
+    };
+    if (merge) for (const [k, v] of Object.entries(d.data || {})) setAt([...parts, ...k.split('/')], v);
+    else setAt(parts, d.data);
+    done();
+  };
+  es.addEventListener('put', e => apply(e, false));
+  es.addEventListener('patch', e => apply(e, true));
+}
+// the items of the characters on the table (badges left out). Used ones count down here until the site's number changes.
+function syncSiteBag() {
+  if (!isHost) return;
+  const linked = new Map(Object.values(state.figures).filter(f => f.link).map(f => [f.link, f]));
+  const used = state.siteUsed ||= {}, list = [];
+  for (const [id, it] of Object.entries(siteBagRaw)) {
+    if (!it || typeof it !== 'object' || it.badge || !linked.has(it.owner)) continue;
+    const qty = Math.max(0, Math.min(999, Math.round(+it.qty) || 0));
+    if (used[id] && used[id].qty !== qty) delete used[id];          // the site caught up
+    const n = qty - (used[id]?.n || 0);
+    if (n > 0) list.push({ id: clean(id, 20), name: clean(it.name, 30) || '?', n, key: !!it.key, owner: linked.get(it.owner).name });
+  }
+  for (const id of Object.keys(used)) if (!siteBagRaw[id]) delete used[id];
+  list.sort((a, b) => a.owner.localeCompare(b.owner) || a.name.localeCompare(b.name));
+  if (JSON.stringify(list) === JSON.stringify(state.siteBag || [])) return;
+  state.siteBag = list; pushBag();
 }
 // what the tabletop takes from a site character
 function siteVals(c) {
@@ -1479,7 +1528,7 @@ const ITEMS = { 'Oran Berry': 'restores some HP', 'Sitrus Berry': 'restores a lo
   'Pecha Berry': 'cures Poison', 'Cheri Berry': 'cures Paralysis', 'Rawst Berry': 'cures Burn', 'Chesto Berry': 'cures Sleep', 'Aspear Berry': 'cures Frozen',
   'Heal Seed': 'cures every status', 'Reviver Seed': 'revives a fainted ally', 'Blast Seed': 'damages the foe in front', 'Sleep Seed': 'puts a foe to Sleep',
   'Escape Orb': 'the team escapes the dungeon', 'Gravelerock': 'thrown at a foe', 'Max Elixir': 'restores the moves\' PP' };
-function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag }); save(); }
+function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
 function renderBag() {
   const el = $('bagList'); if (!el) return;
   el.innerHTML = '';
@@ -1496,6 +1545,22 @@ function renderBag() {
     out.disabled = !!preview;
     out.onclick = () => act({ t: 'bagAdd', name, n: -1 });
     d.append(t, use, out); el.appendChild(d);
+  }
+  const site = state.siteBag || [];
+  if (site.length) {
+    const h = document.createElement('div'); h.className = 'bagHead'; h.textContent = 'From the site'; el.appendChild(h);
+    for (const it of site) {
+      const d = document.createElement('div'); d.className = 'bagRow';
+      const t = document.createElement('span'); t.textContent = `${it.name} ×${it.n} · ${it.owner}`; t.title = it.key ? 'Key item' : ITEMS[it.name] || '';
+      d.append(t);
+      if (!it.key) {
+        const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
+        use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it (take it off on the site too)` : 'Pick your mini first';
+        use.onclick = () => { const f = actMini(); if (f) act({ t: 'siteUse', id: f.id, item: it.id }); };
+        d.append(use);
+      }
+      el.appendChild(d);
+    }
   }
   renderActBar();
 }
@@ -1519,7 +1584,7 @@ function renderActBar() {
   $('actDash').disabled = !!preview || (c && !myTurn);
   barLabel('actDash', dashed ? '↩' : '💨', dashed ? 'Undo dash' : 'Dash');
   $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : `Pick who ${f.name} attacks`;
-  const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0);
+  const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0) + (state.siteBag || []).filter(x => !x.key).reduce((a, x) => a + x.n, 0);
   barLabel('actBag', '🎒', `Bag${n ? ` (${n})` : ''}`);
   $('actMore').disabled = !!preview;
   const over = !c && P.done?.[f.id];
@@ -2400,9 +2465,12 @@ function labelSprite(text, extra) {
   return s;
 }
 // what a mini's label shows besides its name
+// 0 HP: the mini has fainted (Adam: half see-through, no health bar)
+const fainted = f => f.st?.hpMax > 0 && f.st.hp != null && f.st.hp <= 0;
 function labelExtra(f) {
   const st = f.st || {}, tags = (st.status || []).filter(x => !st.timers?.[x]);
   if (engaged.has(f.id)) tags.unshift('Engaged');
+  if (fainted(f)) return { tags: ['Fainted', ...tags] };
   return { hp: st.hp, hpMax: st.hpMax, tags };
 }
 
@@ -2518,7 +2586,20 @@ function upsertFig(f, live) {
   u.side.material.color.set(SIDES[sideOf(f)].color);
   g.visible = !isHost || (gmView() ? gmSees(boardAt(f.x, f.z)) : figVisible(f));
   u.ring.visible = selectedId === f.id;
-  for (const m of [u.col, u.dark]) { m.transparent = !!f.hidden; m.opacity = f.hidden ? 0.4 : 1; }
+  const out = fainted(f) ? 0.5 : 1, op = (f.hidden ? 0.4 : 1) * out;
+  for (const m of [u.col, u.dark]) { m.transparent = op < 1; m.opacity = op; }
+  // a model shares its materials with every copy, so a fainted one gets its own before fading
+  if (u.holder.children.length && (out < 1 || u.faded)) {
+    u.holder.traverse(o => {
+      if (!o.isMesh) return;
+      if (!o.userData.ownMat) {
+        o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+        o.userData.ownMat = [].concat(o.material).map(m => [m.opacity, m.transparent]);
+      }
+      [].concat(o.material).forEach((m, i) => { const [o0, t0] = o.userData.ownMat[i]; m.opacity = o0 * out; m.transparent = t0 || out < 1; });
+    });
+    u.faded = out < 1;
+  }
   if (selectedId === f.id && !live) showSelected();
 }
 
