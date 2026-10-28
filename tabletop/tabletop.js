@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=53';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=53';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=54';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=54';
 
-const VERSION = 53;                              // raised by bump.py on every publish
+const VERSION = 54;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2163,17 +2163,18 @@ function buildTiles() {
   tileGroup.clear();
   const byType = {}, parts = new Map();
   const mtx = new THREE.Matrix4();
-  const D = state.dungeon, under = D && FLOOR_LOOKS[D.look]?.floor, db = D && state.boards.find(b => b.id === D.board);
   for (const [k, t] of Object.entries(state.tiles)) {
     if (isHost && gmView()) { const [i, j] = k.split(',').map(Number); if (!gmSees(boardAt(i + 0.5, j + 0.5))) continue; }
     // on a random floor, props / events / hidden traps stand on the floor (so a hidden trap's square looks like any other)
-    if (under && TILES[t].piece && !TILES[t].link) { const [i, j] = k.split(',').map(Number); if (boardAt(i + 0.5, j + 0.5) === db) (byType[under] ||= []).push(k); }
+    const under = floorUnder(k, t);
+    if (under) (byType[under] ||= []).push(k);
     if (isHost && !gmView() && !tileVisible(k)) continue;
     if (!TILES[t].piece) { (byType[t] ||= []).push(k); continue; }
     const [i, j] = k.split(',').map(Number);
     const near = (di, dj) => linked(t, state.tiles[(i + di) + ',' + (j + dj)]);
+    const lift = under && t !== 'stairs' ? mtx.makeTranslation(0, TILES[under].h, 0).clone() : null;   // up onto that floor (Adam: traps sank into it)
     piecesFor(t, i + 0.5, j + 0.5, { n: near(0, -1), s: near(0, 1), e: near(1, 0), w: near(-1, 0) }, i * 7919 + j * 104729,
-      (shape, look, m) => { const key = shape + '|' + look; if (!parts.has(key)) parts.set(key, []); parts.get(key).push(m.clone()); });
+      (shape, look, m) => { const key = shape + '|' + look; if (!parts.has(key)) parts.set(key, []); parts.get(key).push(lift ? lift.clone().multiply(m) : m.clone()); });
   }
   for (const [type, keys] of Object.entries(byType)) {
     const { geo, mat } = kit(type), h = TILES[type].h;
@@ -2334,8 +2335,21 @@ function groundAt(x, z, w = 1, d = 1) {
   let top = 0;
   const i0 = Math.floor(x - w / 2 + 0.01), i1 = Math.ceil(x + w / 2 - 0.01);
   const j0 = Math.floor(z - d / 2 + 0.01), j1 = Math.ceil(z + d / 2 - 0.01);
-  for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) { const t = state.tiles[i + ',' + j]; if (t) top = Math.max(top, TILES[t].h); }
+  for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) {
+    const k = i + ',' + j, t = state.tiles[k];
+    if (!t) continue;
+    const under = t !== 'stairs' && floorUnder(k, t);
+    top = Math.max(top, TILES[t].h + (under ? TILES[under].h : 0));
+  }
   return top;
+}
+// a random floor's own floor tile under a piece standing on it (props, events, traps), or null
+function floorUnder(k, t) {
+  if (!TILES[t]?.piece || TILES[t].link) return null;
+  const [i, j] = k.split(',').map(Number), b = boardAt(i + 0.5, j + 0.5);
+  if (!b) return null;
+  const D = state.dungeon?.board === b.id ? state.dungeon : Object.values(state.prep || {}).find(p => p.board === b.id);
+  return D ? FLOOR_LOOKS[D.look]?.floor || null : null;
 }
 const cellAt = p => {
   const i = Math.floor(p.x), j = Math.floor(p.z);
