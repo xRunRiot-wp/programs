@@ -56,6 +56,14 @@
   #log .roll { color: var(--accent); }
   #log .sys { color: var(--dim); font-style: italic; }
   @media (max-width: 700px) { #hint { right: 70px; font-size: 11px; } }
+  #floorTag { position: absolute; left: 50%; transform: translateX(-50%); top: 10px; z-index: 3; background: #000a; padding: 4px 12px; border-radius: 6px; font-weight: 700; letter-spacing: .5px; color: #ffd27a; pointer-events: none; }
+  @media (min-width: 701px) { #floorTag { left: calc(50% - 150px); } }
+  @media (max-width: 700px) { #floorTag { top: 44px; } }
+  #floorBanner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none;
+    font-size: 40px; font-weight: 800; color: #fff; text-shadow: 0 3px 12px #000; background: #000c; opacity: 0; z-index: 6; }
+  #floorBanner .fl { font-size: 64px; color: #ffd27a; }
+  #floorBanner.show { animation: floorIn 3.2s ease forwards; }
+  @keyframes floorIn { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
   #hint { position: absolute; left: 10px; bottom: 10px; color: var(--dim); font-size: 12px; background: #0009; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
   #status { position: absolute; left: 10px; top: 10px; background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 13px; display: none; }
   .evwait .evbtns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
@@ -136,6 +144,7 @@
     border: 1px solid #ffd23f; color: #ffe9a6; font-weight: 600; padding: 4px 10px; border-radius: 14px; white-space: nowrap; }
   #prompts .prompt:hover { background: #57460f; }
   #prompts .prompt.talk { background: #0f2f46; border-color: #4aa3e0; }
+  #prompts .prompt.stairs { background: #1d3a1d; border-color: #6cd06c; font-size: 15px; }
   #prompts .prompt.talk:hover { background: #17435f; }
   @media (max-width: 700px) { #prompts { right: 0; } }
   #previewBar { display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4;
@@ -177,6 +186,8 @@
 <div id="game">
   <div id="view"></div>
   <div id="status"></div>
+  <div id="floorTag" style="display:none"></div>
+  <div id="floorBanner"></div>
   <div id="prompts"></div>
   <div id="hint"></div>
   <button id="toggleSide">Menu</button>
@@ -354,6 +365,31 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Events). When an ally next to one clicks Interact, a big throw button pops up over the table (only you see it and the die); the event card with the rules and helper rolls then shows in the same spot.</div>
     </section>
 
+    <section class="gm-only" data-tab="combat">
+      <h3>Random floor</h3>
+      <div class="row">
+        <div><label>Dungeon name</label><input id="floorName" maxlength="30" placeholder="Mystery Dungeon"></div>
+        <div class="fit"><label>Floor</label><input id="floorNum" type="number" min="1" max="99" value="1" style="width:60px"></div>
+      </div>
+      <div class="row">
+        <div><label>Look</label><select id="floorLook"><option value="cave">Cave</option><option value="forest">Forest</option><option value="ice">Ice</option><option value="ruins">Ruins</option><option value="volcano">Volcano</option><option value="beach">Beach cave</option></select></div>
+        <div><label>Size</label><select id="floorSize"><option value="">Keep the board's size</option><option value="small">Small (16 x 12)</option><option value="medium" selected>Medium (24 x 16)</option><option value="large">Large (32 x 22)</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Enemies</label><input id="floorFoes" type="number" min="0" max="12" value="3"></div>
+        <div><label>Chests</label><input id="floorItems" type="number" min="0" max="8" value="2"></div>
+        <div><label>? Events</label><input id="floorEvents" type="number" min="0" max="8" value="2"></div>
+        <div><label>Traps</label><input id="floorTraps" type="number" min="0" max="10" value="2" title="Hidden traps: only you see them"></div>
+      </div>
+      <label>Wild Pokémon on this dungeon (picked at random)</label>
+      <input id="floorFoeNames" maxlength="200" placeholder="Golett, Zubat, Geodude" style="width:100%">
+      <div class="row" style="margin-top:8px">
+        <button id="floorMake" class="primary" title="Rooms and corridors on the board picked in the Boards tab">🎲 Make floor</button>
+        <button id="floorNext" title="Same dungeon, one floor deeper">⬇ Next floor</button>
+      </div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Builds rooms joined by corridors on the picked board, with stairs in the room furthest from the team. A player standing on the <b>Stairs</b> gets a "Go to the next floor" button: the whole team goes down to a fresh floor. Pokémon names that match the site get their stats.</div>
+    </section>
+
     <section class="gm-only fold" data-fold="terrain" data-tab="terrain">
       <h3>Terrain <span class="foldNow" id="terrainNow"></span></h3>
       <div id="tileTypes"></div>
@@ -460,6 +496,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=37"></script>
+<script type="module" src="tabletop.js?v=38"></script>
 </body>
 </html>

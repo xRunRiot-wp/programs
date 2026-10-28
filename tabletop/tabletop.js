@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=37';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=37';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=38';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=38';
 
-const VERSION = 37;                              // raised by bump.py on every publish
+const VERSION = 38;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -52,6 +52,7 @@ const TILES = {
   campfire: { name: 'Campfire', group: 'Events', color: '#ff8a1e', h: 0, piece: 'campfire' },
   clue: { name: 'Clue', group: 'Events', color: '#e8d9a8', h: 0, piece: 'clue' },
   goal: { name: 'Dungeon goal', group: 'Events', color: '#5fe0ff', h: 0, piece: 'goal' },
+  stairs: { name: 'Stairs', group: 'Events', color: '#9a958c', h: 0, piece: 'stairs', seams: true },
 };
 const INTERACT = { event: '❔ Interact', chest: '📦 Open chest', clue: '📜 Check clue', goal: '⭐ Dungeon goal' };
 const linked = (a, b) => !!(TILES[a]?.link && TILES[a].link === TILES[b]?.link);
@@ -106,7 +107,8 @@ function freshState() {
     combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0,
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
     attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
-    areas: {} };                                                             // area shapes on the table (burst / cone / line)
+    areas: {},                                                               // area shapes on the table (burst / cone / line)
+    dungeon: null };                                                         // the random dungeon: name, floor number, settings, its board
 }
 
 // =====================================================================
@@ -196,13 +198,19 @@ function connectToHost() {
 function viewFor() {
   const figures = {}, tiles = {};
   for (const f of Object.values(state.figures)) if (figVisible(f)) figures[f.id] = f;
-  for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
+  for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView() };
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
+// what players get for a square: a hidden trap on a random floor looks like the floor round it
+function playerTile(k, t) {
+  if (tileVisible(k)) return t;
+  const D = state.dungeon, [i, j] = k.split(',').map(Number), b = boardAt(i + 0.5, j + 0.5);
+  return t === 'hiddenTrap' && D && b && !b.hidden && b.id === D.board ? FLOOR_LOOKS[D.look].floor : null;
+}
 // players' copy of the turn order leaves out hidden minis (their turn shows as "the GM's turn")
 function combatView() {
   const c = state.combat;
@@ -213,7 +221,7 @@ function combatView() {
 // tiles to players, leaving out squares on hidden boards
 function sendTiles(set, clear) {
   const vis = {};
-  for (const [k, v] of Object.entries(set)) vis[k] = tileVisible(k) ? v : null;
+  for (const [k, v] of Object.entries(set)) vis[k] = v ? playerTile(k, v) : null;
   sendAll({ t: 'tiles', set: vis, clear: !!clear });
 }
 // after boards are hidden or shown: give every player a fresh view of the table
@@ -316,6 +324,7 @@ function onClientData(msg) {
     case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
     case 'areas': state.areas = msg.areas; renderAreas(); break;
     case 'ping': playPing(msg); break;
+    case 'dungeon': state.dungeon = msg.dungeon; renderFloor(msg.fresh); tilesChanged(); break;
   }
   figsVersion++;
 }
@@ -940,6 +949,33 @@ function handle(msg, from) {
       pushAreas();
       break;
     }
+    case 'floorGen': {                          // GM: rooms and corridors on a board, a new floor of the dungeon
+      const b = gm && state.boards.find(x => x.id === msg.board);
+      if (!b) return;
+      const o = msg.opts || {}, num = (v, lo, hi, d) => Math.max(lo, Math.min(hi, Math.round(+v) || (v === 0 || v === '0' ? 0 : d)));
+      state.dungeon = { board: b.id, name: clean(o.name, 30) || 'Mystery Dungeon', floor: num(o.floor, 1, 99, 1), look: FLOOR_LOOKS[o.look] ? o.look : 'cave',
+        size: FLOOR_SIZES[o.size] ? o.size : '', enemies: num(o.enemies, 0, 12, 3), foes: clean(o.foes, 200), items: num(o.items, 0, 8, 2),
+        events: num(o.events, 0, 8, 2), traps: num(o.traps, 0, 10, 2) };
+      makeFloor(b);
+      break;
+    }
+    case 'stairs': {                            // an ally standing on the stairs takes the team to the next floor
+      if (!mayMove || !(f.owner || sideOf(f) === 'player')) return;
+      const c = fp(f), on = cellsOf(f.x, f.z, c.w, c.d).map(x => x.join(',')).find(k => state.tiles[k] === 'stairs');
+      if (!on) { note(from, `${f.name} has to stand on the stairs.`); return; }
+      if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      const D = state.dungeon, b = D && state.boards.find(x => x.id === D.board);
+      const [si, sj] = on.split(',').map(Number);
+      if (!b || boardAt(si + 0.5, sj + 0.5) !== b) {
+        addLog({ kind: 'sys', text: `${f.name} found the stairs!` });
+        addLog({ kind: 'sys', text: 'Stairs only lead somewhere on a random floor: make one under Random floor (Combat tab).', to: state.gm });
+        return;
+      }
+      addLog({ kind: 'sys', text: `${f.name} takes the stairs! The team goes down to ${D.name} B${D.floor + 1}F.` });
+      D.floor++;
+      makeFloor(b);
+      break;
+    }
     case 'ping': {                              // a flash on a square that everyone sees ("over here!")
       if (!isFinite(msg.x) || !isFinite(msg.z) || !boardAt(msg.x, msg.z)) return;
       const now = Date.now();
@@ -1295,6 +1331,119 @@ function countDown() {
     pushFig(f);
   }
   save();
+}
+
+// ---------- random dungeon floors: rooms joined by corridors, walls round them, darkness beyond ----------
+const FLOOR_LOOKS = {
+  cave: { name: 'Cave', floor: 'dirt', wall: 'wall', props: ['rock'] },
+  forest: { name: 'Forest', floor: 'grass', wall: 'hedge', props: ['tree'] },
+  ice: { name: 'Ice', floor: 'ice', wall: 'wall', props: ['rock'] },
+  ruins: { name: 'Ruins', floor: 'stone', wall: 'wall', props: ['rock'] },
+  volcano: { name: 'Volcano', floor: 'cobble', wall: 'wall', props: ['rock'], pools: 'lava' },
+  beach: { name: 'Beach cave', floor: 'sand', wall: 'wall', props: ['rock'], pools: 'water' },
+};
+const FLOOR_SIZES = { small: [16, 12], medium: [24, 16], large: [32, 22] };
+const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function floorPlan(W, H) {
+  const rooms = [], want = Math.max(3, Math.min(9, Math.round(W * H / 50)));
+  for (let t = 0; t < 400 && rooms.length < want; t++) {
+    const w = rint(3, Math.min(7, W - 4)), h = rint(3, Math.min(6, H - 4)), x = rint(1, W - w - 1), y = rint(1, H - h - 1);
+    if (rooms.some(r => x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y)) continue;
+    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) });
+  }
+  rooms.sort((a, b) => a.cx - b.cx || a.cy - b.cy);
+  const open = new Set(), hall = new Set();
+  for (const r of rooms) for (let i = r.x; i < r.x + r.w; i++) for (let j = r.y; j < r.y + r.h; j++) open.add(i + ',' + j);
+  const dig = (a, b) => {                       // an L-shaped corridor between two room middles
+    let x = a.cx, y = a.cy;
+    const flip = Math.random() < 0.5, step = (k, to) => (k < to ? k + 1 : k - 1);
+    const mark = () => { const k = x + ',' + y; if (!open.has(k)) { open.add(k); hall.add(k); } };
+    for (const ax of flip ? ['x', 'y'] : ['y', 'x'])
+      if (ax === 'x') while (x !== b.cx) { x = step(x, b.cx); mark(); } else while (y !== b.cy) { y = step(y, b.cy); mark(); }
+  };
+  for (let i = 1; i < rooms.length; i++) dig(rooms[i - 1], rooms[i]);
+  if (rooms.length >= 4) dig(rooms[0], rooms[rint(2, rooms.length - 1)]);   // one loop, so it isn't a single line
+  return { rooms, open, hall };
+}
+function makeFloor(b) {
+  const D = state.dungeon, look = FLOOR_LOOKS[D.look];
+  if (D.size) {                                 // the board takes the chosen size
+    const old = { ...b };
+    [b.cols, b.rows] = FLOOR_SIZES[D.size];
+    if (old.cols !== b.cols || old.rows !== b.rows) { dropTilesOutside(old); boardsChanged(true); }
+  }
+  if (b.hidden) { b.hidden = false; resyncPlayers(); }
+  const W = b.cols, H = b.rows;
+  if (W < 10 || H < 8) { note(state.gm, 'That board is too small for a floor: make it at least 10 x 8.'); return; }
+  let plan;
+  for (let t = 0; t < 20; t++) { plan = floorPlan(W, H); if (plan.rooms.length >= 3) break; }
+  const { rooms, open, hall } = plan;
+  if (rooms.length < 2) { note(state.gm, 'Could not fit rooms on that board: try a bigger size.'); return; }
+  const set = {}, at = (i, j) => (b.x + i) + ',' + (b.z + j);
+  for (const k of Object.keys(state.tiles)) { const [i, j] = k.split(',').map(Number); if (boardAt(i + 0.5, j + 0.5) === b) set[k] = null; }
+  for (let i = 0; i < W; i++) for (let j = 0; j < H; j++) {
+    if (open.has(i + ',' + j)) { set[at(i, j)] = look.floor; continue; }
+    let near = false;
+    for (let di = -1; di <= 1 && !near; di++) for (let dj = -1; dj <= 1; dj++) if (open.has((i + di) + ',' + (j + dj))) { near = true; break; }
+    set[at(i, j)] = near ? look.wall : 'pit';
+  }
+  // squares inside rooms, away from the walls, so nothing blocks a doorway
+  const start = rooms[0], far = rooms.slice(1).sort((a, c) => Math.hypot(c.cx - start.cx, c.cy - start.cy) - Math.hypot(a.cx - start.cx, a.cy - start.cy))[0];
+  const used = new Set();
+  const inner = r => { const out = []; for (let i = r.x + 1; i < r.x + r.w - 1; i++) for (let j = r.y + 1; j < r.y + r.h - 1; j++) out.push([i, j]); return out; };
+  const free = list => { const ok = list.filter(([i, j]) => !used.has(i + ',' + j)); if (!ok.length) return null; const c = pick(ok); used.add(c.join(',')); return c; };
+  const tryFree = list => { for (let t = 0; t < 12; t++) { const c = free(list()); if (c) return c; } return null; };   // a full room: try another
+  const others = rooms.filter(r => r !== start);
+  const startCells = []; for (let i = start.x; i < start.x + start.w; i++) for (let j = start.y; j < start.y + start.h; j++) startCells.push([i, j]);
+  for (const c of startCells) used.add(c.join(','));                   // the team's room stays clear
+  const st = free(inner(far)) || [far.cx, far.cy];
+  set[at(...st)] = 'stairs'; used.add(st.join(','));
+  const put = (n, type, list) => { for (let k = 0; k < n; k++) { const c = tryFree(list); if (c) set[at(...c)] = type; } };
+  put(D.items, 'chest', () => inner(pick(others)));
+  put(D.events, 'event', () => inner(pick(others)));
+  put(D.traps, 'hiddenTrap', () => (Math.random() < 0.4 && hall.size ? [...hall].map(k => k.split(',').map(Number)) : inner(pick(others))));
+  put(rint(0, 2), pick(look.props), () => inner(pick(others)));
+  if (look.pools) put(rint(1, 3), look.pools, () => inner(pick(others)));
+  for (const [k, v] of Object.entries(set)) { if (v) state.tiles[k] = v; else delete state.tiles[k]; }
+  tilesChanged(); sendTiles(set, false);
+  // everything that isn't on the team leaves the board; the team stands together in the first room
+  for (const f of Object.values(state.figures)) {
+    if (boardAt(f.x, f.z) !== b || f.owner || sideOf(f) === 'player' || f.parent) continue;
+    for (const c of Object.values(state.figures)) if (c.parent === f.id) { c.parent = null; pushFig(c); }
+    delete state.figures[f.id]; removeFigMesh(f.id); sendAll({ t: 'del', id: f.id });
+  }
+  const team = Object.values(state.figures).filter(f => (f.owner || sideOf(f) === 'player') && !f.parent);
+  const spots = startCells.slice().sort((a, c) => Math.hypot(a[0] - start.cx, a[1] - start.cy) - Math.hypot(c[0] - start.cx, c[1] - start.cy));
+  team.forEach((f, n) => {
+    const c = spots[n % spots.length], k = fp(f), x = b.x + c[0] + (k.w % 2 ? 0.5 : 1), z = b.z + c[1] + (k.d % 2 ? 0.5 : 1);
+    const dx = x - f.x, dz = z - f.z;
+    f.x = x; f.z = z; pushFig(f); carry(f.id, dx, dz);
+  });
+  // wild Pokémon in the other rooms
+  const names = D.foes.split(',').map(x => x.trim()).filter(Boolean), foes = [];
+  for (let k = 0; k < D.enemies; k++) {
+    const c = tryFree(() => inner(pick(others)));
+    if (!c) break;
+    const id = rid(8), name = names.length ? pick(names) : 'Wild Pokémon';
+    state.figures[id] = { id, name, color: '#e0503c', size: '1', w: 1, d: 1, owner: null, hidden: false, side: 'enemy', job: '', x: b.x + c[0] + 0.5, z: b.z + c[1] + 0.5 };
+    pushFig(state.figures[id]); foes.push(id);
+  }
+  if (state.combat) { state.combat = null; pushCombat(); }
+  state.party = { turn: state.party.turn + 1, from: {}, dash: {} }; pushParty();
+  state.areas = {}; pushAreas();
+  addLog({ kind: 'sys', text: `${D.name} B${D.floor}F` });
+  sendAll({ t: 'dungeon', dungeon: state.dungeon, fresh: true }); renderFloor(true);
+  save();
+  if (foes.length && names.length) loadIndex().then(({ species }) => {   // names that match a Pokémon on the site get its stats (and model)
+    for (const id of foes) {
+      const f = state.figures[id], sp = f && species.find(x => x.name.toLowerCase() === f.name.toLowerCase());
+      if (!sp) continue;
+      handle({ t: 'species', id, name: sp.name, attr: sp.attr, hp: sp.hp, types: sp.types, moves: sp.moves }, state.gm);
+      const bi = Object.keys(BUILTIN).find(k => BUILTIN[k].species === sp.name);
+      if (bi) useBuiltin(bi, id);
+    }
+  });
 }
 
 // ---------- rules helpers (host) ----------
@@ -1720,7 +1869,10 @@ function buildTiles() {
   tileGroup.clear();
   const byType = {}, parts = new Map();
   const mtx = new THREE.Matrix4();
+  const D = state.dungeon, under = D && FLOOR_LOOKS[D.look]?.floor, db = D && state.boards.find(b => b.id === D.board);
   for (const [k, t] of Object.entries(state.tiles)) {
+    // on a random floor, props / events / hidden traps stand on the floor (so a hidden trap's square looks like any other)
+    if (under && TILES[t].piece && !TILES[t].link) { const [i, j] = k.split(',').map(Number); if (boardAt(i + 0.5, j + 0.5) === db) (byType[under] ||= []).push(k); }
     if (isHost && !gmView() && !tileVisible(k)) continue;
     if (!TILES[t].piece) { (byType[t] ||= []).push(k); continue; }
     const [i, j] = k.split(',').map(Number);
@@ -1866,6 +2018,10 @@ function piecesFor(type, x, z, links, seed, put) {
     case 'clue':                                // a rolled-up note on a small stone
       put('rock', 'rock', place(x, 0.08, z, 0.4, 0.16, 0.35, rand(2) * 6));
       put('post', 'paper', place(x, 0.2, z, 0.08, 0.32, 0.08, rand(3) * 6, Math.PI / 2));
+      break;
+    case 'stairs':                              // a stone slab with steps climbing to the north
+      put('box', 'stairs', place(x, 0.03, z, 0.96, 0.06, 0.96));
+      for (let k = 0; k < 3; k++) put('box', 'stairs', place(x, 0.04 + k * 0.04, z + 0.27 - k * 0.27, 0.8, 0.08 + k * 0.08, 0.26));
       break;
     case 'goal':                                // a tall glowing crystal
       put('rock', 'crystal', place(x, 0.55, z, 0.42, 1.1, 0.42, rand(1) * 6));
@@ -2111,7 +2267,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); if (isHost) { siteFeed(); renderSiteChars(); } }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -2200,6 +2356,26 @@ function updatePrompts() {
     b.disabled = !!preview;
     const [i, j] = k.split(',').map(Number);
     v.set(i + 0.5, 1.15, j + 0.5).project(camera);
+    b.style.left = (r.width * (v.x + 1) / 2) + 'px';
+    b.style.top = (r.height * (1 - v.y) / 2) + 'px';
+    b.style.display = v.z < 1 ? '' : 'none';
+  }
+  for (const [k, t] of Object.entries(state.tiles)) {             // standing on the stairs
+    if (t !== 'stairs') continue;
+    const who = mine.find(f => { const c = fp(f); return cellsOf(f.x, f.z, c.w, c.d).some(x => x.join(',') === k); });
+    if (!who) continue;
+    seen.add('st:' + k);
+    let b = box.querySelector(`[data-key="st:${k}"]`);
+    if (!b) {
+      b = document.createElement('button'); b.className = 'prompt stairs'; b.dataset.key = 'st:' + k;
+      b.onclick = () => act({ t: 'stairs', id: b.dataset.who });
+      box.appendChild(b);
+    }
+    b.dataset.who = who.id;
+    b.textContent = '⬇ Go to the next floor';
+    b.disabled = !!preview;
+    const [i, j] = k.split(',').map(Number);
+    v.set(i + 0.5, 1.9, j + 0.5).project(camera);
     b.style.left = (r.width * (v.x + 1) / 2) + 'px';
     b.style.top = (r.height * (1 - v.y) / 2) + 'px';
     b.style.display = v.z < 1 ? '' : 'none';
@@ -2381,6 +2557,29 @@ function playPing(msg) {
     beam.material.opacity = 0.6 * (1 - k); beam.scale.x = beam.scale.z = 1 + Math.sin(k * 30) * 0.2;
     tag.position.y = y + 1.4 + k * 0.4; tag.material.opacity = k < 0.7 ? 1 : (1 - k) / 0.3;
   }, end: () => { rings.forEach(dropMesh); dropMesh(beam); scene.remove(tag); tag.material.map.dispose(); tag.material.dispose(); } });
+}
+
+// ---------- floor name: a big banner on a new floor (like the games), then a small tag in the corner ----------
+function renderFloor(fresh) {
+  const D = state.dungeon, tag = $('floorTag');
+  if (!tag) return;
+  tag.style.display = D ? '' : 'none';
+  if (!D) return;
+  tag.textContent = `${D.name} · B${D.floor}F`;
+  if ($('floorName') && document.activeElement !== $('floorName')) $('floorName').value = D.name;
+  if ($('floorNum') && document.activeElement !== $('floorNum')) $('floorNum').value = D.floor;
+  if (!fresh) return;
+  const ban = $('floorBanner');
+  ban.innerHTML = '';
+  const a = document.createElement('div'); a.textContent = D.name;
+  const n = document.createElement('div'); n.className = 'fl'; n.textContent = `B${D.floor}F`;
+  ban.append(a, n);
+  ban.classList.remove('show'); void ban.offsetWidth; ban.classList.add('show');
+  const b = state.boards.find(x => x.id === D.board);
+  if (b && camera) {                             // look at the new floor
+    const cx = b.x + b.cols / 2, cz = b.z + b.rows / 2, d = Math.max(b.cols, b.rows * camera.aspect * 0.8, 8);
+    camera.position.set(cx, d * 0.85, cz + d * 0.75); controls.target.set(cx, 0, cz);
+  }
 }
 
 // ---------- the attack panel (pick a move, then roll accuracy and, on a hit, damage) ----------
@@ -3178,6 +3377,18 @@ function wirePanel() {
     if (e.key === 'Escape' && (areaDraft || pingArm)) { pingArm = false; endAreaDraft(); }
   });
   $('areaPlace').onclick = startAreaDraft;
+  const floorOpts = () => ({ name: $('floorName').value, floor: $('floorNum').value, look: $('floorLook').value, size: $('floorSize').value,
+    enemies: $('floorFoes').value, foes: $('floorFoeNames').value, items: $('floorItems').value, events: $('floorEvents').value, traps: $('floorTraps').value });
+  $('floorMake').onclick = () => {
+    const b = curBoard();
+    if (!b || !confirm(`Make a random floor on board "${b.name || b.id}"? Its terrain and every mini on it except the players' are replaced.`)) return;
+    act({ t: 'floorGen', board: b.id, opts: floorOpts() });
+  };
+  $('floorNext').onclick = () => {
+    const D = state.dungeon;
+    if (!D) { alert('Make a floor first.'); return; }
+    act({ t: 'floorGen', board: D.board, opts: { ...floorOpts(), floor: D.floor + 1 } });
+  };
   $('areaClear').onclick = () => act({ t: 'areaClear' });
   $('pingBtn').onclick = () => { endAreaDraft(); pingArm = true; status('Click a square to ping it for everyone (Esc to cancel)'); };
   $('selAttack').onclick = () => {

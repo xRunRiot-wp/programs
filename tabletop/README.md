@@ -91,6 +91,18 @@ party turn, or with × / **Clear** (players clear their own, the GM all of them)
 **Ping.** Click **📍 Ping** and then a square, or Alt+click anywhere: rings and a beam with your name flash there
 for everyone ("over here!"). A GM ping on a hidden area only shows to the GM.
 
+**Random floors** (Mystery Dungeon style, GM: Combat tab > **Random floor**). Type a dungeon name, pick a look
+(Cave, Forest, Ice, Ruins, Volcano, Beach cave) and size, how many enemies, chests, ? events and hidden traps, and
+optionally the wild Pokémon that live there ("Golett, Zubat"). **Make floor** builds rooms joined by corridors on
+the board picked in the Boards tab, with walls round them and darkness beyond. Everything on that board except the
+players' minis is replaced; the team starts together in one room, the **Stairs** go in the room furthest away.
+Enemy names that match a Pokémon on the Voice of the Forest site get its stats (and a built-in model if there is one).
+A big banner shows the floor ("Golett Cave B1F") and a small tag stays at the top of the table.
+
+**Stairs.** A player whose mini stands on the stairs gets a **Go to the next floor** button (in combat, on their
+turn): the whole team goes down to a fresh floor of the same dungeon. The GM can also press **Next floor**, or paint
+Stairs by hand (Terrain > Events). Hidden traps on a random floor look like ordinary floor to players.
+
 **Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
 (walls, thin walls, hedges, doors and trees block the view), with the distance in squares.
 
