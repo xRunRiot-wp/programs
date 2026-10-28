@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=55';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=55';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=56';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=56';
 
-const VERSION = 55;                              // raised by bump.py on every publish
+const VERSION = 56;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -83,7 +83,10 @@ const blobs = (() => {
 })();
 const MAX_MODEL = 15 * 1024 * 1024;
 // models that come with the site; a mini linked to a site character of that species gets it by itself
-const BUILTIN = { golett: { name: 'Golett', file: 'models/golett.glb', species: 'Golett' } };
+const BUILTIN = {
+  golett: { name: 'Golett', file: 'models/golett.glb', species: 'Golett' },
+  magnemite: { name: 'Magnemite', file: 'models/magnemite.glb', species: 'Magnemite' },
+};
 const modelData = new Map();                    // model id -> .glb bytes (ArrayBuffer)
 const okColor = c => /^#[0-9a-f]{6}$/i.test(c) ? c : '#888888';
 

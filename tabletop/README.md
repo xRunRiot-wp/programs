@@ -224,11 +224,13 @@ Select a mini, then **Upload .glb**. The model is fitted onto the mini's base an
 so many minis can share one model. Keep models under about 5 MB so they load quickly (15 MB is the limit).
 Blender, Sketchfab and most free mini packs can export .glb.
 
-Built-in models come with the site and show up in the same **3D model** list: right now **Golett**.
-A mini linked to a Golett on the Voice of the Forest site gets the Golett model by itself (if it has no model yet).
+Built-in models come with the site and show up in the same **3D model** list: right now **Golett** and **Magnemite**.
+A mini linked to a Golett or Magnemite on the Voice of the Forest site gets that model by itself (if it has no model yet).
 
 Credits: the Golett model is ["Golett"](https://sketchfab.com/3d-models/golett-0d239c883bc54a4f94a3e15ac789e378) by nguyenlouis32,
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (material converted to standard glTF, otherwise unchanged).
+The Magnemite model is ["Magnemite"](https://sketchfab.com/3d-models/magnemite-dae3d444292e451ab41994410b90a8f8) by nguyenlouis32,
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (unchanged).
 
 ## Putting it on another website
 
