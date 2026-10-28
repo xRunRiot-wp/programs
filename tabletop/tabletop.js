@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=44';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=44';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=45';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=45';
 
-const VERSION = 44;                              // raised by bump.py on every publish
+const VERSION = 45;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -212,7 +212,7 @@ const offView = b => !!b && !shown(b);
 const gmSees = b => !b || layerOf(b) === gmLayer;
 // a random floor's rooms and corridors stay dark to players until an ally gets there (fog.hid: square -> room number, -1 = corridor or wall)
 const fogged = k => state.fog?.hid[k] != null;
-const figVisible = f => !f.hidden && !offView(boardAt(f.x, f.z)) && !fogged(Math.floor(f.x) + ',' + Math.floor(f.z));
+const figVisible = f => !f.hidden && !offView(boardAt(f.x, f.z)) && (!!f.owner || f.side === 'player' || !fogged(Math.floor(f.x) + ',' + Math.floor(f.z)));   // the team's own minis never vanish into the dark
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !offView(boardAt(i + 0.5, j + 0.5)) && !fogged(k); };
 // what players get for a square: a hidden trap on a random floor looks like the floor round it, an unseen square is darkness
 function playerTile(k, t) {
@@ -368,6 +368,7 @@ function handle(msg, from) {
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
       let boards = state.boards;
       if (!gm) boards = state.boards.filter(shown);
+      if (!gm && !msg.done && fogged(Math.floor(x) + ',' + Math.floor(z))) return;   // dragging over the dark: the mini waits at the edge
       if (!gm && msg.done && (offView(boardAt(x, z)) || fogged(Math.floor(x) + ',' + Math.floor(z)))) {
         Object.assign(f, f._from); delete f._from;
         note(from, `${f.name} can't walk onto a square nobody can see yet.`);
