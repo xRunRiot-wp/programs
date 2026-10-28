@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=59';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=59';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=60';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=60';
 
-const VERSION = 59;                              // raised by bump.py on every publish
+const VERSION = 60;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2192,22 +2192,127 @@ function buildBoard() {
 // ---------- terrain tiles ----------
 let tileGroup = null, tilesDirty = false;
 const tileKit = {};                             // type -> { geo, mat }
-function tileTexture(t) {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d'), base = new THREE.Color(t.color);
-  g.fillStyle = t.color; g.fillRect(0, 0, 64, 64);
-  for (let i = 0; i < 260; i++) {               // speckles so flat colours don't look plastic
-    const k = 0.82 + Math.random() * 0.3, col = base.clone().multiplyScalar(k);
-    g.fillStyle = '#' + col.getHexString(); g.fillRect(Math.random() * 64, Math.random() * 64, 2 + Math.random() * 3, 2 + Math.random() * 3);
-  }
-  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 2;
-  if (t.seams) { g.strokeRect(1, 1, 62, 62); g.beginPath(); g.moveTo(0, 32); g.lineTo(64, 32); g.moveTo(32, 0); g.lineTo(32, 32); g.moveTo(16, 32); g.lineTo(16, 64); g.moveTo(48, 32); g.lineTo(48, 64); g.stroke(); }
-  if (t.planks) { g.beginPath(); for (const y of [0, 16, 32, 48]) { g.moveTo(0, y); g.lineTo(64, y); } g.stroke(); }
-  if (t.cobble) for (let y = 0; y < 64; y += 16) for (let x = (y / 16 % 2) * 8; x < 72; x += 16) { g.beginPath(); g.ellipse(x, y + 8, 7, 6, 0, 0, 7); g.stroke(); }
-  if (t.checker) { g.fillStyle = 'rgba(30,30,34,0.85)'; g.fillRect(0, 0, 32, 32); g.fillRect(32, 32, 32, 32); }
-  if (t.rug) { g.strokeStyle = '#d8b25a'; g.lineWidth = 3; g.strokeRect(5, 5, 54, 54); }
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+// each terrain gets a 128px pattern drawn once (colour + a matching height map for bump lighting):
+// cheap on phones, and the edges wrap so neighbouring squares join up
+const TEX = 128;
+function tileTexture(t, type = '') {
+  const S = TEX, c = document.createElement('canvas'), h = document.createElement('canvas');
+  c.width = c.height = h.width = h.height = S;
+  const g = c.getContext('2d'), b = h.getContext('2d'), base = new THREE.Color(t.color);
+  let seed = [...(type || t.color)].reduce((a, ch) => a * 31 + ch.charCodeAt(0) | 0, 7) >>> 0;
+  const R = () => ((seed = seed * 1664525 + 1013904223 >>> 0) / 2 ** 32);
+  const tone = k => '#' + base.clone().multiplyScalar(k).getHexString();
+  const grey = v => { const n = Math.max(0, Math.min(255, v * 255 | 0)); return `rgb(${n},${n},${n})`; };
+  // draw at (x, y) and again across the edges, so the pattern tiles without seams
+  const wrap = (x, y, r, fn) => { for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) if (x + dx > -r && x + dx < S + r && y + dy > -r && y + dy < S + r) fn(x + dx, y + dy); };
+  const blob = (x, y, rx, ry, col, hv, rot = 0) => wrap(x, y, Math.max(rx, ry), (X, Y) => {
+    g.fillStyle = col; g.beginPath(); g.ellipse(X, Y, rx, ry, rot, 0, 7); g.fill();
+    if (hv != null) { b.fillStyle = grey(hv); b.beginPath(); b.ellipse(X, Y, rx, ry, rot, 0, 7); b.fill(); }
+  });
+  const speck = (n, lo, hi, smin, smax, hvar = 0.15) => {
+    for (let i = 0; i < n; i++) {
+      const x = R() * S, y = R() * S, s = smin + R() * (smax - smin), k = lo + R() * (hi - lo);
+      blob(x, y, s, s * (0.6 + R() * 0.4), tone(k), 0.5 + (k - 1) * hvar * 4, R() * 3);
+    }
+  };
+  const line = (ctx, col, w, pts) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); };
+  g.fillStyle = t.color; g.fillRect(0, 0, S, S); b.fillStyle = grey(0.5); b.fillRect(0, 0, S, S);
+  const style = ['grass', 'hedge', 'tree'].includes(type) ? 'grass' : type === 'swamp' ? 'swamp' : type === 'dirt' ? 'dirt'
+    : type === 'sand' ? 'sand' : type === 'snow' ? 'snow' : type === 'ice' ? 'ice' : t.water ? 'water' : t.glow ? 'lava' : type === 'pit' ? 'pit'
+    : t.planks || ['trunk', 'pole', 'fence'].includes(type) ? 'wood' : t.cobble ? 'cobble' : t.seams ? 'stone' : t.rug ? 'rug' : t.checker ? 'checker' : 'plain';
+  if (style === 'grass') {
+    speck(40, 0.8, 1.12, 4, 10, 0.1);
+    for (let i = 0; i < 420; i++) {               // blades: dark at the root, light at the tip
+      const x = R() * S, y = R() * S, l = 3 + R() * 5, a = -Math.PI / 2 + (R() - 0.5) * 0.9, k = 0.75 + R() * 0.55;
+      wrap(x, y, 10, (X, Y) => {
+        const p = [[X, Y], [X + Math.cos(a) * l, Y + Math.sin(a) * l]];
+        line(g, tone(k), 1.4, p); line(b, grey(0.35 + k * 0.4), 1.4, p);
+      });
+    }
+  } else if (style === 'dirt' || style === 'swamp') {
+    speck(90, 0.78, 1.15, 3, 9);
+    for (let i = 0; i < 26; i++) {                // pebbles with a little shadow
+      const x = R() * S, y = R() * S, s = 1.5 + R() * 2.5;
+      blob(x + 0.8, y + 0.8, s, s * 0.8, 'rgba(0,0,0,.35)', 0.3); blob(x, y, s, s * 0.8, tone(1.25 + R() * 0.2), 0.85);
+    }
+    if (style === 'swamp') for (let i = 0; i < 6; i++) blob(R() * S, R() * S, 8 + R() * 10, 5 + R() * 6, 'rgba(40,70,60,.55)', 0.35, R() * 3);
+  } else if (style === 'sand' || style === 'snow') {
+    speck(style === 'sand' ? 500 : 160, 0.9, 1.08, 0.6, 1.6, 0.25);
+    for (let y = 8; y < S; y += 16) {             // wind ripples (whole waves across, so they wrap)
+      const pts = []; for (let x = 0; x <= S; x += 8) pts.push([x, y + Math.sin(x / S * Math.PI * 4 + y) * 3]);
+      line(g, tone(style === 'sand' ? 0.88 : 0.93), 2, pts); line(b, grey(0.62), 2, pts);
+    }
+    if (style === 'snow') for (let i = 0; i < 50; i++) blob(R() * S, R() * S, 0.8, 0.8, '#ffffff', 0.7);
+  } else if (style === 'ice' || style === 'water') {
+    speck(30, 0.92, 1.1, 8, 18, 0.05);
+    for (let i = 0; i < (style === 'ice' ? 9 : 14); i++) {
+      const x = R() * S, y = R() * S, l = 10 + R() * 22, a = R() * 6.3;
+      wrap(x, y, l * 1.5, (X, Y) => {
+        if (style === 'ice') {                    // cracks
+          const p = [[X, Y], [X + Math.cos(a) * l, Y + Math.sin(a) * l], [X + Math.cos(a + 0.6) * l * 1.4, Y + Math.sin(a + 0.6) * l * 1.4]];
+          line(g, 'rgba(255,255,255,.55)', 1, p); line(b, grey(0.3), 1, p);
+        } else {                                  // ripples
+          g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(X, Y, l * 0.6, l * 0.22, 0, 3.4, 6); g.stroke();
+          b.strokeStyle = grey(0.7); b.lineWidth = 2; b.beginPath(); b.ellipse(X, Y, l * 0.6, l * 0.22, 0, 3.4, 6); b.stroke();
+        }
+      });
+    }
+  } else if (style === 'lava') {
+    speck(40, 0.7, 1.0, 6, 14);
+    for (let i = 0; i < 18; i++) blob(R() * S, R() * S, 5 + R() * 7, 4 + R() * 5, 'rgba(60,20,10,.55)', 0.7, R() * 3);   // dark crust
+    for (let i = 0; i < 16; i++) {                // glowing cracks
+      const x = R() * S, y = R() * S, l = 14 + R() * 20, a = R() * 6.3;
+      wrap(x, y, l + 4, (X, Y) => {
+        const p = [[X, Y], [X + Math.cos(a) * l * 0.5 + 3, Y + Math.sin(a) * l * 0.5], [X + Math.cos(a) * l, Y + Math.sin(a) * l]];
+        line(g, '#ffd23f', 2, p); line(b, grey(0.2), 3, p);
+      });
+    }
+  } else if (style === 'wood') {
+    const rows = t.planks ? 4 : 1, ph = S / rows;
+    for (let r = 0; r < rows; r++) {
+      g.fillStyle = tone(0.88 + R() * 0.24); g.fillRect(0, r * ph, S, ph);
+      for (let i = 0; i < 9; i++) {               // grain
+        const y = r * ph + 2 + R() * (ph - 4), pts = [];
+        for (let x = 0; x <= S; x += 8) pts.push([x, y + Math.sin(x / S * Math.PI * 2 * 3 + i) * 1.2]);
+        line(g, tone(0.72 + R() * 0.12), 1, pts); line(b, grey(0.4), 1, pts);
+      }
+      if (R() < 0.6) blob(R() * S, r * ph + ph / 2, 2.5, 1.6, tone(0.55), 0.3);   // a knot
+      if (rows > 1) { line(g, 'rgba(0,0,0,.5)', 2, [[0, r * ph], [S, r * ph]]); line(b, grey(0.1), 3, [[0, r * ph], [S, r * ph]]); }
+    }
+  } else if (style === 'cobble') {
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, 0, S, S); b.fillStyle = grey(0.15); b.fillRect(0, 0, S, S);   // mortar
+    const rh = S / 6;
+    for (let r = 0; r < 6; r++) for (let x = (r % 2) * 12; x < S + 12; x += 24) {
+      const k = 0.85 + R() * 0.3, rx = 9 + R() * 2, ry = 8 + R() * 2, cx = x + (R() - 0.5) * 3, cy = r * rh + rh / 2 + (R() - 0.5) * 3;
+      blob(cx, cy, rx, ry, tone(k), 0.7);
+      blob(cx - 2, cy - 2, rx * 0.55, ry * 0.5, tone(k * 1.12), 0.85);   // the lit top of each stone
+    }
+  } else if (style === 'stone') {
+    speck(120, 0.85, 1.12, 1, 4);
+    for (const [x, y, w, hh] of [[0, 0, 64, 64], [64, 0, 64, 64], [0, 64, 128, 64]]) {   // bevelled slabs
+      line(g, 'rgba(255,255,255,.18)', 2, [[x + 2, y + hh - 2], [x + 2, y + 2], [x + w - 2, y + 2]]);
+      line(g, 'rgba(0,0,0,.45)', 2.5, [[x + w - 1, y + 1], [x + w - 1, y + hh - 1], [x + 1, y + hh - 1]]);
+      b.strokeStyle = grey(0.1); b.lineWidth = 3; b.strokeRect(x + 0.5, y + 0.5, w - 1, hh - 1);
+    }
+    for (let i = 0; i < 5; i++) {                 // hairline cracks
+      const x = 8 + R() * (S - 30), y = 8 + R() * (S - 30);
+      line(g, 'rgba(0,0,0,.3)', 1, [[x, y], [x + R() * 14 - 7, y + R() * 10], [x + R() * 20 - 10, y + 6 + R() * 10]]);
+    }
+  } else if (style === 'rug') {
+    for (let y = 0; y < S; y += 2) { g.fillStyle = tone(y % 4 ? 0.95 : 1.05); g.fillRect(0, y, S, 1); }
+    speck(80, 0.88, 1.1, 0.6, 1.2, 0.2);
+    g.strokeStyle = '#d8b25a'; g.lineWidth = 5; g.strokeRect(10, 10, S - 20, S - 20);
+    b.strokeStyle = grey(0.7); b.lineWidth = 5; b.strokeRect(10, 10, S - 20, S - 20);
+  } else if (style === 'checker') {
+    speck(60, 0.9, 1.08, 1, 3);
+    g.fillStyle = 'rgba(30,30,34,0.85)'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+    b.strokeStyle = grey(0.2); b.lineWidth = 2; b.strokeRect(0, 0, 64, 64); b.strokeRect(64, 64, 64, 64);
+  } else if (style === 'pit') {
+    speck(30, 0.6, 1.4, 4, 12, 0.02);
+  } else speck(200, 0.82, 1.12, 2, 5);
+  const mk = cv => { const x = new THREE.CanvasTexture(cv); x.anisotropy = Math.min(4, renderer?.capabilities.getMaxAnisotropy() || 1); return x; };
+  const map = mk(c); map.colorSpace = THREE.SRGBColorSpace;
+  return { map, bump: mk(h) };
 }
 const LOOKS = { trunk: { color: '#5a3d22', planks: true }, metal: { color: '#4a4d52', seams: true }, spike: { color: '#b9bdc4', shiny: true },
   gold: { color: '#d8a83a', shiny: true }, pole: { color: '#5a3d22' }, flame: { color: '#ff8a1e', fire: true },
@@ -2215,7 +2320,8 @@ const LOOKS = { trunk: { color: '#5a3d22', planks: true }, metal: { color: '#4a4
 function kit(type) {
   if (!tileKit[type]) {
     const t = TILES[type] || LOOKS[type];
-    const mat = new THREE.MeshStandardMaterial({ map: tileTexture(t), roughness: t.water || t.shiny ? 0.15 : 0.9 });
+    const tx = tileTexture(t, type);
+    const mat = new THREE.MeshStandardMaterial({ map: tx.map, bumpMap: tx.bump, bumpScale: t.water ? 0.4 : 1.5, roughness: t.water || t.shiny ? 0.15 : 0.9 });
     if (t.water) { mat.transparent = true; mat.opacity = 0.85; mat.metalness = 0.1; }
     if (t.piece === 'event') { mat.emissive = new THREE.Color('#ffb000'); mat.emissiveIntensity = 0.9; }
     if (t.fire) { mat.emissive = new THREE.Color('#ff6a00'); mat.emissiveIntensity = 1.2; }
