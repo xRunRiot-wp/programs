@@ -151,6 +151,18 @@
   #actBar button.primary { background: var(--orange); border-color: #ffd28a; }
   #actBar button[data-key]::after { content: attr(data-key); font: 700 12px var(--pix); color: var(--accent); margin-left: 6px; opacity: .8; vertical-align: super; }
   @media (hover: none) { #actBar button[data-key]::after { content: none; } }
+  #actBar button i { font-style: normal; }
+  /* phones: five even buttons, icon on top, word centred under it */
+  @media (max-width: 700px) {
+    #actBar { width: calc(100% - 16px); max-width: 440px; gap: 5px; padding: 6px; }
+    #actBar button { flex: 1 1 0; min-width: 0; padding: 6px 2px; font-size: 14px; line-height: 1.15;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    #actBar button i { font-size: 18px; }
+    #actBar button span { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    #actBar button[data-key]::after { content: none; }
+    body:not(.gm) #floorTag { left: 10px; transform: none; top: 100px; font-size: 14px; }
+  }
+  @media (hover: none) { #hint { display: none; } }
   #floorTag { color: var(--accent); font-size: 18px; padding: 4px 14px; }
   #floorBanner { font-family: var(--pix); background: radial-gradient(#000c, #000e); }
   #floorBanner .fl { color: var(--accent); }
@@ -282,17 +294,17 @@
     <div class="row evb"><button id="bagClose" class="fit">Close</button></div>
   </div>
   <div id="actPanel" class="evcard" style="display:none">
-    <div class="evt" id="actTitle">🎯 Actions</div>
+    <div class="evt" id="actTitle"><i>🎯</i> <span>Actions</span></div>
     <div id="actList"></div>
     <div class="evx" style="color:var(--dim);margin-top:6px">Dice = attribute + skill (hover a button to see which); 4, 5 and 6 are successes. Evade and Clash work outside your turn.</div>
     <div class="row evb"><button id="actClose" class="fit">Close</button></div>
   </div>
   <div id="actBar" style="display:none">
-    <button id="actAttack" class="primary" data-key="A" title="Attack (A)">⚔ Attack</button>
-    <button id="actDash" data-key="D" title="Dash (D)">💨 Dash</button>
+    <button id="actAttack" class="primary" data-key="A" title="Attack (A)"><i>⚔</i> <span>Attack</span></button>
+    <button id="actDash" data-key="D" title="Dash (D)"><i>💨</i> <span>Dash</span></button>
     <button id="actMore" data-key="Q" title="Actions (Q)">🎯 Actions</button>
-    <button id="actBag" data-key="B" title="Bag (B)">🎒 Bag</button>
-    <button id="actEnd" data-key="E">&#9197; End turn</button>
+    <button id="actBag" data-key="B" title="Bag (B)"><i>🎒</i> <span>Bag</span></button>
+    <button id="actEnd" data-key="E"><i>&#9197;</i> <span>End turn</span></button>
   </div>
   <div id="updateBar">
     <span>A new version of the tabletop is out.</span>
@@ -588,6 +600,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=56"></script>
+<script type="module" src="tabletop.js?v=57"></script>
 </body>
 </html>

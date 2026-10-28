@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=56';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=56';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=57';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=57';
 
-const VERSION = 56;                              // raised by bump.py on every publish
+const VERSION = 57;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1505,6 +1505,9 @@ function actMini() {
   if (sel && (sel.owner === me || (gmView() && sel.owner))) return sel;
   return Object.values(state.figures).find(f => f.owner && f.owner === me) || null;
 }
+// bar buttons: the icon and the word apart, so phones can stack them evenly
+function barLabel(id, ico, txt) { const b = $(id); b.innerHTML = `<i>${ico}</i> <span>${txt}</span>`; }
+
 function renderActBar() {
   const bar = $('actBar'); if (!bar) return;
   const f = actMini();
@@ -1514,14 +1517,14 @@ function renderActBar() {
   const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
   $('actAttack').disabled = !!preview || (c && !myTurn);
   $('actDash').disabled = !!preview || (c && !myTurn);
-  $('actDash').textContent = dashed ? '↩ Undo dash' : '💨 Dash';
+  barLabel('actDash', dashed ? '↩' : '💨', dashed ? 'Undo dash' : 'Dash');
   $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : `Pick who ${f.name} attacks`;
   const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0);
-  $('actBag').textContent = `🎒 Bag${n ? ` (${n})` : ''}`;
+  barLabel('actBag', '🎒', `Bag${n ? ` (${n})` : ''}`);
   $('actMore').disabled = !!preview;
   const over = !c && P.done?.[f.id];
   $('actEnd').disabled = !!preview || (c && !myTurn);
-  $('actEnd').textContent = over ? '↩ Not done' : '⏭ End turn';
+  barLabel('actEnd', over ? '↩' : '⏭', over ? 'Not done' : 'End turn');
   $('actEnd').title = c ? (myTurn ? `End ${f.name}'s turn` : `Wait for ${f.name}'s turn`) : over ? 'Take it back: you still want to move or act' : 'Done for this party turn: when every player is done, the next one starts';
   renderActions();
 }
