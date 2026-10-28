@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=41';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=41';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=42';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=42';
 
-const VERSION = 41;                              // raised by bump.py on every publish
+const VERSION = 42;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1147,7 +1147,7 @@ async function attackRoll(f, tg, mv, msg, from) {
         dmg = mu.immune ? 0 : Math.max(0, rolled + mu.mod);
         const extra = [stab && 'same type +1', crit && 'critical +2'].filter(Boolean).join(', ');
         const eff = mu.immune ? `, but ${tg.name} is immune` : mu.mod > 0 ? `, super effective +${mu.mod}` : mu.mod < 0 ? `, not very effective ${mu.mod}` : '';
-        return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)} ${def}${extra ? ', ' + extra : ''}) - ${rolled} success${rolled === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${eff}: ${dmg} damage to ${tg.name}`;
+        return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)}${sideOf(tg) === 'enemy' ? '' : ' ' + def}${extra ? ', ' + extra : ''}) - ${rolled} success${rolled === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${eff}: ${dmg} damage to ${tg.name}`;
       });
       const fx = { t: 'fx', kind: mv.cat, type: mv.type, from: f.id, to: tg.id, text: dmg ? `-${dmg}` : 'No damage' };
       sendAll(fx); playFx(fx);
@@ -2806,6 +2806,7 @@ function renderAttack() {
     $('atkInfo').append(c, ` ${m.cat}${m.cat !== 'Status' ? ` · Power ${m.power}` : ''}${m.effect && m.effect !== '-' ? ' · ' + m.effect : ''}`);
   }
   const a = f.st?.attr || {}, rows = $('atkRows');
+  const hideDef = !gmView() && sideOf(tg) === 'enemy';   // players never see an enemy's Vitality / Insight (Adam)
   const keep = new Map([...rows.querySelectorAll('input')].map(i => [i.dataset.key + '|' + i.dataset.own, i.value]));
   rows.innerHTML = '';
   const field = (label, key, val, own) => {
@@ -2821,7 +2822,7 @@ function renderAttack() {
     for (const k of m.acc) field(`${f.name}'s ${k}`, k, a[k], true);
     if (m.cat !== 'Status') {
       if (m.dmg && !m.acc.includes(m.dmg)) field(`${f.name}'s ${m.dmg}`, m.dmg, a[m.dmg], true);
-      field(`${tg.name}'s ${defenceFor(m.cat)}`, defenceFor(m.cat), tg.st?.attr?.[defenceFor(m.cat)], false).disabled = !gmView();
+      if (!hideDef) field(`${tg.name}'s ${defenceFor(m.cat)}`, defenceFor(m.cat), tg.st?.attr?.[defenceFor(m.cat)], false).disabled = !gmView();
     }
   }
   function calc() {
@@ -2833,7 +2834,7 @@ function renderAttack() {
     const notes = [stab && 'same type +1 die', mu.immune ? `${tg.name} is immune` : mu.mod > 0 ? `super effective +${mu.mod}` : mu.mod < 0 ? `not very effective ${mu.mod}` : '',
       pain && `pain -${pain} success${pain > 1 ? 'es' : ''}`].filter(Boolean);
     $('atkSum').textContent = `Accuracy: ${acc} dice, a hit needs 1 success (4-6; 4+ = critical, +2 damage dice)` +
-      (m.cat !== 'Status' ? ` · Damage: ${dmg} dice, each success = 1 damage` : '') + (notes.length ? ` · ${notes.join(' · ')}` : '');
+      (m.cat !== 'Status' ? ` · Damage: ${dmg} dice${hideDef ? ` minus ${tg.name}'s ${defenceFor(m.cat)}` : ''}, each success = 1 damage` : '') + (notes.length ? ` · ${notes.join(' · ')}` : '');
   }
   calc();
   $('atkAcc').disabled = !m || !!preview;
