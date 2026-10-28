@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=46';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=46';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=47';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=47';
 
-const VERSION = 46;                              // raised by bump.py on every publish
+const VERSION = 47;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3127,7 +3127,7 @@ function tick(now) {
 }
 
 // ---------- picking and dragging ----------
-let dragging = null, lastSend = 0;
+let dragging = null, lastSend = 0, clickMove = null;
 function ndc(e) {
   const r = renderer.domElement.getBoundingClientRect();
   return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
@@ -3209,7 +3209,12 @@ function onDown(e) {
     return;
   }
   const id = figAt(e);
-  if (!id) { select(null); return; }
+  if (!id) {                                    // a click (not a drag) on a square sends the selected mini there (Adam)
+    const sel = selectedId && state.figures[selectedId];
+    if (sel && canMove(sel) && !preview) clickMove = { id: sel.id, x: e.clientX, y: e.clientY, p: floorAt(e) };
+    else select(null);
+    return;
+  }
   const f = state.figures[id];
   const yours = canMove(f) || (preview && preview.as && f.owner === preview.as);
   if (!yours && selectedId && state.figures[selectedId]) { hoverId = hoverId === id ? null : id; return; }
@@ -3265,6 +3270,13 @@ function onUp(e) {
     rightClick = null;
   }
   painting = false; boardDrag = null;
+  const cm = clickMove; clickMove = null;
+  if (cm && e && Math.hypot(e.clientX - cm.x, e.clientY - cm.y) < 6 && cm.p && state.figures[cm.id]) {   // didn't pan the camera: move
+    const c = fp(state.figures[cm.id]);
+    const pos = isHost ? snapPos(cm.p.x, cm.p.z, c.w, c.d) : { x: gridSnap(cm.p.x, c.w), z: gridSnap(cm.p.z, c.d) };
+    act({ t: 'move', id: cm.id, x: pos.x, z: pos.z, snap: true, done: true });
+    return;
+  }
   if (!dragging) return;
   clearTimeout(dragging.hold);
   const d = dragging, g = figMeshes.get(d.id);
@@ -3686,6 +3698,7 @@ function wirePanel() {
   addEventListener('keydown', e => {
     if (e.key === 'Escape' && (attachFor || attackFor)) { attachFor = attackFor = null; status(''); }
     if (e.key === 'Escape' && (areaDraft || pingArm)) { pingArm = false; endAreaDraft(); }
+    else if (e.key === 'Escape' && selectedId && !attachFor && !attackFor && document.activeElement?.tagName !== 'INPUT') select(null);
   });
   $('areaPlace').onclick = startAreaDraft;
   const floorOpts = () => ({ name: $('floorName').value, floor: $('floorNum').value, look: $('floorLook').value, size: $('floorSize').value,
