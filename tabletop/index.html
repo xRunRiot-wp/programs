@@ -454,6 +454,10 @@
     </section>
 
     <section class="gm-only fold" data-fold="boards" data-tab="boards">
+      <h3>Layers</h3>
+      <div class="row"><select id="layerPick" style="flex:1"></select><button id="layerNew" class="fit" title="A new layer with an empty board: map a floor there, or make a random floor on it">+ New layer</button></div>
+      <div class="row" style="margin-top:4px"><button id="layerLive" title="Players will only see this layer">Move the team to this layer</button></div>
+      <div style="color:var(--dim);font-size:12px;margin:4px 0 10px">Map out several floors at once: only you see layers other than the one the team is on. Stairs on the team's layer take everyone to the next layer.</div>
       <h3>Boards <span class="foldNow" id="boardsNow"></span></h3>
       <div id="boardList"></div>
       <div class="row" style="margin-top:6px">
@@ -536,6 +540,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=43"></script>
+<script type="module" src="tabletop.js?v=44"></script>
 </body>
 </html>

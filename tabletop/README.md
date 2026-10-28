@@ -234,3 +234,10 @@ licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (material con
 
 It's four static files (`index.html`, `tabletop.js`, `dice.js` and `rules.js`) with no build step. Copy them to any web host
 (it needs https). Three.js, cannon-es (dice physics) and PeerJS load from unpkg.
+
+## Hidden rooms and layers (v43-v44)
+
+- **Random floors hide unseen rooms.** Players see only the room they start in. Corridor squares within 2 of an ally light up, and a room (with its walls) appears when an ally steps next to or into it. Enemies, chests, ? squares and stairs in the dark stay hidden. Players can't drop a mini onto a dark square. The GM's **Show whole floor** button lifts it.
+- **Rooms are bigger:** fewer rooms (3-6), each at least 6 x 5. Floor sizes are 20 x 14, 28 x 20 and 36 x 26.
+- **Layers** (Boards tab): each layer is its own set of boards, 200 squares apart on the table. The GM looks at one layer at a time (**Layer** list, **+ New layer**). Players only see the layer the team is on. A random floor made on another layer waits there. Stairs on the team's layer take everyone to the next layer (into a waiting floor's first room); otherwise they make a fresh floor as before. **Move the team to this layer** does it by hand.
+

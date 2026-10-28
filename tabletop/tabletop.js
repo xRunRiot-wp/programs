@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=43';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=43';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=44';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=44';
 
-const VERSION = 43;                              // raised by bump.py on every publish
+const VERSION = 44;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -108,7 +108,7 @@ function freshState() {
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
     attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
     areas: {},                                                               // area shapes on the table (burst / cone / line)
-    dungeon: null, bag: {}, fog: null };          // fog = the random floor's squares players haven't seen yet (host only)                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
+    dungeon: null, bag: {}, fog: null, live: 1, prep: {} };   // live = the layer the team is on; prep = random floors waiting on other layers          // fog = the random floor's squares players haven't seen yet (host only)                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
 }
 
 // =====================================================================
@@ -199,20 +199,28 @@ function viewFor() {
   const figures = {}, tiles = {};
   for (const f of Object.values(state.figures)) if (figVisible(f)) figures[f.id] = f;
   for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
-  return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
+  return { boards: state.boards.filter(shown), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
     attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag };
 }
+// layers: each board sits on one (far apart on the table); players only ever see the team's layer, the GM looks at one at a time
+const LAYER_GAP = 200;
+let gmLayer = 1;
+const layerOf = b => b?.layer || 1;
+const shown = b => !!b && !b.hidden && layerOf(b) === (state.live || 1);
+const offView = b => !!b && !shown(b);
+const gmSees = b => !b || layerOf(b) === gmLayer;
 // a random floor's rooms and corridors stay dark to players until an ally gets there (fog.hid: square -> room number, -1 = corridor or wall)
 const fogged = k => state.fog?.hid[k] != null;
-const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden && !fogged(Math.floor(f.x) + ',' + Math.floor(f.z));
-const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden && !fogged(k); };
+const figVisible = f => !f.hidden && !offView(boardAt(f.x, f.z)) && !fogged(Math.floor(f.x) + ',' + Math.floor(f.z));
+const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !offView(boardAt(i + 0.5, j + 0.5)) && !fogged(k); };
 // what players get for a square: a hidden trap on a random floor looks like the floor round it, an unseen square is darkness
 function playerTile(k, t) {
+  const D = state.dungeon, [i, j] = k.split(',').map(Number), b = boardAt(i + 0.5, j + 0.5);
+  if (offView(b)) return null;
   if (tileVisible(k)) return t;
   if (fogged(k)) return 'pit';
-  const D = state.dungeon, [i, j] = k.split(',').map(Number), b = boardAt(i + 0.5, j + 0.5);
-  return t === 'hiddenTrap' && D && b && !b.hidden && b.id === D.board ? FLOOR_LOOKS[D.look].floor : null;
+  return t === 'hiddenTrap' && D && b && b.id === D.board ? FLOOR_LOOKS[D.look].floor : null;
 }
 // players' copy of the turn order leaves out hidden minis (their turn shows as "the GM's turn")
 function combatView() {
@@ -277,7 +285,7 @@ function onHostData(conn, msg) {
       f.st = st;
     }
     conn.send({ t: 'welcome', state: viewFor() });
-    for (const [id, map] of Object.entries(state.maps)) if (!state.boards.find(b => b.id === id)?.hidden) conn.send({ t: 'map', id, map });
+    for (const [id, map] of Object.entries(state.maps)) if (!offView(state.boards.find(b => b.id === id))) conn.send({ t: 'map', id, map });
     for (const [id, data] of modelData) conn.send({ t: 'model', id, name: state.models[id]?.name, data });
     sendAll({ t: 'figs', figures: viewFor().figures });
     addLog({ kind: 'sys', text: `${name} joined.` });
@@ -359,8 +367,8 @@ function handle(msg, from) {
       if (!state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
       let boards = state.boards;
-      if (!gm) boards = state.boards.filter(b => !b.hidden);
-      if (!gm && msg.done && (boardAt(x, z)?.hidden || fogged(Math.floor(x) + ',' + Math.floor(z)))) {
+      if (!gm) boards = state.boards.filter(shown);
+      if (!gm && msg.done && (offView(boardAt(x, z)) || fogged(Math.floor(x) + ',' + Math.floor(z)))) {
         Object.assign(f, f._from); delete f._from;
         note(from, `${f.name} can't walk onto a square nobody can see yet.`);
         pushFig(f); return;
@@ -804,8 +812,9 @@ function handle(msg, from) {
     }
     case 'boardAdd': {
       if (!gm) return;
-      const box = boardsBox(), cols = clampSize(msg.cols, 12), rows = clampSize(msg.rows, 12);
-      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols, rows, grid: true, hidden: !!msg.hidden };   // lined up to the right
+      const L = Math.max(1, Math.min(20, Math.round(+msg.layer) || gmLayer)), first = !state.boards.some(x => layerOf(x) === L);
+      const box = boardsBox(L), cols = clampSize(msg.cols, 12), rows = clampSize(msg.rows, 12);
+      const b = { id: 'b' + rid(5), x: first ? (L - 1) * LAYER_GAP - 10 : box.x1, z: first ? -7 : box.z0, cols, rows, grid: true, hidden: !!msg.hidden, layer: L };   // lined up to the right
       state.boards.push(b);
       boardsChanged();
       return b.id;
@@ -865,8 +874,8 @@ function handle(msg, from) {
     case 'boardPlace': {                        // put a saved board on the table, to the right of the others
       const L = gm && state.boardLib?.[msg.lib];
       if (!L) return;
-      const box = boardsBox();
-      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols: L.cols, rows: L.rows, grid: L.grid !== false, hidden: !!msg.hidden };
+      const box = boardsBox(gmLayer);
+      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols: L.cols, rows: L.rows, grid: L.grid !== false, hidden: !!msg.hidden, layer: gmLayer };
       state.boards.push(b);
       const set = {};
       for (const [k, t] of Object.entries(L.tiles || {})) { const [i, j] = k.split(',').map(Number); set[(i + b.x) + ',' + (j + b.z)] = t; }
@@ -911,9 +920,16 @@ function handle(msg, from) {
       boardsChanged(true);
       break;
     }
+    case 'layerLive': {                         // GM: the team goes to another layer
+      if (!gm || !state.boards.some(b => layerOf(b) === +msg.layer)) return;
+      addLog({ kind: 'sys', text: 'The team moves on.' });
+      goLive(+msg.layer);
+      break;
+    }
     case 'fogOff': {                            // GM: show players the whole floor at once
       if (!gm || !state.fog) return;
-      state.fog = null;
+      for (const k of Object.keys(state.fog.hid)) { const [i, j] = k.split(',').map(Number); if (shown(boardAt(i + 0.5, j + 0.5))) delete state.fog.hid[k]; }
+      if (!Object.keys(state.fog.hid).length) state.fog = null;
       tilesChanged(); resyncPlayers(); save();
       break;
     }
@@ -924,7 +940,7 @@ function handle(msg, from) {
       if (map) state.maps[b.id] = map; else delete state.maps[b.id];
       blobs.set('map:' + b.id, map);
       buildBoard();
-      if (!b.hidden) sendAll({ t: 'map', id: b.id, map });
+      if (shown(b)) sendAll({ t: 'map', id: b.id, map });
       save();
       break;
     }
@@ -998,10 +1014,11 @@ function handle(msg, from) {
       const b = gm && state.boards.find(x => x.id === msg.board);
       if (!b) return;
       const o = msg.opts || {}, num = (v, lo, hi, d) => Math.max(lo, Math.min(hi, Math.round(+v) || (v === 0 || v === '0' ? 0 : d)));
-      state.dungeon = { board: b.id, name: clean(o.name, 30) || 'Mystery Dungeon', floor: num(o.floor, 1, 99, 1), look: FLOOR_LOOKS[o.look] ? o.look : 'cave',
+      const D = { board: b.id, name: clean(o.name, 30) || 'Mystery Dungeon', floor: num(o.floor, 1, 99, 1), look: FLOOR_LOOKS[o.look] ? o.look : 'cave',
         size: FLOOR_SIZES[o.size] ? o.size : '', enemies: num(o.enemies, 0, 12, 3), foes: clean(o.foes, 200), items: num(o.items, 0, 8, 2),
         events: num(o.events, 0, 8, 2), traps: num(o.traps, 0, 10, 2) };
-      makeFloor(b);
+      if (layerOf(b) === (state.live || 1)) state.dungeon = D; else (state.prep ||= {})[layerOf(b)] = D;
+      makeFloor(b, D);
       break;
     }
     case 'stairs': {                            // an ally standing on the stairs takes the team to the next floor
@@ -1009,6 +1026,12 @@ function handle(msg, from) {
       const c = fp(f), on = cellsOf(f.x, f.z, c.w, c.d).map(x => x.join(',')).find(k => state.tiles[k] === 'stairs');
       if (!on) { note(from, `${f.name} has to stand on the stairs.`); return; }
       if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      const next = (state.live || 1) + 1;
+      if (state.boards.some(x => layerOf(x) === next)) {          // the GM prepared the next layer: the team goes there
+        addLog({ kind: 'sys', text: `${f.name} takes the stairs! The team goes down.` });
+        goLive(next);
+        return;
+      }
       const D = state.dungeon, b = D && state.boards.find(x => x.id === D.board);
       const [si, sj] = on.split(',').map(Number);
       if (!b || boardAt(si + 0.5, sj + 0.5) !== b) {
@@ -1018,7 +1041,7 @@ function handle(msg, from) {
       }
       addLog({ kind: 'sys', text: `${f.name} takes the stairs! The team goes down to ${D.name} B${D.floor + 1}F.` });
       D.floor++;
-      makeFloor(b);
+      makeFloor(b, D);
       break;
     }
     case 'ping': {                              // a flash on a square that everyone sees ("over here!")
@@ -1028,7 +1051,7 @@ function handle(msg, from) {
       pingAt[from] = now;
       const p = state.players[from], fx = { t: 'ping', x: +msg.x, z: +msg.z, name: p?.name || '?', color: p?.color || '#ffd23f' };
       playPing(fx);
-      if (!boardAt(fx.x, fx.z)?.hidden) sendAll(fx);                       // a ping on a hidden area stays with the GM
+      if (!offView(boardAt(fx.x, fx.z))) sendAll(fx);                       // a ping on a hidden area stays with the GM
       break;
     }
     case 'chat': {
@@ -1055,7 +1078,7 @@ async function rollPhysics(msg, from, logText) {
   const kinds = sides === 100 ? Array.from({ length: n }, () => ['d10t', 'd10']).flat() : Array(n).fill('d' + sides);
   const CANNON = await (cannonP ||= import('cannon-es'));
   const num = (v, lo, hi) => Math.max(lo, Math.min(hi, isFinite(+v) ? +v : 0));
-  const box = boardsBox();
+  const box = boardsBox(from === state.gm ? gmLayer : state.live || 1);
   const at = { x: num(msg.at?.x, box.x0, box.x1), z: num(msg.at?.z, box.z0, box.z1) };
   const dir = { x: num(msg.dir?.x, -1, 1), z: num(msg.dir?.z, -1, 1) || -1 };
   const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
@@ -1329,7 +1352,7 @@ function dropTilesOutside(old) {
 // host: boards changed; minis left off the boards are put back on (refit = re-snap everyone)
 function boardsChanged(refit) {
   buildBoard(); updateBoardInputs();
-  sendAll({ t: 'boards', boards: state.boards.filter(b => !b.hidden) });
+  sendAll({ t: 'boards', boards: state.boards.filter(shown) });
   for (const f of Object.values(state.figures)) {
     if (!refit && boardAt(f.x, f.z)) continue;
     const c = fp(f), p = snapPos(f.x, f.z, c.w, c.d);
@@ -1361,7 +1384,7 @@ function areaHits(a) {
   const cells = new Set(areaCells(a).map(c => c.join(',')));
   return Object.values(state.figures).filter(f => { const k = fp(f); return cellsOf(f.x, f.z, k.w, k.d).some(c => cells.has(c.join(','))); });
 }
-const areasView = () => Object.fromEntries(Object.entries(state.areas || {}).filter(([, a]) => !boardAt(a.x, a.z)?.hidden));
+const areasView = () => Object.fromEntries(Object.entries(state.areas || {}).filter(([, a]) => !offView(boardAt(a.x, a.z))));
 function pushAreas() { renderAreas(); sendAll({ t: 'areas', areas: areasView() }); save(); }
 function clearAreas() { if (Object.keys(state.areas || {}).length) { state.areas = {}; pushAreas(); } }
 const pingAt = {};
@@ -1508,14 +1531,14 @@ function floorPlan(W, H) {
   if (rooms.length >= 4) dig(rooms[0], rooms[rint(2, rooms.length - 1)]);   // one loop, so it isn't a single line
   return { rooms, open, hall };
 }
-function makeFloor(b) {
-  const D = state.dungeon, look = FLOOR_LOOKS[D.look];
+function makeFloor(b, D) {
+  const look = FLOOR_LOOKS[D.look], live = layerOf(b) === (state.live || 1);
   if (D.size) {                                 // the board takes the chosen size
     const old = { ...b };
     [b.cols, b.rows] = FLOOR_SIZES[D.size];
     if (old.cols !== b.cols || old.rows !== b.rows) { dropTilesOutside(old); boardsChanged(true); }
   }
-  if (b.hidden) { b.hidden = false; resyncPlayers(); }
+  if (b.hidden && live) { b.hidden = false; resyncPlayers(); }
   const W = b.cols, H = b.rows;
   if (W < 10 || H < 8) { note(state.gm, 'That board is too small for a floor: make it at least 10 x 8.'); return; }
   let plan;
@@ -1549,13 +1572,17 @@ function makeFloor(b) {
   if (look.pools) put(rint(1, 3), look.pools, () => inner(pick(others)));
   for (const [k, v] of Object.entries(set)) { if (v) state.tiles[k] = v; else delete state.tiles[k]; }
   // players only see the team's room at first: the rest stays dark until an ally gets there
-  const hid = {};
+  const F = state.fog ||= { hid: {}, rooms: [] }, base = F.rooms.length;   // other layers keep their own dark squares
+  for (const k of Object.keys(F.hid)) { const [i, j] = k.split(',').map(Number); if (boardAt(i + 0.5, j + 0.5) === b) delete F.hid[k]; }
   for (let i = 0; i < W; i++) for (let j = 0; j < H; j++) {
     const k = at(i, j);
-    if (set[k] && set[k] !== 'pit') hid[k] = rooms.findIndex(r => i >= r.x && i < r.x + r.w && j >= r.y && j < r.y + r.h);
+    if (!set[k] || set[k] === 'pit') continue;
+    const r = rooms.findIndex(r => i >= r.x && i < r.x + r.w && j >= r.y && j < r.y + r.h);
+    F.hid[k] = r < 0 ? -1 : base + r;
   }
-  state.fog = { hid, rooms: rooms.map(r => ({ x: b.x + r.x, z: b.z + r.y, w: r.w, h: r.h })) };
-  revealRoom(rooms.indexOf(start), {});
+  F.rooms.push(...rooms.map(r => ({ x: b.x + r.x, z: b.z + r.y, w: r.w, h: r.h })));
+  revealRoom(base + rooms.indexOf(start), {});
+  D.start = F.rooms[base + rooms.indexOf(start)];
   tilesChanged(); sendTiles(set, false);
   // everything that isn't on the team leaves the board; the team stands together in the first room
   for (const f of Object.values(state.figures)) {
@@ -1563,14 +1590,7 @@ function makeFloor(b) {
     for (const c of Object.values(state.figures)) if (c.parent === f.id) { c.parent = null; pushFig(c); }
     delete state.figures[f.id]; removeFigMesh(f.id); sendAll({ t: 'del', id: f.id });
   }
-  const team = Object.values(state.figures).filter(f => (f.owner || sideOf(f) === 'player') && !f.parent);
-  const spots = startCells.slice().sort((a, c) => Math.hypot(a[0] - start.cx, a[1] - start.cy) - Math.hypot(c[0] - start.cx, c[1] - start.cy));
-  team.forEach((f, n) => {
-    const c = spots[n % spots.length], k = fp(f), x = b.x + c[0] + (k.w % 2 ? 0.5 : 1), z = b.z + c[1] + (k.d % 2 ? 0.5 : 1);
-    const dx = x - f.x, dz = z - f.z;
-    f.x = x; f.z = z; pushFig(f); carry(f.id, dx, dz);
-  });
-  for (const f of team) revealFog(f);
+  if (live) for (const f of placeTeam(D.start)) revealFog(f);
   // wild Pokémon in the other rooms
   const names = D.foes.split(',').map(x => x.trim()).filter(Boolean), foes = [];
   for (let k = 0; k < D.enemies; k++) {
@@ -1580,11 +1600,8 @@ function makeFloor(b) {
     state.figures[id] = { id, name, color: '#e0503c', size: '1', w: 1, d: 1, owner: null, hidden: false, side: 'enemy', job: '', x: b.x + c[0] + 0.5, z: b.z + c[1] + 0.5 };
     pushFig(state.figures[id]); foes.push(id);
   }
-  if (state.combat) { state.combat = null; pushCombat(); }
-  state.party = { turn: state.party.turn + 1, from: {}, dash: {} }; pushParty();
-  state.areas = {}; pushAreas();
-  addLog({ kind: 'sys', text: `${D.name} B${D.floor}F` });
-  sendAll({ t: 'dungeon', dungeon: state.dungeon, fresh: true }); renderFloor(true);
+  if (live) newFloorStart(D);
+  else { addLog({ kind: 'sys', text: `Layer ${layerOf(b)}: ${D.name} B${D.floor}F is ready. The stairs on the team's layer lead here.`, to: state.gm }); renderLayers(); }
   save();
   if (foes.length && names.length) loadIndex().then(({ species }) => {   // names that match a Pokémon on the site get its stats (and model)
     for (const id of foes) {
@@ -1595,6 +1612,69 @@ function makeFloor(b) {
       if (bi) useBuiltin(bi, id);
     }
   });
+}
+
+// the team stands together in the middle of a rectangle of squares (a floor's first room, or a layer's board)
+function placeTeam(S) {
+  const team = Object.values(state.figures).filter(f => (f.owner || sideOf(f) === 'player') && !f.parent);
+  const cx = S.x + S.w / 2, cz = S.z + S.h / 2, spots = [];
+  for (let i = S.x; i < S.x + S.w; i++) for (let j = S.z; j < S.z + S.h; j++) if (!BLOCKS_MOVE.has(state.tiles[i + ',' + j])) spots.push([i, j]);
+  if (!spots.length) spots.push([Math.floor(cx), Math.floor(cz)]);
+  spots.sort((a, c) => Math.hypot(a[0] + 0.5 - cx, a[1] + 0.5 - cz) - Math.hypot(c[0] + 0.5 - cx, c[1] + 0.5 - cz));
+  team.forEach((f, n) => {
+    const c = spots[n % spots.length], k = fp(f), x = c[0] + (k.w % 2 ? 0.5 : 1), z = c[1] + (k.d % 2 ? 0.5 : 1);
+    const dx = x - f.x, dz = z - f.z;
+    f.x = x; f.z = z; pushFig(f); carry(f.id, dx, dz);
+  });
+  return team;
+}
+// a fresh start on a floor: no fight, a new party turn, the banner for everyone
+function newFloorStart(D) {
+  if (state.combat) { state.combat = null; pushCombat(); }
+  state.party = { turn: state.party.turn + 1, from: {}, dash: {} }; pushParty();
+  state.areas = {}; pushAreas();
+  if (D) addLog({ kind: 'sys', text: `${D.name} B${D.floor}F` });
+  sendAll({ t: 'dungeon', dungeon: state.dungeon, fresh: !!D }); renderFloor(!!D);
+}
+// GM (or the stairs): the team moves to layer L. Players now see only that layer; a random floor waiting there starts.
+function goLive(L) {
+  const boards = state.boards.filter(b => layerOf(b) === L);
+  if (!boards.length) return;
+  state.live = L;
+  const P = state.prep?.[L];
+  if (P) delete state.prep[L];
+  const b = (P && boards.find(x => x.id === P.board)) || boards[0];
+  state.dungeon = P && P.start && b.id === P.board ? P : null;
+  gmLayer = L; selBoard = b.id;
+  const team = placeTeam(state.dungeon ? state.dungeon.start : { x: b.x, z: b.z, w: b.cols, h: b.rows });
+  buildBoard(); tilesChanged(); syncFigures(); updateBoardInputs(); renderLayers();
+  resyncPlayers();
+  for (const f of team) revealFog(f);
+  newFloorStart(state.dungeon);
+  if (!state.dungeon) frameBoard();
+  save();
+}
+// GM: look at another layer (players don't notice)
+function viewLayer(L) {
+  gmLayer = L;
+  const b = state.boards.find(x => layerOf(x) === L);
+  if (b) selBoard = b.id;
+  buildBoard(); tilesChanged(); syncFigures(); updateBoardInputs(); renderLayers(); frameBoard();
+}
+function renderLayers() {
+  const sel = $('layerPick');
+  if (!isHost || !sel) return;
+  const n = Math.max(1, ...state.boards.map(layerOf));
+  sel.innerHTML = '';
+  for (let L = 1; L <= n; L++) {
+    const o = document.createElement('option'), P = state.prep?.[L], D = state.dungeon;
+    o.value = L;
+    o.textContent = `Layer ${L}` + (L === (state.live || 1) ? ' · the team is here' + (D ? ` (B${D.floor}F)` : '') : '') + (P ? ` · ${P.name} B${P.floor}F ready` : '') +
+      (state.boards.some(b => layerOf(b) === L) ? '' : ' · empty');
+    sel.appendChild(o);
+  }
+  sel.value = gmLayer;
+  $('layerLive').disabled = gmLayer === (state.live || 1);
 }
 
 // ---------- rules helpers (host) ----------
@@ -1674,7 +1754,7 @@ function worldFor(f) {
   }
   const mine = isSmall(f);
   const occupied = (i, j) => { const k = i + ',' + j; return full.has(k) || (smalls.get(k) || 0) >= (mine ? 2 : 1); };
-  const seen = f.owner ? state.boards.filter(b => !b.hidden) : state.boards;   // allies' paths stay on what they can see
+  const seen = f.owner ? state.boards.filter(shown) : state.boards;   // allies' paths stay on what they can see
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied, wall: edgeWall };
 }
 function pushParty() { renderActBar(); renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
@@ -1826,8 +1906,10 @@ function edgeWall(i, j, ni, nj) {
   const k = edgeKey(i, j, ni, nj);
   return !(a?.gaps || []).includes(k) && !(b?.gaps || []).includes(k);
 }
-function boardsBox() {
-  const B = state.boards;
+function boardsBox(L) {
+  const want = L ?? (!isHost ? null : gmView() ? gmLayer : state.live || 1);
+  let B = want == null ? state.boards : state.boards.filter(b => layerOf(b) === want);
+  if (!B.length) B = state.boards;
   return { x0: Math.min(...B.map(b => b.x)), z0: Math.min(...B.map(b => b.z)), x1: Math.max(...B.map(b => b.x + b.cols)), z1: Math.max(...B.map(b => b.z + b.rows)) };
 }
 // a piece w squares wide has its middle on a square's middle (odd) or on a grid line (even)
@@ -1933,7 +2015,7 @@ function buildBoard() {
   boardGroup.clear();
   const slabMat = new THREE.MeshStandardMaterial({ color: '#3b2a1c', roughness: 0.8 });
   for (const b of state.boards) {
-    if (b.hidden && isHost && !gmView()) continue;
+    if (isHost && (gmView() ? !gmSees(b) : !shown(b))) continue;
     const { cols, rows, grid } = b, cx = b.x + cols / 2, cz = b.z + rows / 2;
     const mat = new THREE.MeshStandardMaterial({ color: '#4d5b47', roughness: 0.95 });
     if (b.hidden) { mat.transparent = true; mat.opacity = 0.45; }
@@ -1976,7 +2058,7 @@ function buildBoard() {
   if (edgeWallsOn()) {                          // the low edge walls: one short block per square of edge
     const segs = new Map();
     for (const b of state.boards) {
-      if (b.hidden && isHost && !gmView()) continue;
+      if (isHost && (gmView() ? !gmSees(b) : !shown(b))) continue;
       const add = (i, j, ni, nj, x, z, along) => { if (edgeWall(i, j, ni, nj)) segs.set(edgeKey(i, j, ni, nj), { x, z, along }); };
       for (let i = b.x; i < b.x + b.cols; i++) { add(i, b.z - 1, i, b.z, i + 0.5, b.z, 'x'); add(i, b.z + b.rows - 1, i, b.z + b.rows, i + 0.5, b.z + b.rows, 'x'); }
       for (let j = b.z; j < b.z + b.rows; j++) { add(b.x - 1, j, b.x, j, b.x, j + 0.5, 'z'); add(b.x + b.cols - 1, j, b.x + b.cols, j, b.x + b.cols, j + 0.5, 'z'); }
@@ -2050,6 +2132,7 @@ function buildTiles() {
   const mtx = new THREE.Matrix4();
   const D = state.dungeon, under = D && FLOOR_LOOKS[D.look]?.floor, db = D && state.boards.find(b => b.id === D.board);
   for (const [k, t] of Object.entries(state.tiles)) {
+    if (isHost && gmView()) { const [i, j] = k.split(',').map(Number); if (!gmSees(boardAt(i + 0.5, j + 0.5))) continue; }
     // on a random floor, props / events / hidden traps stand on the floor (so a hidden trap's square looks like any other)
     if (under && TILES[t].piece && !TILES[t].link) { const [i, j] = k.split(',').map(Number); if (boardAt(i + 0.5, j + 0.5) === db) (byType[under] ||= []).push(k); }
     if (isHost && !gmView() && !tileVisible(k)) continue;
@@ -2076,6 +2159,7 @@ function buildTiles() {
   const SIGNS = { event: ['?', '#ff2b2b', '#ffd23f'], clue: ['!', '#e8d9a8', '#ffffff'], goal: ['★', '#5fe0ff', '#ffffff'] };
   for (const [k, t] of Object.entries(state.tiles)) {             // floating signs over event squares
     if (!SIGNS[t] || (isHost && !gmView() && !tileVisible(k))) continue;
+    if (isHost && gmView() && !gmSees(boardAt(+k.split(',')[0] + 0.5, +k.split(',')[1] + 0.5))) continue;
     const [i, j] = k.split(',').map(Number);
     const q = new THREE.Sprite(signMat(...SIGNS[t])); q.position.set(i + 0.5, t === 'goal' ? 1.45 : 0.75, j + 0.5); q.scale.set(0.6, 0.6, 1);
     q.userData.bob = t === 'goal' ? 1.45 : 0.75;
@@ -2379,7 +2463,7 @@ function upsertFig(f, live) {
   u.labelY = u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
   u.mine.visible = !!viewerId() && f.owner === viewerId();
   u.side.material.color.set(SIDES[sideOf(f)].color);
-  g.visible = !isHost || gmView() || figVisible(f);
+  g.visible = !isHost || (gmView() ? gmSees(boardAt(f.x, f.z)) : figVisible(f));
   u.ring.visible = selectedId === f.id;
   for (const m of [u.col, u.dark]) { m.transparent = !!f.hidden; m.opacity = f.hidden ? 0.4 : 1; }
   if (selectedId === f.id && !live) showSelected();
@@ -3301,9 +3385,9 @@ function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !
 function updateBoardInputs() {
   if (!isHost || !$('boardList')) return;
   setTimeout(updateFoldNotes);
-  if (!state.boards.some(b => b.id === selBoard)) selBoard = state.boards[0].id;
+  if (!state.boards.some(b => b.id === selBoard && gmSees(b))) selBoard = (state.boards.find(gmSees) || state.boards[0]).id;
   const list = $('boardList'); list.innerHTML = '';
-  state.boards.forEach((b, n) => {
+  state.boards.filter(gmSees).forEach((b, n) => {
     const btn = document.createElement('button');
     btn.textContent = `Board ${n + 1} (${b.cols}×${b.rows})`;
     btn.classList.toggle('on', b.id === selBoard);
@@ -3315,7 +3399,7 @@ function updateBoardInputs() {
   if (document.activeElement !== $('rows')) $('rows').value = b.rows;
   $('gridOn').checked = b.grid;
   $('delBoard').disabled = state.boards.length < 2;
-  renderRules();
+  renderRules(); renderLayers();
 }
 function pickBoard(id) { selBoard = id; updateBoardInputs(); buildBoard(); }
 const curBoard = () => state.boards.find(x => x.id === selBoard) || state.boards[0];
@@ -3610,7 +3694,7 @@ function wirePanel() {
     act({ t: 'floorGen', board: D.board, opts: { ...floorOpts(), floor: D.floor + 1 } });
   };
   $('floorShow').onclick = () => {
-    if (!state.fog) { alert('The players can already see the whole floor.'); return; }
+    if (!state.fog || !Object.keys(state.fog.hid).some(k => { const [i, j] = k.split(',').map(Number); return shown(boardAt(i + 0.5, j + 0.5)); })) { alert('The players can already see the whole floor.'); return; }
     if (confirm('Show the players every room on this floor now?')) act({ t: 'fogOff' });
   };
   $('areaClear').onclick = () => act({ t: 'areaClear' });
@@ -3738,7 +3822,17 @@ function wirePanel() {
   };
   $('applyBoard').onclick = () => act({ t: 'boardEdit', id: curBoard().id, cols: $('cols').value, rows: $('rows').value });
   $('gridOn').onchange = () => act({ t: 'boardEdit', id: curBoard().id, grid: $('gridOn').checked });
-  $('addBoard').onclick = () => { const b = curBoard(); const id = handle({ t: 'boardAdd', cols: b.cols, rows: b.rows }, clientId); if (id) pickBoard(id); };
+  $('addBoard').onclick = () => { const b = curBoard(); const id = handle({ t: 'boardAdd', cols: b.cols, rows: b.rows, layer: gmLayer }, clientId); if (id) pickBoard(id); };
+  $('layerPick').onchange = () => viewLayer(+$('layerPick').value);
+  $('layerNew').onclick = () => {
+    const L = Math.max(...state.boards.map(layerOf)) + 1;
+    gmLayer = L;
+    const id = handle({ t: 'boardAdd', cols: 28, rows: 20, layer: L, hidden: false }, clientId);
+    if (id) viewLayer(L);
+  };
+  $('layerLive').onclick = () => {
+    if (confirm(`Move the team to layer ${gmLayer}? Players will only see that layer from now on.`)) handle({ t: 'layerLive', layer: gmLayer }, clientId);
+  };
   $('delBoard').onclick = () => { if (state.boards.length > 1 && confirm('Delete this board (and the terrain on it)?')) act({ t: 'boardDel', id: curBoard().id }); };
   function setMoveBoards(on) {
     moveBoards = on;
