@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=36';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=36';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=37';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=37';
 
-const VERSION = 36;                              // raised by bump.py on every publish
+const VERSION = 37;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -105,7 +105,8 @@ function freshState() {
   return { boards: [{ id: 'b1', x: -10, z: -7, cols: 20, rows: 14, grid: true }], maps: {}, figures: {}, party: { turn: 1, from: {}, dash: {} }, players: {}, log: [], gm: '', models: {}, tiles: {},
     combat: null, rules: { diag: 'one', limit: true, autoReveal: true }, explored: 0,
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
-    attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {} };       // attack in progress, warp-out vote, GM's saved minis and boards
+    attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
+    areas: {} };                                                             // area shapes on the table (burst / cone / line)
 }
 
 // =====================================================================
@@ -198,7 +199,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) if (tileVisible(k)) tiles[k] = t;
   return { boards: state.boards.filter(b => !b.hidden), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {} };
+    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView() };
 }
 const figVisible = f => !f.hidden && !boardAt(f.x, f.z)?.hidden;
 const tileVisible = k => { const [i, j] = k.split(',').map(Number); return state.tiles[k] !== 'hiddenTrap' && !boardAt(i + 0.5, j + 0.5)?.hidden; };
@@ -313,6 +314,8 @@ function onClientData(msg) {
     case 'party': state.party = msg.party; renderParty(); break;
     case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); buildBoard(); break;
     case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
+    case 'areas': state.areas = msg.areas; renderAreas(); break;
+    case 'ping': playPing(msg); break;
   }
   figsVersion++;
 }
@@ -401,6 +404,9 @@ function handle(msg, from) {
       const st = { ...(f.st || {}) };
       for (const k of ['dex', 'alert', 'hp', 'hpMax', 'move']) if (k in msg) st[k] = n(msg[k]);
       if (Array.isArray(msg.status)) st.status = [...new Set(msg.status.filter(x => STATUSES.includes(x)))].slice(0, 10);
+      const timers = { ...(st.timers || {}), ...(msg.timers && typeof msg.timers === 'object' ? msg.timers : {}) };
+      st.timers = {};                           // rounds left on a status; it drops off by itself at 0
+      for (const x of st.status || []) { const r = n(timers[x], 20); if (r > 0) st.timers[x] = r; }
       f.st = st;
       pushFig(f); save();
       if (state.combat) { if (fights(f)) joinCombat(f); pushCombat(); }
@@ -452,7 +458,8 @@ function handle(msg, from) {
         c.order = c.order.filter(o => state.figures[o.id]);
         if (!c.order.length) { state.combat = null; pushCombat(); return; }
         c.turn = (c.turn + 1) % c.order.length;
-        if (c.turn === 0) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); }
+        if (c.turn === 0) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); countDown(); }
+        clearAreas();
         const nx = state.figures[c.order[c.turn].id];
         c.from = { x: nx.x, z: nx.z }; c.dash = 0;
       }
@@ -606,6 +613,7 @@ function handle(msg, from) {
       if (state.paused) { note(from, 'Resolve the event first (throw the die / Done).'); return; }
       state.party = { turn: state.party.turn + 1, from: {}, dash: {} };
       addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
+      countDown(); clearAreas();
       pushParty();
       break;
     }
@@ -909,6 +917,39 @@ function handle(msg, from) {
       addLog({ kind: 'roll', from, text, to: msg.hidden ? from : null });
       break;
     }
+    case 'areaAdd': {                           // anyone: show which squares a move hits
+      const a = msg.area || {}, kind = AREA_KINDS[a.kind] ? a.kind : null;
+      if (!kind || !isFinite(a.x) || !isFinite(a.z)) return;
+      const mine = Object.entries(state.areas).filter(([, x]) => x.by === from).map(([k]) => k);
+      if (mine.length >= 6) delete state.areas[mine[0]];                    // keep it tidy: 6 each at most
+      const id = rid(6), size = Math.max(1, Math.min(10, Math.round(+a.size) || 2)), dir = ((Math.round((+a.dir || 0) / 45) * 45) % 360 + 360) % 360;
+      const ar = state.areas[id] = { kind, x: Math.floor(+a.x) + 0.5, z: Math.floor(+a.z) + 0.5, size, dir, by: from, color: state.players[from]?.color || '#ffd23f' };
+      const hits = areaHits(ar).filter(figVisible).map(x => x.name);
+      addLog({ kind: 'sys', text: `${state.players[from]?.name || '?'}'s ${AREA_KINDS[kind].toLowerCase()} (${size}) ${hits.length ? 'hits ' + hits.join(', ') : 'hits nobody'}.` });
+      pushAreas();
+      break;
+    }
+    case 'areaDel': {
+      const a = state.areas[msg.area];
+      if (!a || !(gm || a.by === from)) return;
+      delete state.areas[msg.area]; pushAreas();
+      break;
+    }
+    case 'areaClear': {                         // GM: all of them; a player: their own
+      for (const [k, a] of Object.entries(state.areas)) if (gm || a.by === from) delete state.areas[k];
+      pushAreas();
+      break;
+    }
+    case 'ping': {                              // a flash on a square that everyone sees ("over here!")
+      if (!isFinite(msg.x) || !isFinite(msg.z) || !boardAt(msg.x, msg.z)) return;
+      const now = Date.now();
+      if (now - (pingAt[from] || 0) < 600) return;
+      pingAt[from] = now;
+      const p = state.players[from], fx = { t: 'ping', x: +msg.x, z: +msg.z, name: p?.name || '?', color: p?.color || '#ffd23f' };
+      playPing(fx);
+      if (!boardAt(fx.x, fx.z)?.hidden) sendAll(fx);                       // a ping on a hidden area stays with the GM
+      break;
+    }
     case 'chat': {
       const text = clean(msg.text, 300);
       if (text) addLog({ kind: 'chat', from, text });
@@ -1207,6 +1248,51 @@ function boardsChanged(refit) {
     if (!refit && boardAt(f.x, f.z)) continue;
     const c = fp(f), p = snapPos(f.x, f.z, c.w, c.d);
     if (p.x !== f.x || p.z !== f.z) { Object.assign(f, p); pushFig(f); }
+  }
+  save();
+}
+
+// ---------- area shapes: burst (a square around a point), cone (widens away from the start), line ----------
+const AREA_KINDS = { burst: 'Burst', cone: 'Cone', line: 'Line' };
+const DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];   // 0°, 45°, ... (x right, z down)
+function areaCells(a) {
+  const oi = Math.floor(a.x), oj = Math.floor(a.z), n = a.size, out = [];
+  if (a.kind === 'burst') {
+    for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) out.push([oi + i, oj + j]);
+    return out;
+  }
+  const [dx, dz] = DIRS[Math.round(a.dir / 45) % 8];
+  if (a.kind === 'line') { for (let k = 1; k <= n; k++) out.push([oi + dx * k, oj + dz * k]); return out; }
+  // cone: a quarter turn wide, starting next to the start square
+  for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) {
+    if (!i && !j) continue;
+    const ok = dx && dz ? i * dx >= 0 && j * dz >= 0 : dx ? i * dx >= Math.abs(j) && i * dx > 0 : j * dz >= Math.abs(i) && j * dz > 0;
+    if (ok) out.push([oi + i, oj + j]);
+  }
+  return out;
+}
+function areaHits(a) {
+  const cells = new Set(areaCells(a).map(c => c.join(',')));
+  return Object.values(state.figures).filter(f => { const k = fp(f); return cellsOf(f.x, f.z, k.w, k.d).some(c => cells.has(c.join(','))); });
+}
+const areasView = () => Object.fromEntries(Object.entries(state.areas || {}).filter(([, a]) => !boardAt(a.x, a.z)?.hidden));
+function pushAreas() { renderAreas(); sendAll({ t: 'areas', areas: areasView() }); save(); }
+function clearAreas() { if (Object.keys(state.areas || {}).length) { state.areas = {}; pushAreas(); } }
+const pingAt = {};
+// status timers: one round off each (end of a combat round, or each party turn); at 0 the status wears off
+function countDown() {
+  for (const f of Object.values(state.figures)) {
+    const t = f.st?.timers;
+    if (!t || !Object.keys(t).length) continue;
+    const st = { ...f.st, timers: {} }, gone = [];
+    for (const [x, r] of Object.entries(t)) {
+      if (!(st.status || []).includes(x)) continue;
+      if (r > 1) st.timers[x] = r - 1; else gone.push(x);
+    }
+    st.status = (st.status || []).filter(x => !gone.includes(x));
+    f.st = st;
+    if (gone.length) addLog({ kind: 'sys', text: `${f.name}: ${gone.join(', ')} wore off.`, ...(figVisible(f) ? {} : { to: state.gm }) });
+    pushFig(f);
   }
   save();
 }
@@ -1843,9 +1929,35 @@ function labelSprite(text, extra) {
 }
 // what a mini's label shows besides its name
 function labelExtra(f) {
-  const st = f.st || {}, tags = [...(st.status || [])];
+  const st = f.st || {}, tags = (st.status || []).filter(x => !st.timers?.[x]);
   if (engaged.has(f.id)) tags.unshift('Engaged');
   return { hp: st.hp, hpMax: st.hpMax, tags };
+}
+
+// status countdowns over a mini's head: each status with a gold disc showing the rounds left
+function timerSprite(list) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 52;
+  const g = c.getContext('2d');
+  g.font = 'bold 20px system-ui, sans-serif';
+  const parts = list.map(([x, r]) => ({ x, r, w: g.measureText(x).width + 38 }));
+  const w = Math.min(248, parts.reduce((a, b) => a + b.w, 0) + 12 + (parts.length - 1) * 6);
+  g.fillStyle = 'rgba(40,24,6,0.82)';
+  g.beginPath(); g.roundRect((256 - w) / 2, 6, w, 40, 12); g.fill();
+  let x = (256 - w) / 2 + 8;
+  g.textBaseline = 'middle';
+  for (const p of parts) {
+    g.fillStyle = '#ffd27a'; g.textAlign = 'left'; g.font = 'bold 20px system-ui, sans-serif';
+    g.fillText(p.x, x, 27, 200);
+    const cx = x + p.w - 17;
+    g.fillStyle = '#ffd23f'; g.beginPath(); g.arc(cx, 26, 13, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2a1a04'; g.textAlign = 'center'; g.font = 'bold 19px system-ui, sans-serif';
+    g.fillText(String(p.r), cx, 27);
+    x += p.w + 6;
+  }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(2, 2 * 52 / 256, 1); sp.renderOrder = 10; sp.center.set(0.5, 0);
+  return sp;
 }
 
 // flat rectangle outline (selection / "yours" marker) for a w x d footprint
@@ -1909,6 +2021,12 @@ function upsertFig(f, live) {
   if (u.labelText !== key) {
     g.remove(u.label); u.label.material.map.dispose(); u.label.material.dispose();
     u.label = labelSprite(text, extra); u.labelText = key; g.add(u.label);
+  }
+  const timed = Object.entries(f.st?.timers || {}).filter(([x]) => (f.st.status || []).includes(x)), tkey = JSON.stringify(timed);
+  if (u.timerKey !== tkey) {
+    if (u.timer) { g.remove(u.timer); u.timer.material.map.dispose(); u.timer.material.dispose(); u.timer = null; }
+    if (timed.length) { u.timer = timerSprite(timed); g.add(u.timer); }
+    u.timerKey = tkey;
   }
   const { w, d } = fp(f), small = f.size === '0.7' && w === 1 && d === 1;
   const baseKey = `${w}x${d}${small ? 's' : ''}`;
@@ -1993,7 +2111,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); if (isHost) { siteFeed(); renderSiteChars(); } }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -2170,6 +2288,99 @@ function animateFx(now) {
     e.step(k);
     if (k >= 1) { e.end(); fxList.splice(i, 1); }
   }
+}
+
+// ---------- area shapes on the table + the one being placed ----------
+let areaGroup = null, areaKey = '', areaRings = [], areaDraft = null, pingArm = false, draftGroup = null;
+const areaGeo = new THREE.PlaneGeometry(0.94, 0.94).rotateX(-Math.PI / 2);
+function shownAreas() { return isHost && !gmView() ? areasView() : state.areas || {}; }
+function areaMesh(list, opacity) {
+  const grp = new THREE.Group(), cells = [];
+  for (const a of list) for (const [i, j] of areaCells(a)) if (boardAt(i + 0.5, j + 0.5)) cells.push([i, j, a]);
+  if (!cells.length) return grp;
+  const m = new THREE.InstancedMesh(areaGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity, depthWrite: false }), cells.length);
+  const col = new THREE.Color();
+  cells.forEach(([i, j, a], n) => {
+    m.setMatrixAt(n, place(i + 0.5, groundAt(i + 0.5, j + 0.5) + 0.02, j + 0.5, 1, 1, 1));
+    m.setColorAt(n, col.set(a.color || '#ffd23f'));
+  });
+  m.renderOrder = 3; grp.add(m);
+  for (const a of list) {                          // a faint square marks where a cone or line starts
+    if (a.kind === 'burst') continue;
+    const o = new THREE.Mesh(areaGeo, new THREE.MeshBasicMaterial({ color: a.color || '#ffd23f', transparent: true, opacity: 0.18, depthWrite: false }));
+    o.position.set(a.x, groundAt(a.x, a.z) + 0.018, a.z); o.scale.setScalar(0.6); o.renderOrder = 3;
+    grp.add(o);
+  }
+  return grp;
+}
+function dropGroup(grp) { if (!grp) return; scene.remove(grp); grp.traverse(o => { if (o.isMesh) { if (o.geometry !== areaGeo) o.geometry.dispose(); o.material.dispose(); } }); }
+function renderAreas() {
+  areaKey = '';
+  const el = $('areaList'); if (!el) return;
+  el.innerHTML = '';
+  for (const [id, a] of Object.entries(shownAreas())) {
+    const d = document.createElement('div'); d.className = 'areaRow';
+    const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = a.color;
+    const t = document.createElement('span'); t.textContent = `${state.players[a.by]?.name || '?'}: ${AREA_KINDS[a.kind]} ${a.size}`;
+    d.append(dot, t);
+    if (gmView() || (!isHost && a.by === clientId)) {
+      const x = document.createElement('button'); x.className = 'fit'; x.textContent = '×'; x.title = 'Remove';
+      x.onclick = () => act({ t: 'areaDel', area: id }); d.appendChild(x);
+    }
+    el.appendChild(d);
+  }
+}
+function updateAreas() {
+  const list = Object.values(shownAreas());
+  const key = `${figsVersion}|${tilesVersion}|${JSON.stringify(list)}|${preview ? preview.as : ''}`;
+  if (key === areaKey) return;
+  areaKey = key;
+  dropGroup(areaGroup); areaRings = [];
+  areaGroup = areaMesh(list, 0.38); scene.add(areaGroup);
+  const seen = new Set();
+  for (const a of list) for (const f of areaHits(a)) {                  // minis caught in it get a pulsing ring
+    const g = figMeshes.get(f.id);
+    if (seen.has(f.id) || !g?.visible) continue;
+    seen.add(f.id);
+    const k = fp(f), r = 0.42 * Math.max(k.w, k.d) + 0.16;
+    const m = new THREE.Mesh(new THREE.RingGeometry(r, r + 0.09, 40), new THREE.MeshBasicMaterial({ color: a.color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(f.x, groundAt(f.x, f.z, k.w, k.d) + 0.03, f.z); m.renderOrder = 4;
+    areaGroup.add(m); areaRings.push(m);
+  }
+}
+// the shape follows the mouse while it's being placed
+function draftArea(p) {
+  dropGroup(draftGroup); draftGroup = null;
+  if (!areaDraft || !p) return null;
+  const d = areaDraft, from = d.from || p, ang = Math.atan2(p.z - from.z, p.x - from.x) * 180 / Math.PI;
+  const a = { kind: d.kind, size: d.size, x: Math.floor(d.kind === 'burst' ? p.x : from.x) + 0.5, z: Math.floor(d.kind === 'burst' ? p.z : from.z) + 0.5,
+    dir: ((Math.round(ang / 45) * 45) % 360 + 360) % 360, color: state.players[clientId]?.color || '#ffd23f' };
+  if (d.kind !== 'burst' && !d.from) return a;     // waiting for the start square
+  draftGroup = areaMesh([a], 0.25); scene.add(draftGroup);
+  return a;
+}
+function startAreaDraft() {
+  const kind = $('areaKind').value, size = Math.max(1, Math.min(10, Math.round(+$('areaSize').value) || 2));
+  const f = selectedId && state.figures[selectedId];
+  areaDraft = { kind, size, from: kind !== 'burst' && f ? { x: f.x, z: f.z } : null };
+  pingArm = false;
+  const name = AREA_KINDS[kind].toLowerCase();
+  status(kind === 'burst' ? 'Click the square in the middle of the burst (Esc to cancel)'
+    : areaDraft.from ? `Point the ${name} away from ${f.name} and click (Esc to cancel)` : `Click where the ${name} starts, then click the way it points (Esc to cancel)`);
+}
+function endAreaDraft() { areaDraft = null; dropGroup(draftGroup); draftGroup = null; status(''); }
+// a ping: rings spreading out on the square and a beam of light, in the pinger's colour
+function playPing(msg) {
+  if (!scene) return;
+  const y = groundAt(msg.x, msg.z) + 0.03, t0 = performance.now(), col = msg.color || '#ffd23f';
+  const rings = [0, 1, 2].map(() => { const m = fxMesh(new THREE.RingGeometry(0.3, 0.4, 40), col); m.rotation.x = -Math.PI / 2; m.position.set(msg.x, y, msg.z); m.visible = false; return m; });
+  const beam = fxMesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 12), col, 0.6); beam.position.set(msg.x, y + 1.5, msg.z);
+  const tag = labelSprite('📍 ' + msg.name); tag.position.set(msg.x, y + 1.4, msg.z); scene.add(tag);
+  fxList.push({ t0, ms: 2400, step: k => {
+    rings.forEach((m, i) => { const u = Math.min(1, Math.max(0, (k * 2400 - i * 350) / 1200)); m.visible = u > 0 && u < 1; m.scale.setScalar(1 + u * 3); m.material.opacity = 1 - u; });
+    beam.material.opacity = 0.6 * (1 - k); beam.scale.x = beam.scale.z = 1 + Math.sin(k * 30) * 0.2;
+    tag.position.y = y + 1.4 + k * 0.4; tag.material.opacity = k < 0.7 ? 1 : (1 - k) / 0.3;
+  }, end: () => { rings.forEach(dropMesh); dropMesh(beam); scene.remove(tag); tag.material.map.dispose(); tag.material.dispose(); } });
 }
 
 // ---------- the attack panel (pick a move, then roll accuracy and, on a hit, damage) ----------
@@ -2383,7 +2594,7 @@ function tick() {
       scene.add(turnMarker);
     }
     turnMarker.visible = true;
-    const lb = cur.userData.label, top = lb.position.y + lb.scale.y * (1 - lb.center.y);   // just above the name tag
+    const lb = cur.userData.label, top = lb.position.y + lb.scale.y * (1 - lb.center.y) + (cur.userData.timer ? cur.userData.timer.scale.y + 0.04 : 0);   // just above the name tag
     turnMarker.position.set(cur.position.x, cur.position.y + top + 0.3 + Math.sin(performance.now() / 250) * 0.06, cur.position.z);
     turnMarker.rotation.y += 0.03;
   } else if (turnMarker) turnMarker.visible = false;
@@ -2394,7 +2605,11 @@ function tick() {
     g.position.lerp(_shareT, dragging?.id === g.userData.id ? 1 : 0.25);
     g.scale.setScalar(g.scale.x + ((off ? 0.8 : 1) - g.scale.x) * 0.25);   // squeezed in next to another Small
     if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off < 0 ? 0.5 : 0);   // name tags one above the other (the back one higher)
+    const lb = g.userData.label, tm = g.userData.timer;
+    if (tm) tm.position.y = lb.position.y + lb.scale.y * (1 - lb.center.y) + 0.04;
   }
+  updateAreas();
+  if (areaRings.length) { const k = 0.55 + Math.sin(performance.now() / 180) * 0.35; for (const m of areaRings) m.material.opacity = k; }
   controls.update();
   // keep the near plane in step with the zoom, so thin layers (grid, terrain) don't flicker through each other from far away
   const near = Math.max(0.05, camera.position.distanceTo(controls.target) * 0.03);
@@ -2445,6 +2660,23 @@ function onDown(e) {
     return;                                     // the camera still turns if you drag
   }
   if (e.button !== 0 || e.target !== renderer.domElement) return;
+  if (areaDraft) {
+    e.stopPropagation();
+    const p = floorAt(e);
+    if (!p) return;
+    if (areaDraft.kind !== 'burst' && !areaDraft.from) { areaDraft.from = { x: Math.floor(p.x) + 0.5, z: Math.floor(p.z) + 0.5 }; status(`Now click the way the ${AREA_KINDS[areaDraft.kind].toLowerCase()} points (Esc to cancel)`); return; }
+    const a = draftArea(p);
+    endAreaDraft();
+    if (a && !preview) act({ t: 'areaAdd', area: a });
+    return;
+  }
+  if (pingArm || e.altKey) {
+    e.stopPropagation();
+    pingArm = false; status('');
+    const p = floorAt(e);
+    if (p && !preview) act({ t: 'ping', x: p.x, z: p.z });
+    return;
+  }
   if (attackFor) {                              // picking who the selected mini attacks
     const to = figAt(e), id = attackFor;
     attackFor = null; status('');
@@ -2498,6 +2730,7 @@ function onMove(e) {
     if (x !== b.x || z !== b.z) act({ t: 'boardMove', id: b.id, x, z });
     return;
   }
+  if (areaDraft) { draftArea(floorAt(e)); return; }
   if (!dragging) {
     if (e.pointerType === 'mouse' && e.target === renderer?.domElement) { const h = figAt(e); if (h !== hoverId) hoverId = h; }
     return;
@@ -2572,7 +2805,7 @@ function showSelected() {
   $('stMove').textContent = st.dex != null ? `Moves ${moveBudget(f)} squares a turn (${moveBudget(f) !== ownMove(f) ? 'the slowest of its attached minis' : '2 + Dexterity' + ((st.status || []).includes('Immobilized') ? ', Immobilized' : '')}).` : 'Set Dexterity to see how far it can move.';
   const chips = $('stChips'); chips.innerHTML = '';
   for (const x of st.status || []) {
-    const b = document.createElement('button'); b.className = 'chip'; b.textContent = x + ' ×'; b.title = 'Remove';
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = x + (st.timers?.[x] ? ` ⏳${st.timers[x]}` : '') + ' ×'; b.title = 'Remove';
     b.onclick = () => act({ t: 'stats', id: f.id, status: (f.st?.status || []).filter(y => y !== x) });
     chips.appendChild(b);
   }
@@ -2585,7 +2818,7 @@ function showSelected() {
   for (const id of ['selName', 'selColor', 'selTurn']) $(id).disabled = !look;
   $('selSizeBox').style.display = all ? '' : 'none';
   if (!all) $('selCustom').style.display = 'none';
-  for (const id of ['st_dex', 'st_alert', 'st_hp', 'st_hpMax', 'hpDown', 'hpUp', 'stStatus', 'stAdd']) $(id).disabled = !all;
+  for (const id of ['st_dex', 'st_alert', 'st_hp', 'st_hpMax', 'hpDown', 'hpUp', 'stStatus', 'stRounds', 'stAdd']) $(id).disabled = !all;
   $('stEditRow').style.display = $('stStatusRow').style.display = all ? 'flex' : 'none';
   for (const b of chips.children) b.disabled = !all;
   if (!all) for (const b of chips.children) b.textContent = b.textContent.replace(' ×', '');
@@ -2940,7 +3173,13 @@ function wirePanel() {
     status(`Click the piece to attach ${state.figures[selectedId].name} to (Esc to cancel)`);
   };
   $('selDetach').onclick = () => selectedId && act({ t: 'attach', id: selectedId, to: null });
-  addEventListener('keydown', e => { if (e.key === 'Escape' && (attachFor || attackFor)) { attachFor = attackFor = null; status(''); } });
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && (attachFor || attackFor)) { attachFor = attackFor = null; status(''); }
+    if (e.key === 'Escape' && (areaDraft || pingArm)) { pingArm = false; endAreaDraft(); }
+  });
+  $('areaPlace').onclick = startAreaDraft;
+  $('areaClear').onclick = () => act({ t: 'areaClear' });
+  $('pingBtn').onclick = () => { endAreaDraft(); pingArm = true; status('Click a square to ping it for everyone (Esc to cancel)'); };
   $('selAttack').onclick = () => {
     if (!selectedId) return;
     attackFor = selectedId;
@@ -3023,8 +3262,9 @@ function wirePanel() {
   for (const x of STATUSES) { const o = document.createElement('option'); o.value = o.textContent = x; $('stStatus').appendChild(o); }
   $('stAdd').onclick = () => {
     const f = selectedId && state.figures[selectedId], x = $('stStatus').value;
-    if (f && x) act({ t: 'stats', id: f.id, status: [...(f.st?.status || []), x] });
-    $('stStatus').value = '';
+    const r = Math.round(+$('stRounds').value);
+    if (f && x) act({ t: 'stats', id: f.id, status: [...(f.st?.status || []), x], timers: { [x]: r > 0 ? r : 0 } });
+    $('stStatus').value = ''; $('stRounds').value = '';
   };
   $('hpDown').onclick = () => { const f = state.figures[selectedId]; if (f?.st?.hpMax) act({ t: 'stats', id: f.id, hp: Math.max(0, (f.st.hp ?? f.st.hpMax) - 1) }); };
   $('hpUp').onclick = () => { const f = state.figures[selectedId]; if (f?.st?.hpMax) act({ t: 'stats', id: f.id, hp: Math.min(f.st.hpMax, (f.st.hp ?? f.st.hpMax) + 1) }); };
@@ -3105,4 +3345,6 @@ if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('jo
 // for testing in a browser console
 window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene }; }, get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
   hover(id) { hoverId = id; },
+  get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
+  timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
   async addModel(data, name, figId) { act({ t: 'model', id: await modelId(data), name, data, figId }); } };

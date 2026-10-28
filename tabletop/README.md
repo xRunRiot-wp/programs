@@ -28,6 +28,7 @@ The game is open while the GM's tab is open. If the GM refreshes, the same room 
 | Boards: add more, size, map picture, grid lines, drag them together | | yes |
 | 3D models (.glb) for minis | | yes |
 | Physics dice (d4 to d100, "only me" rolls) and chat | yes | yes |
+| Move areas (burst, cone, line) and pings | their own | all |
 | Stats on a mini (Dexterity, Alert, HP, statuses) | see their own | set them |
 | Combat: roll initiative, next turn, end combat | end own turn, Dash | yes |
 | Hide areas, dungeon event roll, rules settings | | yes |
@@ -74,6 +75,21 @@ With **Limit moves in combat** (on unless the GM turns it off) a player can only
 only within range; a move that's too far snaps back.
 
 **Engaged** shows on the name tags when a player's mini stands next to a GM mini.
+
+**Status timers.** When the GM adds a status they can type how many **Rounds** it lasts. The countdown floats over
+the mini's head (the status name with a gold number). It goes down by one at the end of each combat round, and
+each party turn when exploring. At 0 the status wears off and the log says so. Leave Rounds empty for a status
+that stays until the GM removes it.
+
+**Move areas** (Mystery Dungeon move ranges). Under **Move areas & ping**, pick **Nearby (burst)**,
+**Front + sides (cone)** or **Line**, set the size, click **Place**, then click the board. A burst is a square around
+the clicked square. A cone or line starts from your picked mini (or from a first click) and points where you click
+next: the shape follows the mouse first, in 45° steps. Everyone sees the squares in the placer's colour. Minis
+inside get a pulsing ring, and the log says who was hit. Areas clear by themselves at the next combat turn or
+party turn, or with × / **Clear** (players clear their own, the GM all of them).
+
+**Ping.** Click **📍 Ping** and then a square, or Alt+click anywhere: rings and a beam with your name flash there
+for everyone ("over here!"). A GM ping on a hidden area only shows to the GM.
 
 **Line of sight.** Pick a mini and point at another: a green rod means in sight, red means blocked
 (walls, thin walls, hedges, doors and trees block the view), with the distance in squares.

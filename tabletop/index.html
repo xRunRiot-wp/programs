@@ -94,6 +94,8 @@
   button:disabled { opacity: .4; cursor: default; }
   .stats { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 4px; }
   .stats input { width: 100%; }
+  .areaRow { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; }
+  .areaRow span:nth-child(2) { flex: 1; }
   #stChips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; background: #3a2f1a; border-color: #7a5a20; }
   #turnList .turn { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
@@ -251,6 +253,7 @@
         </div>
         <div id="stStatusRow" class="row" style="margin-top:6px">
           <select id="stStatus"><option value="">Add a status…</option></select>
+          <input id="stRounds" type="number" min="1" max="20" placeholder="Rounds" class="fit" style="width:76px" title="How many rounds it lasts: it counts down over the mini's head and wears off at 0 (blank = until removed)">
           <button id="stAdd" class="fit">Add</button>
         </div>
         <div id="stChips"></div>
@@ -423,6 +426,22 @@
     </section>
 
     <section class="tblSec" data-tab="combat">
+      <h3>Move areas &amp; ping</h3>
+      <div class="row">
+        <select id="areaKind" title="Mystery Dungeon move ranges"><option value="burst">Nearby (burst)</option><option value="cone">Front + sides (cone)</option><option value="line">Line</option></select>
+        <label class="fit" style="margin:0">Size</label>
+        <input id="areaSize" type="number" min="1" max="10" value="2" class="fit" style="width:56px" title="Squares out from the start">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="areaPlace" class="primary" title="Pick your mini first and a cone or line starts from it">📐 Place</button>
+        <button id="pingBtn" title="Or Alt+click anywhere">📍 Ping</button>
+        <button id="areaClear" class="fit" title="GM: all areas, players: your own">Clear</button>
+      </div>
+      <div id="areaList"></div>
+      <div style="color:var(--dim);font-size:12px;margin-top:4px">Areas clear by themselves at the next turn. Minis inside get a pulsing ring.</div>
+    </section>
+
+    <section class="tblSec" data-tab="combat">
       <h3>Log</h3>
       <div id="log"></div>
       <div class="row" style="margin-top:6px">
@@ -441,6 +460,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=36"></script>
+<script type="module" src="tabletop.js?v=37"></script>
 </body>
 </html>
