@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=75';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=75';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=76';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=76';
 
-const VERSION = 75;                              // raised by bump.py on every publish
+const VERSION = 76;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1833,7 +1833,9 @@ function renderEnding() {
     whiteout: `The whole team fainted in ${E.name}${E.floor ? ` on B${E.floor}F` : ''}.` }[E.kind] || '';
   box.querySelector('.et').textContent = title;
   box.querySelector('.es').textContent = sub;
-  $('endClose').textContent = gmView() ? 'Close for everyone' : 'Close';
+  // only the DM can close it; players wait for the DM (Adam)
+  $('endClose').textContent = 'Close for everyone';
+  $('endClose').style.display = gmView() ? '' : 'none';
   box.className = `show ${E.kind}`;
 }
 function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
@@ -4523,6 +4525,8 @@ function wirePanel() {
   };
   $('selDetach').onclick = () => selectedId && act({ t: 'attach', id: selectedId, to: null });
   addEventListener('keydown', e => {
+    // players can't click the ending screen away, but Esc hides it just for them (Adam)
+    if (e.key === 'Escape' && $('endScreen').classList.contains('show')) { $('endScreen').className = ''; e.stopImmediatePropagation(); return; }
     if (e.key === 'Escape' && (attachFor || attackFor || itemFor)) { attachFor = attackFor = itemFor = null; status(''); }
     if (e.key === 'Escape' && (areaDraft || pingArm)) { pingArm = false; endAreaDraft(); }
     else if (e.key === 'Escape' && selectedId && !attachFor && !attackFor && document.activeElement?.tagName !== 'INPUT') select(null);
@@ -4552,7 +4556,7 @@ function wirePanel() {
     status(`${touchy ? 'Tap' : 'Click'} a foe: red ring = any move, orange ring = ranged moves only, no ring = out of reach (Esc to cancel)`);
   };
   $('atkMove').oninput = () => pickMove();
-  $('endClose').onclick = () => { if (gmView()) act({ t: 'endingClose' }); else $('endScreen').className = ''; };
+  $('endClose').onclick = () => { if (gmView()) act({ t: 'endingClose' }); };
   $('actAttack').onclick = () => {
     const f = actMini(); if (!f) return;
     select(f.id); attackFor = f.id;
