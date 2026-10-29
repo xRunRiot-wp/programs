@@ -177,6 +177,22 @@
   #status { top: auto; bottom: 120px; left: 50%; transform: translateX(-50%); font-size: 16px; padding: 6px 14px; z-index: 7; }
   @media (min-width: 701px) { #status { left: calc(50% - 150px); } }
   /* newest log lines over the board, like the dungeon's message box */
+  /* attack banner: attacker vs target, blue for players, red for enemies */
+  #vsBox { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(560px, calc(100% - 20px));
+    display: none; align-items: center; justify-content: center; gap: 6px; pointer-events: none; font-family: var(--pix); }
+  #vsBox.show { display: flex; }
+  #vsBox .ban { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border: 2px solid #fff; border-radius: 10px; color: #fff;
+    box-shadow: 0 3px 10px #0008; }
+  #vsBox .ban.r { flex-direction: row-reverse; text-align: right; }
+  #vsBox .ban img { width: 72px; height: 72px; flex: none; border-radius: 8px; background: #0003; }
+  #vsBox .ban b { display: block; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #vsBox .ban span { font-size: 14px; opacity: .85; }
+  #vsBox .vs { font-size: 26px; color: #ffd27a; text-shadow: 0 2px 0 #000; flex: none; }
+  #vsBox.show .l { animation: vsL 2.6s ease forwards; } #vsBox.show .r { animation: vsR 2.6s ease forwards; } #vsBox.show .vs { animation: vsM 2.6s ease forwards; }
+  @keyframes vsL { 0% { transform: translateX(-60px); opacity: 0 } 12%, 85% { transform: none; opacity: 1 } 100% { opacity: 0 } }
+  @keyframes vsR { 0% { transform: translateX(60px); opacity: 0 } 12%, 85% { transform: none; opacity: 1 } 100% { opacity: 0 } }
+  @keyframes vsM { 0%, 8% { transform: scale(2.5); opacity: 0 } 18%, 85% { transform: none; opacity: 1 } 100% { opacity: 0 } }
+  @media (max-width: 700px) { #vsBox { top: 140px; } #vsBox .ban img { width: 52px; height: 52px; } #vsBox .ban b { font-size: 16px; } #vsBox .ban span { font-size: 12px; } #vsBox .vs { font-size: 20px; } }
   #msgBox { position: absolute; left: 10px; bottom: 44px; z-index: 3; width: min(360px, calc(100% - 20px)); padding: 6px 12px; font-size: 16px; line-height: 1.3;
     pointer-events: none; opacity: 0; transition: opacity .5s; }
   #msgBox.on { opacity: 1; }
@@ -261,6 +277,7 @@
   <div id="status"></div>
 <div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div></div>
 <div id="msgBox"></div>
+<div id="vsBox"></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
   <div id="prompts"></div>
@@ -601,6 +618,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=62"></script>
+<script type="module" src="tabletop.js?v=63"></script>
 </body>
 </html>

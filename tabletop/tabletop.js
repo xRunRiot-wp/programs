@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=62';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=62';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=63';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=63';
 
-const VERSION = 62;                              // raised by bump.py on every publish
+const VERSION = 63;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -332,6 +332,7 @@ function onClientData(msg) {
     case 'paused': state.paused = msg.on; renderPause(); break;
     case 'attack': state.attack = msg.attack; renderAttack(); break;
     case 'fx': playFx(msg); break;
+    case 'vs': showVs(msg); break;
     case 'warp': state.warp = msg.warp; renderWarp(); break;
     case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); renderActBar(); break;
     case 'party': state.party = msg.party; renderParty(); renderActBar(); break;
@@ -1193,6 +1194,9 @@ async function attackRoll(f, tg, mv, msg, from) {
   attackBusy = true;
   try {
     if (msg.step !== 'dmg') {
+      const vs = { t: 'vs', a: f.id, b: tg.id };
+      if (figVisible(f) && figVisible(tg)) sendAll(vs);
+      showVs(vs);
       const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0)), pain = painOf(f);
       let hits = 0;
       await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
@@ -3000,6 +3004,55 @@ function fxMesh(geo, color, opacity = 1) {
 }
 const dropMesh = m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); };
 const FX_HIT = { Physical: 150, Special: 450, Status: 250 };   // ms until the move reaches the target
+// attack banner: a picture of each mini (the top half of tall ones) on a blue (player) or red (enemy) banner
+let shotR = null;
+const shots = new Map();
+function miniShot(f) {
+  const g = figMeshes.get(f.id);
+  if (!g) return '';
+  const u = g.userData, key = `${f.id}|${u.modelKey}|${f.color}|${fainted(f)}`;
+  if (shots.has(key)) return shots.get(key);
+  const src = u.holder.children.length ? u.holder : u.pawn;
+  try {
+    shotR ||= new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    shotR.setSize(160, 160, false);
+    const sc = new THREE.Scene(), m = cloneSkinned(src);
+    m.rotation.set(0, 0, 0); m.position.set(0, 0, 0);
+    sc.add(m, new THREE.HemisphereLight('#ffffff', '#445', 2.2));
+    const sun = new THREE.DirectionalLight('#ffffff', 1.6); sun.position.set(1, 2, 3); sc.add(sun);
+    m.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(m, true), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+    const wide = Math.max(size.x, size.z), tall = size.y > wide * 1.3;
+    const h = tall ? Math.max(size.y / 2, wide) : Math.max(size.y, wide);
+    if (tall) mid.y = box.max.y - h / 2;
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.01, 100), dist = h * 0.62 / Math.tan(15 * Math.PI / 180);
+    cam.position.set(mid.x + dist * 0.25, mid.y + dist * 0.12, mid.z + dist); cam.lookAt(mid);
+    shotR.render(sc, cam);
+    const url = shotR.domElement.toDataURL('image/png');
+    shots.set(key, url);
+    return url;
+  } catch { return ''; }
+}
+let vsTimer = 0;
+function showVs(msg) {
+  const a = state.figures[msg.a], b = state.figures[msg.b], box = $('vsBox');
+  if (!a || !b || !box) return;
+  const ban = (f, cls) => {
+    const side = sideOf(f), d = document.createElement('div');
+    d.className = 'ban ' + cls;
+    d.style.background = side === 'player' ? 'linear-gradient(180deg,#3d7be0,#1f4fa8)' : side === 'enemy' ? 'linear-gradient(180deg,#e0503c,#a8261f)' : 'linear-gradient(180deg,#5a6478,#363d4d)';
+    const img = document.createElement('img'), t = document.createElement('div'), nm = document.createElement('b'), sub = document.createElement('span');
+    img.src = miniShot(f); img.alt = '';
+    nm.textContent = f.name; sub.textContent = f.st?.species && f.st.species !== f.name ? f.st.species : SIDES[side].name;
+    t.style.minWidth = 0; t.append(nm, sub); d.append(img, t);
+    return d;
+  };
+  const vs = document.createElement('div'); vs.className = 'vs'; vs.textContent = 'VS';
+  box.classList.remove('show'); box.replaceChildren(ban(a, 'l'), vs, ban(b, 'r'));
+  void box.offsetWidth;
+  box.classList.add('show');
+  clearTimeout(vsTimer); vsTimer = setTimeout(() => box.classList.remove('show'), 2700);
+}
 function playFx(fx) {
   const tg = state.figures[fx.to], src = state.figures[fx.from], color = TYPES[fx.type] || '#ffffff';
   if (!tg || !scene) return;
