@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=73';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=73';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=74';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=74';
 
-const VERSION = 73;                              // raised by bump.py on every publish
+const VERSION = 74;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -204,7 +204,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
   return { boards: state.boards.filter(shown), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag, siteBag: state.siteBag || [] };
+    attack: state.attack, warp: state.warp, ending: state.ending || null, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag, siteBag: state.siteBag || [] };
 }
 // layers: each board sits on one (far apart on the table); players only ever see the team's layer, the GM looks at one at a time
 const LAYER_GAP = 200;
@@ -334,6 +334,7 @@ function onClientData(msg) {
     case 'fx': playFx(msg); break;
     case 'vs': showVs(msg); break;
     case 'warp': state.warp = msg.warp; renderWarp(); break;
+    case 'ending': state.ending = msg.ending; renderEnding(); break;
     case 'combat': state.combat = msg.combat; renderCombat(); renderParty(); renderActBar(); break;
     case 'party': state.party = msg.party; renderParty(); renderActBar(); break;
     case 'rules': state.rules = msg.rules; state.explored = msg.explored; renderRules(); buildBoard(); break;
@@ -597,9 +598,15 @@ function handle(msg, from) {
       w.votes[from] = !!msg.yes;
       if (!msg.yes || w.voters.every(v => w.votes[v])) {
         w.result = msg.yes ? 'out' : 'stay';
+        if (msg.yes) setEnding('complete');
         addLog({ kind: 'sys', text: msg.yes ? 'Everyone agreed: the team warps out of the dungeon!' : `${state.players[from]?.name || 'Someone'} chose to stay: the team stays in the dungeon (the warp is used up).` });
       }
       pushWarp();
+      break;
+    }
+    case 'endingClose': {
+      if (!gm) return;
+      state.ending = null; sendAll({ t: 'ending', ending: null }); renderEnding(); save();
       break;
     }
     case 'warpClose': {
@@ -1557,8 +1564,8 @@ function renderActions() {
 // ---------- the team's bag (Mystery Dungeon items; ITEM_FX below makes them work by the campaign's item list) ----------
 // the hint for each item, from the campaign site's item list
 const ITEMS = {
-  "Apple": "Common food. If Hunger is in effect restores 50 Hunger",
-  "Big Apple": "Common food worth 10 Apples. If Hunger is in effect restores 100 Hunger for the party",
+  "Apple": "No effect here (no hunger in this game)",
+  "Big Apple": "No effect here (no hunger in this game)",
   "Oran Berry": "Heals 1 damage",
   "Sitrus Berry": "Heals 3 damage or 1 Lethal damage",
   "Figy Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
@@ -1576,7 +1583,7 @@ const ITEMS = {
   "Heal Seed": "Cures all status conditions",
   "Eyedrop Seed": "Reveals every trap and hidden item on the floor to the eater; cures Blinker",
   "Tiny Reviver Seed": "A fainted Pokémon gets back up with 1 HP. Can't stop going Primal. Becomes a Plain Seed",
-  "Reviver Seed": "Heals all HP and Lethal HP, can prevent going Primal, and heals 50 Hunger",
+  "Reviver Seed": "Heals all HP and Lethal HP, can prevent going Primal",
   "Quick Seed": "The eater is Sped Up for the scene",
   "Vanish Seed": "The eater becomes Invisible for the scene",
   "Blast Seed": "Eat it to sneeze fire: deal 1 HP damage to a foe directly (no reaction)",
@@ -1632,7 +1639,7 @@ const ITEM_FX = {
   'Slumber Orb': { to: 'foes', add: 'Sleep' }, 'Totter Orb': { to: 'foes', add: 'Confused' }, 'Petrify Orb': { to: 'foes', add: 'Petrified' },
   'Foe-Hold Orb': { to: 'foes', add: 'Immobilized' }, 'Foe-Fear Orb': { to: 'foes', add: 'Terrified' }, 'Foe-Seal Orb': { to: 'foes', add: 'Sealed' },
   'Silence Orb': { to: 'foes', add: 'Sealed' }, 'Slow Orb': { to: 'foes', add: 'Slowed' }, 'Shocker Orb': { to: 'foes', add: 'Cowering' },
-  'Health Orb': { to: 'allies', cure: 'all' },
+  'Health Orb': { to: 'allies', cure: 'all' }, 'Escape Orb': { to: 'self', escape: true },
   'All-Hit Orb': { to: 'team', add: 'Sure Shot', gm: 'Sure Shot lasts the scene' }, 'Observer Orb': { to: 'foes', add: 'Flinch' },
   'Decoy Orb': { to: 'foe', add: 'Decoy' }, 'Two-Edge Orb': { to: 'everyone', halve: true },
   'One-Shot Orb': { to: 'foe', oneShot: true, gm: 'bosses are immune: undo it if the target is a boss' },
@@ -1684,6 +1691,7 @@ function useItem(f, name, tid, from) {
   else if (fx.revive) { setSt(tg, { hp: fx.revive === 'full' ? tg.st.hpMax : 1, ...(fx.revive === 'full' ? { status: [] } : {}) }); addLog({ kind: 'sys', text: `${head} on ${tg.name}: ${tg.name} gets back up with ${tg.st.hp} HP!` }); }
   else if (fx.add && to === 'self') { give(f); addLog({ kind: 'sys', text: `${head}: ${f.name} is ${feel(fx.add)}!` }); }
   else if (fx.dmg) { addLog({ kind: 'sys', text: `${head}: ${tg.name} takes ${fx.dmg} damage.` }); hurt(tg, fx.dmg); }
+  else if (fx.escape) { addLog({ kind: 'sys', text: `${head}: the team escapes the dungeon!` }); setEnding('escaped'); }
   else if (fx.warp) {
     const spot = fx.warp === 'stairs' ? stairsSpot(f) : randomSpot(f);
     if (!spot) { note(from, fx.warp === 'stairs' ? 'There are no stairs on this floor.' : 'Nowhere to warp to.'); return false; }
@@ -1800,6 +1808,33 @@ function itemTiles(f, kind) {
   }
   if (n) { tilesChanged(); sendTiles(set); save(); }
   return n;
+}
+// the end of a run, shown to everyone until the GM closes it: 'complete' (warped out after the goal), 'escaped' (Escape Orb),
+// 'whiteout' (every ally fainted)
+function setEnding(kind) {
+  if (state.ending?.kind === kind) return;
+  const D = state.dungeon;
+  state.ending = { kind, name: D?.name || 'the dungeon', floor: D?.floor || 0 };
+  addLog({ kind: 'sys', text: { complete: 'Dungeon complete!', escaped: 'The team escaped!', whiteout: 'Every ally has fainted: the team whited out...' }[kind] });
+  sendAll({ t: 'ending', ending: state.ending }); renderEnding(); save();
+}
+// host: after HP changes, a team with nobody left standing whites out
+function checkWhiteout() {
+  if (!isHost || state.ending) return;
+  const team = Object.values(state.figures).filter(x => (x.owner || x.side === 'player') && !x.parent && x.st?.hpMax && figVisible(x));
+  if (team.length && team.every(fainted)) setEnding('whiteout');
+}
+function renderEnding() {
+  const box = $('endScreen'), E = state.ending;
+  if (!box) return;
+  if (!E) { box.className = ''; return; }
+  const title = { complete: 'Dungeon Complete!', escaped: 'Escaped!', whiteout: 'Whited out...' }[E.kind] || '';
+  const sub = { complete: `The team cleared ${E.name}.`, escaped: `The team escaped from ${E.name}${E.floor ? ` on B${E.floor}F` : ''}.`,
+    whiteout: `The whole team fainted in ${E.name}${E.floor ? ` on B${E.floor}F` : ''}.` }[E.kind] || '';
+  box.querySelector('.et').textContent = title;
+  box.querySelector('.es').textContent = sub;
+  $('endClose').textContent = gmView() ? 'Close for everyone' : 'Close';
+  box.className = `show ${E.kind}`;
 }
 function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
 function renderBag() {
@@ -2289,6 +2324,7 @@ function carry(id, dx, dz, deg, around) {
 function pushFig(f, skipFor, live) {
   upsertFig(f, live);
   if (isHost && !live && checkLurkers()) pushCombat();
+  if (isHost && !live) checkWhiteout();
   if (!figVisible(f)) sendAll({ t: 'del', id: f.id });
   else sendAll({ t: 'fig', fig: f, live: !!live }, live && skipFor ? cid => cid !== skipFor : null);
 }
@@ -3138,7 +3174,7 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); renderBag(); if (isHost) { siteFeed(); renderSiteChars(); } }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderEnding(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); renderBag(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
 let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
@@ -3536,7 +3572,7 @@ const loadMoves = () => loadIndex().then(x => (movesCache = x.moves));
 function loadItems() {
   fetch(INDEX_URL).then(r => r.json()).then(E => {
     for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name))
-      ITEMS[e.name] = (e.outcome || '').replace(/\s*\d[\d,]* Poké.*$/, '').trim();
+      ITEMS[e.name] = (e.outcome || '').replace(/\s*\d[\d,]* Poké.*$/, '').replace(/,? and heals \d+ Hunger/i, '').split(/(?<=\.)\s+/).filter(x => !/hunger|starving/i.test(x)).join(' ').trim() || 'No effect here (no hunger in this game).';
     const dl = $('bagItems'); if (!dl) return;
     dl.innerHTML = '';
     for (const name of Object.keys(ITEMS).sort()) { const o = document.createElement('option'); o.value = name; dl.appendChild(o); }
@@ -4499,6 +4535,7 @@ function wirePanel() {
     status(`${touchy ? 'Tap' : 'Click'} a foe: red ring = any move, orange ring = ranged moves only, no ring = out of reach (Esc to cancel)`);
   };
   $('atkMove').oninput = () => pickMove();
+  $('endClose').onclick = () => { if (gmView()) act({ t: 'endingClose' }); else $('endScreen').className = ''; };
   $('actAttack').onclick = () => {
     const f = actMini(); if (!f) return;
     select(f.id); attackFor = f.id;
