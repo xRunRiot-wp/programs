@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=61';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=61';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=62';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=62';
 
-const VERSION = 61;                              // raised by bump.py on every publish
+const VERSION = 62;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -246,6 +246,7 @@ function resyncPlayers() {
   sendAll({ t: 'tiles', set: v.tiles, clear: true });
   sendAll({ t: 'figs', figures: v.figures });
   sendAll({ t: 'combat', combat: v.combat });
+  if (isHost && checkLurkers()) pushCombat();
 }
 
 function sendAll(msg, filter) {
@@ -489,8 +490,7 @@ function handle(msg, from) {
       } else {
         c.order = c.order.filter(o => state.figures[o.id]);
         if (!c.order.length) { state.combat = null; pushCombat(); return; }
-        c.turn = (c.turn + 1) % c.order.length;
-        if (c.turn === 0) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); countDown(); }
+        nextTurn();
         clearAreas();
         const nx = state.figures[c.order[c.turn].id];
         c.from = { x: nx.x, z: nx.z }; c.dash = 0;
@@ -1807,9 +1807,11 @@ function nextToFig(a, b) {
 const fights = x => sideOf(x) !== 'npc' && (!!x.owner || (x.st && x.st.dex != null));
 function rollInit(x) {
   const st = x.st || {}, roll = rollDie(6), sts = st.status || [];
-  return { id: x.id, roll, init: roll + (st.dex || 0) + (st.alert || 0), speed: sts.includes('Sped Up') ? 1 : sts.includes('Slowed') ? -1 : 0, dex: st.dex || 0, tie: Math.random() };
+  return { id: x.id, roll, init: roll + (st.dex || 0) + (st.alert || 0), speed: sts.includes('Sped Up') ? 1 : sts.includes('Slowed') ? -1 : 0, dex: st.dex || 0, tie: Math.random(), lurk: lurks(x) };
 }
-const initOrder = (a, b) => (b.speed || 0) - (a.speed || 0) || b.init - a.init || (b.dex || 0) - (a.dex || 0) || (b.tie || 0) - (a.tie || 0);
+// an enemy nobody has found yet (hidden, or in the dark) moves last and wanders by itself (Adam)
+const lurks = x => sideOf(x) === 'enemy' && !x.owner && !figVisible(x);
+const initOrder = (a, b) => (a.lurk ? 1 : 0) - (b.lurk ? 1 : 0) || (b.speed || 0) - (a.speed || 0) || b.init - a.init || (b.dex || 0) - (a.dex || 0) || (b.tie || 0) - (a.tie || 0);
 // someone joins a fight already going: roll for them and slot them in by initiative
 function joinCombat(x) {
   const c = state.combat;
@@ -1820,6 +1822,50 @@ function joinCombat(x) {
   c.turn = c.order.findIndex(e => e.id === curId);
   if (figVisible(x)) addLog({ kind: 'sys', text: `${x.name} joins the fight (initiative ${o.init}).` });
   pushCombat();
+}
+// host: an undiscovered enemy that comes into view takes its place in the initiative; from then on the GM moves it
+function checkLurkers() {
+  const c = state.combat;
+  if (!c) return false;
+  let changed = false;
+  for (const o of c.order) {
+    const x = state.figures[o.id];
+    if (!x || !!o.lurk === lurks(x)) continue;
+    o.lurk = !o.lurk; changed = true;
+    if (!o.lurk) addLog({ kind: 'sys', text: `${x.name} is discovered and joins the initiative (${o.init}).` });
+  }
+  if (!changed) return false;
+  const curId = c.order[c.turn]?.id;
+  c.order.sort(initOrder);
+  c.turn = Math.max(0, c.order.findIndex(e => e.id === curId));
+  return true;
+}
+// host: an undiscovered enemy's turn: it walks to a random square it can reach
+function wander(x) {
+  if (fainted(x)) return;
+  const { w, d } = fp(x), ox = x.x, oz = x.z;
+  const spots = [...reachable(worldFor(x), x.x, x.z, w, d, moveBudget(x), state.rules.diag).keys()].filter(k => k !== `${x.x},${x.z}`);
+  if (!spots.length) return;
+  const [nx, nz] = spots[Math.floor(Math.random() * spots.length)].split(',').map(Number);
+  x.x = nx; x.z = nz;
+  pushFig(x);
+  carry(x.id, x.x - ox, x.z - oz, 0, x);
+  addLog({ kind: 'sys', text: `${x.name} (undiscovered) wanders about.`, to: state.gm });
+}
+// host: next turn; undiscovered enemies (always at the end) take theirs by themselves
+function nextTurn() {
+  const c = state.combat;
+  // who comes next is worked out before a wanderer moves: if it gets found, its new place in the order counts from next round
+  let wrap = c.turn + 1 >= c.order.length, nextId = c.order[(c.turn + 1) % c.order.length].id;
+  for (let n = 0; n <= c.order.length; n++) {
+    c.turn = wrap ? 0 : Math.max(0, c.order.findIndex(e => e.id === nextId));
+    if (wrap) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); countDown(); }
+    const o = c.order[c.turn], x = state.figures[o.id];
+    if (!o.lurk || !x || c.order.every(e => e.lurk)) break;
+    wrap = c.turn + 1 >= c.order.length; nextId = c.order[(c.turn + 1) % c.order.length].id;
+    wander(x);
+    checkLurkers();
+  }
 }
 function note(to, text) {
   if (to === state.gm) { status(text); setTimeout(() => status(''), 4000); }
@@ -1874,7 +1920,7 @@ function nextPartyTurn() {
   pushParty();
 }
 function pushParty() { renderActBar(); renderParty(); sendAll({ t: 'party', party: state.party }); save(); figsVersion++; }
-function pushCombat() { renderActBar(); renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
+function pushCombat() { if (isHost) checkLurkers(); renderActBar(); renderCombat(); renderParty(); showSelected(); sendAll({ t: 'combat', combat: combatView() }); save(); figsVersion++; }
 function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, explored: state.explored }); save(); figsVersion++; }
 // a hidden board comes into view; every 2 new ones the GM is reminded to roll the dungeon event
 function revealBoard(b) {
@@ -1959,6 +2005,7 @@ function carry(id, dx, dz, deg, around) {
 
 function pushFig(f, skipFor, live) {
   upsertFig(f, live);
+  if (isHost && !live && checkLurkers()) pushCombat();
   if (!figVisible(f)) sendAll({ t: 'del', id: f.id });
   else sendAll({ t: 'fig', fig: f, live: !!live }, live && skipFor ? cid => cid !== skipFor : null);
 }
@@ -3721,6 +3768,7 @@ function renderCombat() {
     d.children[0].style.background = f.color;
     d.children[1].textContent = f.name + (f.st?.hpMax ? `  ${f.st.hp ?? f.st.hpMax}/${f.st.hpMax} HP` : '');
     d.children[2].textContent = o.init;
+    if (o.lurk) { d.children[1].textContent += ' · undiscovered, wanders'; d.style.opacity = 0.6; }
     d.onclick = () => { select(canMove(f) ? f.id : null); controls.target.set(f.x, 0, f.z); };
     list.appendChild(d);
   });
