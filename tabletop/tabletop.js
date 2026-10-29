@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=76';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=76';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=77';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=77';
 
-const VERSION = 76;                              // raised by bump.py on every publish
+const VERSION = 77;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -556,7 +556,7 @@ function handle(msg, from) {
       if (!mv) return;
       // the rulebook: contact moves need the target next to you; ranged ones (every Special or Status move, and Physical
       // moves marked "Ranged") only need line of sight
-      if (msg.step !== 'dmg') {
+      if (msg.step !== 'dmg' && !selfMove(mv)) {
         if (!isRanged(mv) && !nextToFig(f, tg)) { note(from, `${mv.name} is a contact move: ${f.name} has to stand next to ${tg.name}.`); return; }
         if (isRanged(mv) && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${f.name} can't see ${tg.name}: a ranged move needs line of sight.`); return; }
       }
@@ -1192,7 +1192,12 @@ function matchup(type, foeTypes) {
 }
 // pain: at half HP or less 1 success is lost, at 1 HP 2 -- only when hurt (a mini with 1 max HP at full health feels no pain)
 const painOf = f => { const h = f.st?.hp, m = f.st?.hpMax; return h == null || !m || h <= 0 || h >= m ? 0 : h <= 1 ? 2 : h <= m / 2 ? 1 : 0; };
-const isRanged = mv => mv.cat !== 'Physical' || /ranged/i.test(mv.effect || '');
+const isRanged = mv => mv.cat !== 'Physical' || /\branged\b/i.test(mv.effect || '');
+// moves aimed at the user, allies or the battlefield (the rulebook's "Target User" etc.) need no reach to the foe
+const selfMove = mv => /^(User|User and Allies|One Ally|Battlefield|Area|Battlefield and Area)$/i.test(mv.target || '');
+const MOVE_REACH = { contact: ['👊', 'Contact: has to stand next to the target'], ranged: ['🎯', 'Ranged: anyone in line of sight'],
+  self: ['✨', 'Targets the user, allies or the field: no reach needed'] };
+const moveReach = mv => selfMove(mv) ? 'self' : isRanged(mv) ? 'ranged' : 'contact';
 // successes taken off an accuracy roll: the move's Reduced Accuracy ("-2 Accuracy") and the Whiffer / Blinker / Confused statuses
 function accuracyCut(f, mv) {
   const sts = f.st?.status || [];
@@ -1205,7 +1210,7 @@ function cleanMove(m) {
   const name = clean(m.name, 40);
   if (!name) return null;
   const cat = ['Physical', 'Special', 'Status'].includes(m.cat) ? m.cat : 'Physical';
-  return { name, type: TYPES[m.type] ? m.type : 'Normal', cat, power: Math.max(0, Math.min(10, Math.round(+m.power) || 0)), effect: clean(m.effect, 300),
+  return { name, type: TYPES[m.type] ? m.type : 'Normal', cat, power: Math.max(0, Math.min(10, Math.round(+m.power) || 0)), effect: clean(m.effect, 300), target: clean(m.target, 30),
     acc: (Array.isArray(m.acc) ? m.acc : []).filter(a => ATTRS.includes(a)).slice(0, 2), dmg: ATTRS.includes(m.dmg) ? m.dmg : '' };
 }
 // turn a mini to face another (square minis, in 45 degree steps; 0 = facing +z)
@@ -3563,7 +3568,7 @@ let indexP = null, attackFor = null, atk = null;
 const INDEX_URL = 'https://xrunriot-wp.github.io/thevoiceoftheforest/data/index.json';
 function loadIndex() {
   return indexP ||= fetch(INDEX_URL).then(r => r.json()).then(E => {
-    const moves = E.filter(e => e.kind === 'Move' && e.mv).map(e => ({ name: e.name, ...e.mv, text: e.trigger || '' })).sort((a, b) => a.name.localeCompare(b.name));
+    const moves = E.filter(e => e.kind === 'Move' && e.mv).map(e => ({ name: e.name, ...e.mv, target: (/Target ([^.]*)\./.exec(e.outcome || '') || [])[1] || 'Foe', text: e.trigger || '' })).sort((a, b) => a.name.localeCompare(b.name));
     const species = E.filter(e => e.kind === 'Species').map(parseSpecies).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
     return { moves, species };
   }).catch(() => { indexP = null; return { moves: [], species: [] }; });
@@ -3597,7 +3602,7 @@ function reachOf(f, tg) {
   if (nextToFig(f, tg)) return 'both';
   return lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z) ? 'ranged' : 'none';
 }
-const moveFits = (mv, r) => r === 'both' || (r === 'ranged' && isRanged(mv));
+const moveFits = (mv, r) => r === 'both' || selfMove(mv) || (r === 'ranged' && isRanged(mv));
 // while picking who to attack: a red ring under foes any move can hit, orange under foes only ranged moves reach
 let aimRings = [], aimKey = '';
 function updateAimRings() {
@@ -3636,7 +3641,8 @@ async function openAttack(id, target) {
     // Pokemon-style move button: filled with the move's type colour, name on top, type and category underneath (Adam)
     const b = document.createElement('button'); b.className = 'fit chip pkmv'; b.dataset.mv = m ? m.name : '';
     b.append(Object.assign(document.createElement('b'), { textContent: m ? m.name : `${n} (not found)` }));
-    if (m) b.append(Object.assign(document.createElement('small'), { textContent: `${m.type} · ${m.cat}` }));
+    // the little icon says how far the move reaches: fist = contact, target = ranged, sparkle = user/allies/field (Adam)
+    if (m) { const [ic, tip] = MOVE_REACH[moveReach(m)]; b.append(Object.assign(document.createElement('small'), { textContent: `${ic} ${m.type} · ${m.cat}`, title: tip })); }
     b.disabled = !m || !moveFits(m, r);
     if (m && !moveFits(m, r)) b.title = `Contact move: ${f.name} has to stand next to the target`;
     if (m) { b.style.setProperty('--tc', TYPES[m.type] || '#888'); b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
