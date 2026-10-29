@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=68';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=68';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=69';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=69';
 
-const VERSION = 68;                              // raised by bump.py on every publish
+const VERSION = 69;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1163,6 +1163,15 @@ const CHART = {
   Dragon: ['Dragon', 'Steel', 'Fairy'], Dark: ['Psychic Ghost', 'Fighting Dark Fairy', ''],
   Steel: ['Ice Rock Fairy', 'Fire Water Electric Steel', ''], Fairy: ['Fighting Dragon Dark', 'Fire Poison Steel', ''] };
 // her rules: super effective +1 damage per weak type, not very effective -1 per resisting type, immune = no damage
+// how well a move lands, by the type matchup (Adam's names for +2 and -2)
+function effWord(mu) {
+  if (mu.immune) return { text: "It doesn't affect it...", color: '#b8c0d8' };
+  if (mu.mod >= 2) return { text: "It's hyper effective!", color: '#ffb02e' };
+  if (mu.mod === 1) return { text: "It's super effective!", color: '#6be36b' };
+  if (mu.mod === -1) return { text: "It's not very effective...", color: '#e0c060' };
+  if (mu.mod <= -2) return { text: "It's barely effective...", color: '#e07a5f' };
+  return null;
+}
 function matchup(type, foeTypes) {
   const [sup, nve, imm] = (CHART[type] || ['', '', '']).map(x => x.split(' '));
   if (foeTypes.some(t => imm.includes(t))) return { immune: true, mod: 0 };
@@ -1220,10 +1229,10 @@ async function attackRoll(f, tg, mv, msg, from) {
         const rolled = Math.max(0, parts.filter(v => v >= 4).length - pain);
         dmg = mu.immune ? 0 : Math.max(0, rolled + mu.mod);
         const extra = [stab && 'same type +1', crit && 'critical +2'].filter(Boolean).join(', ');
-        const eff = mu.immune ? `, but ${tg.name} is immune` : mu.mod > 0 ? `, super effective +${mu.mod}` : mu.mod < 0 ? `, not very effective ${mu.mod}` : '';
+        const ew = effWord(mu), eff = mu.immune ? `, but ${tg.name} is immune` : ew ? `, ${ew.text.replace(/^It's |[.!]+$/g, '')} ${mu.mod > 0 ? '+' : ''}${mu.mod}` : '';
         return `${mv.name} damage: ${n} dice (${mv.dmg || '?'} + Power ${mv.power} - ${defenceFor(mv.cat)}${sideOf(tg) === 'enemy' ? '' : ' ' + def}${extra ? ', ' + extra : ''}) - ${rolled} success${rolled === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}${eff}: ${dmg} damage to ${tg.name}`;
       });
-      const fx = { t: 'fx', kind: mv.cat, type: mv.type, from: f.id, to: tg.id, text: dmg ? `-${dmg}` : 'No damage' };
+      const fx = { t: 'fx', kind: mv.cat, type: mv.type, from: f.id, to: tg.id, text: dmg ? `-${dmg}` : 'No damage', eff: effWord(mu) };
       sendAll(fx); playFx(fx);
       await new Promise(ok => setTimeout(ok, FX_HIT[mv.cat] || 300));
       if (tg.st?.hp != null && dmg) {
@@ -3033,6 +3042,15 @@ function miniShot(f) {
     return url;
   } catch { return ''; }
 }
+let effTimer = 0;
+function showEff(e) {
+  const box = $('effPop');
+  if (!box || !e?.text) return;
+  box.classList.remove('show'); box.textContent = String(e.text).slice(0, 40); box.style.color = /^#[0-9a-f]{6}$/i.test(e.color) ? e.color : '#fff';
+  void box.offsetWidth;
+  box.classList.add('show');
+  clearTimeout(effTimer); effTimer = setTimeout(() => box.classList.remove('show'), 2300);
+}
 let vsTimer = 0;
 function showVs(msg) {
   const a = state.figures[msg.a], b = state.figures[msg.b], box = $('vsBox');
@@ -3077,6 +3095,7 @@ function playFx(fx) {
     add(ms, k => { const u = Math.max(0, (k * ms - delay) / 1500); sp.visible = k * ms >= delay; sp.position.y = head + u * 0.8; sp.material.opacity = 1 - Math.max(0, u - 0.6) / 0.4; },
       () => { scene.remove(sp); sp.material.map.dispose(); sp.material.dispose(); });
   };
+  if (fx.eff) setTimeout(() => showEff(fx.eff), FX_HIT[fx.kind] || 300);
   if (fx.miss) floatText('Miss!', null, FX_HIT[fx.kind] || 300);
   else if (fx.text) floatText(fx.text, '#ff8a80', FX_HIT[fx.kind] || 300);
   if (fx.kind === 'miss') { floatText('Miss!'); return; }   // sent by an older version

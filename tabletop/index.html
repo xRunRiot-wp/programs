@@ -194,6 +194,14 @@
   #vsBox { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(560px, calc(100% - 20px));
     display: none; align-items: center; justify-content: center; gap: 6px; pointer-events: none; font-family: var(--pix); }
   #vsBox.show { display: flex; }
+  /* "It's super effective!" and friends, over the board when the damage lands */
+  #effPop { position: absolute; top: 38%; left: 50%; transform: translateX(-50%); z-index: 6; pointer-events: none; display: none;
+    font: 700 34px var(--pix); letter-spacing: .02em; white-space: nowrap; text-shadow: 0 3px 0 #000, 0 0 12px #000c; }
+  @media (min-width: 701px) { #effPop { left: calc(50% - 150px); } }
+  @media (max-width: 700px) { #effPop { font-size: 26px; } }
+  #effPop.show { display: block; animation: effIn 2.2s ease forwards; }
+  @keyframes effIn { 0% { transform: translateX(-50%) scale(.4); opacity: 0 } 12% { transform: translateX(-50%) scale(1.15); opacity: 1 }
+    20%, 80% { transform: translateX(-50%) scale(1); opacity: 1 } 100% { transform: translateX(-50%) translateY(-20px); opacity: 0 } }
   #vsBox .ban { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 10px; border: 2px solid #fff; border-radius: 10px; color: #fff;
     box-shadow: 0 3px 10px #0008; }
   #vsBox .ban.r { flex-direction: row-reverse; text-align: right; }
@@ -304,6 +312,7 @@
 <div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div></div>
 <div id="msgBox"></div>
 <div id="vsBox"></div>
+<div id="effPop"></div>
 <div id="turnBox"></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
@@ -645,6 +654,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=68"></script>
+<script type="module" src="tabletop.js?v=69"></script>
 </body>
 </html>
