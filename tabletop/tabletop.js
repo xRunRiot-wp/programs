@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=78';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=78';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=79';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=79';
 
-const VERSION = 78;                              // raised by bump.py on every publish
+const VERSION = 79;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4652,7 +4652,25 @@ function wirePanel() {
   $('selFight').onclick = () => selectedId && act({ t: 'combatJoin', id: selectedId });
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
   // a real player window next to the GM's: moves, End turn and Dash all work there
-  $('previewBtn').onclick = () => window.open(location.origin + location.pathname + '?room=' + roomCode + '&test=1', 'tabletop-test-player', 'width=1100,height=750');
+  // the test player opens in a picture-in-picture window where the browser allows it: it stays on top of the DM's
+  // window instead of dropping behind it (Adam); other browsers get an ordinary window
+  let testPip = null;
+  $('previewBtn').onclick = async () => {
+    const url = location.origin + location.pathname + '?room=' + roomCode + '&test=1';
+    if (testPip && !testPip.closed) { testPip.focus(); return; }
+    if (window.documentPictureInPicture) {
+      try {
+        testPip = await documentPictureInPicture.requestWindow({ width: 1100, height: 750 });
+        testPip.document.title = 'Test player';
+        testPip.document.body.style.cssText = 'margin:0;background:#111;overflow:hidden';
+        const fr = testPip.document.createElement('iframe');
+        fr.src = url; fr.allow = 'autoplay; fullscreen'; fr.style.cssText = 'border:0;width:100vw;height:100vh;display:block';
+        testPip.document.body.append(fr);
+        return;
+      } catch { testPip = null; }
+    }
+    window.open(url, 'tabletop-test-player', 'width=1100,height=750');
+  };
   $('peekBtn').onclick = () => setPreview(true);
   $('previewBack').onclick = () => setPreview(false);
   $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
