@@ -136,14 +136,14 @@
   }
   html, body { background: var(--bg); }
   input, select { background: #24170b; }
-  #side h3, #lobby h1, #gmTabs button, #actBar button, #floorTag, #floorBanner, #hud, #msgBox, .prompt, #status { font-family: var(--pix); }
+  #side h3, #lobby h1, #gmTabs button, #actBar button, #floorTag, #floorBanner, #hud, #turnBox, #msgBox, .prompt, #status { font-family: var(--pix); }
   #side h3 { font-size: 15px; letter-spacing: .04em; color: var(--accent); }
   button.primary { background: var(--orange); border-color: #b85f12; color: #fffaf0; box-shadow: 0 2px 0 #8a4a10; }
   button.primary:active { transform: translateY(1px); box-shadow: none; }
   #gmTabs button.on { background: var(--orange); color: #fffaf0; border-color: #b85f12; }
   #log { background: #24170b; }
   /* the PMD window: navy, a light inner frame, a dark outer edge */
-  .pmd, #actBar, #floorTag, #status, #hud, #msgBox, #actPanel, #bagPanel, #atkPanel, .prompt {
+  .pmd, #actBar, #floorTag, #status, #hud, #turnBox, #msgBox, #actPanel, #bagPanel, #atkPanel, .prompt {
     background: linear-gradient(180deg, var(--navy2), var(--navy)) !important; color: #fff;
     border: 2px solid #dfe6ff; border-radius: 10px; box-shadow: 0 0 0 2px #0b1020, inset 0 0 0 2px #3b4a8a, 0 6px 16px #000a;
   }
@@ -173,6 +173,19 @@
   #hud .hn small { color: var(--accent); font-size: 14px; }
   #hud .hpb { height: 9px; background: #0b1020; border: 1px solid #6f82d0; border-radius: 5px; margin-top: 4px; overflow: hidden; }
   #hud .hpb i { display: block; height: 100%; background: #3fbf4f; transition: width .3s; }
+  /* turn order at the top right, same window as the HUD */
+  #turnBox { position: absolute; right: 310px; top: 10px; z-index: 4; padding: 6px 10px 8px; width: 215px; pointer-events: none; display: none; }
+  #turnBox .tt { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
+  #turnBox .row { display: flex; align-items: center; gap: 6px; font-size: 15px; line-height: 1.35; color: #cfd8ff; }
+  #turnBox .row i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  #turnBox .row span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #turnBox .row small { font-size: 13px; opacity: .7; }
+  #turnBox .row.now { color: var(--accent); font-weight: 700; background: #ffffff1f; border-radius: 4px; margin: 0 -4px; padding: 0 4px; }
+  #turnBox .row.out { opacity: .45; text-decoration: line-through; }
+  #turnBox .row.lurk { opacity: .5; }
+  #turnBox .more { font-size: 13px; color: #cfd8ff; opacity: .7; }
+  body.previewing #turnBox { right: 310px; }
+  @media (max-width: 700px) { #turnBox, body.previewing #turnBox { right: 10px; top: 48px; width: 170px; } #turnBox .row { font-size: 13px; } }
   #hud .ht { font-size: 14px; color: #cfd8ff; margin-top: 3px; }
   #status { top: auto; bottom: 120px; left: 50%; transform: translateX(-50%); font-size: 16px; padding: 6px 14px; z-index: 7; }
   @media (min-width: 701px) { #status { left: calc(50% - 150px); } }
@@ -278,6 +291,7 @@
 <div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div></div>
 <div id="msgBox"></div>
 <div id="vsBox"></div>
+<div id="turnBox"></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
   <div id="prompts"></div>
@@ -618,6 +632,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=63"></script>
+<script type="module" src="tabletop.js?v=64"></script>
 </body>
 </html>

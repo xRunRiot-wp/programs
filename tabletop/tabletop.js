@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=63';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=63';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=64';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=64';
 
-const VERSION = 63;                              // raised by bump.py on every publish
+const VERSION = 64;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3765,6 +3765,7 @@ function showMsg(line) {
 }
 // the player's own mini at the top left: name, HP, statuses and whose turn it is
 function renderHud() {
+  renderTurnBox();
   const hud = $('hud'), f = !gmView() && actMini();
   if (!hud) return;
   hud.style.display = f ? 'block' : 'none';
@@ -3780,6 +3781,31 @@ function renderHud() {
   const cur = c && state.figures[c.order[c.turn]?.id];
   const turn = c ? (cur?.id === f.id ? 'Your turn!' : `${cur && figVisible(cur) ? cur.name : 'Enemy'}'s turn`) : state.party?.done?.[f.id] ? 'Waiting for the others' : 'Exploring';
   $('hudTurn').textContent = [D ? `B${D.floor}F` : '', turn, (st.status || []).join(', ')].filter(Boolean).join(' · ');
+}
+// the turn order at the top right of the board (combat only), in the same window style as the HUD
+function renderTurnBox() {
+  const box = $('turnBox');
+  if (!box) return;
+  const c = isHost && !gmView() ? combatView() : state.combat;
+  box.style.display = c && c.order.length ? 'block' : 'none';
+  if (!c || !c.order.length) return;
+  const rows = [], max = innerWidth <= 700 ? 6 : 10;
+  const tt = document.createElement('div'); tt.className = 'tt'; tt.textContent = `Round ${c.round}`;
+  rows.push(tt);
+  // start from whoever's turn it is, so the next ones are always in view
+  const n = c.order.length, start = Math.max(0, c.turn);
+  for (let k = 0; k < Math.min(n, max); k++) {
+    const o = c.order[(start + k) % n], f = state.figures[o.id];
+    if (!f) continue;
+    const d = document.createElement('div');
+    d.className = 'row' + (k === 0 ? ' now' : '') + (fainted(f) ? ' out' : '') + (o.lurk ? ' lurk' : '');
+    const dot = document.createElement('i'), nm = document.createElement('span'), ini = document.createElement('small');
+    dot.style.background = sideOf(f) === 'player' ? '#3d7be0' : SIDES[sideOf(f)].color;
+    nm.textContent = f.name; ini.textContent = o.init;
+    d.append(dot, nm, ini); rows.push(d);
+  }
+  if (n > max) { const m = document.createElement('div'); m.className = 'more'; m.textContent = `+${n - max} more`; rows.push(m); }
+  box.replaceChildren(...rows);
 }
 function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !isHost || gmView() || e.to === viewerId()).forEach(renderLogEntry); }
 
@@ -3807,10 +3833,12 @@ const curBoard = () => state.boards.find(x => x.id === selBoard) || state.boards
 
 function renderCombat() {
   const c = isHost && !gmView() ? combatView() : state.combat;
+  if (!c) renderTurnBox();
   $('combatSec').style.display = c ? 'block' : 'none';
   if (isHost) { $('combatStart').style.display = c ? 'none' : ''; $('combatEndBtn').style.display = c ? '' : 'none'; }
   if (!c) return;
   $('combatRound').textContent = `Round ${c.round}`;
+  renderTurnBox();
   const list = $('turnList'); list.innerHTML = '';
   c.order.forEach((o, n) => {
     const f = state.figures[o.id];
