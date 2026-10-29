@@ -278,6 +278,19 @@
   @media (max-width: 700px) { body.previewing #view { right: 0; } }
   @media (min-width: 701px) { #eventBox { left: calc(50% - 150px); } #pauseBar { left: calc(50% - 150px); } }
   #toggleSide { display: none; position: absolute; right: 10px; top: 10px; z-index: 3; }
+  #toggleSide { font-size: 20px; line-height: 1; padding: 6px 11px; }
+  @media (max-width: 700px) { #side.open { z-index: 8; } #toggleSide { z-index: 9; } }   /* the open panel covers the HUD boxes */
+  /* players on a computer: the same button hides the side panel and the board fills the screen (Adam) */
+  @media (min-width: 701px) {
+    body:not(.gm) #toggleSide, body.previewing #toggleSide { display: block; right: 310px; }
+    body:not(.gm) #turnBox, body.previewing #turnBox { right: 362px; }
+    body.sideHidden:is(:not(.gm), .previewing) #side { display: none !important; }
+    body.sideHidden:is(:not(.gm), .previewing) #view, body.sideHidden:is(:not(.gm), .previewing) #prompts { right: 0 !important; }
+    body.sideHidden:is(:not(.gm), .previewing) #toggleSide { right: 10px; }
+    body.sideHidden:is(:not(.gm), .previewing) #turnBox { right: 62px; }
+    body.sideHidden:is(:not(.gm), .previewing) :is(#actPanel, #bagPanel, #actBar, #floorTag, #status, #effPop, #atkPanel, #warpBox, #eventBox, #pauseBar) { left: 50% !important; }
+    body.sideHidden:is(:not(.gm), .previewing) #actBar { width: max-content; }
+  }
 
   @media (max-width: 700px) {
     #view { right: 0; }
@@ -318,7 +331,7 @@
   <div id="floorBanner"></div>
   <div id="prompts"></div>
   <div id="hint"></div>
-  <button id="toggleSide">Menu</button>
+  <button id="toggleSide" title="Show or hide the side panel">&#9776;</button>
   <div id="pauseBar" style="display:none"></div>
   <div id="eventBox" style="display:none"></div>
   <div id="atkPanel" class="evcard" style="display:none">
@@ -654,6 +667,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=69"></script>
+<script type="module" src="tabletop.js?v=70"></script>
 </body>
 </html>

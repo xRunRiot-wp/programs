@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=69';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=69';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=70';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=70';
 
-const VERSION = 69;                              // raised by bump.py on every publish
+const VERSION = 70;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4091,7 +4091,14 @@ function wirePanel() {
     catch { prompt('Invite link:', link); }
     setTimeout(() => $('copyLink').textContent = 'Copy invite link', 1500);
   };
-  $('toggleSide').onclick = () => $('side').classList.toggle('open');
+  // phones: the panel slides over the board; computers: it hides and the board takes the whole width (remembered)
+  $('toggleSide').onclick = () => {
+    if (innerWidth <= 700) { $('side').classList.toggle('open'); return; }
+    const off = document.body.classList.toggle('sideHidden');
+    try { localStorage.setItem('tabletop-sideHidden', off ? '1' : ''); } catch {}
+    resize();
+  };
+  try { if (localStorage.getItem('tabletop-sideHidden')) document.body.classList.add('sideHidden'); } catch {}
 
   $('selName').onchange = () => selectedId && act({ t: 'edit', id: selectedId, name: $('selName').value });
   $('selColor').oninput = () => selectedId && act({ t: 'edit', id: selectedId, color: $('selColor').value });
