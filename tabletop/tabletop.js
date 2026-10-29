@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=81';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=81';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=82';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=82';
 
-const VERSION = 81;                              // raised by bump.py on every publish
+const VERSION = 82;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4227,8 +4227,14 @@ function renderTurnBox() {
   box.style.display = c && c.order.length ? 'block' : 'none';
   if (!c || !c.order.length) return;
   const rows = [], max = innerWidth <= 700 ? 6 : 10;
-  const tt = document.createElement('div'); tt.className = 'tt'; tt.textContent = `Round ${c.round}`;
+  // the title folds the list away and back (Adam), remembered in this browser
+  let folded = false; try { folded = localStorage.getItem('tabletop-turnFold') === '1'; } catch {}
+  const tt = document.createElement('div'); tt.className = 'tt'; tt.title = folded ? 'Show the turn order' : 'Hide the turn order';
+  const cur = state.figures[c.order[Math.max(0, c.turn)]?.id];
+  tt.textContent = `${folded ? '▸' : '▾'} Round ${c.round}${folded && cur ? ` · ${cur.name}` : ''}`;
+  tt.onclick = () => { try { localStorage.setItem('tabletop-turnFold', folded ? '0' : '1'); } catch {} renderTurnBox(); };
   rows.push(tt);
+  if (folded) { box.replaceChildren(...rows); return; }
   // start from whoever's turn it is, so the next ones are always in view
   const n = c.order.length, start = Math.max(0, c.turn);
   for (let k = 0; k < Math.min(n, max); k++) {

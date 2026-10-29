@@ -202,6 +202,8 @@
   /* turn order at the top right, same window as the HUD */
   #turnBox { position: absolute; right: 310px; top: 10px; z-index: 4; padding: 6px 10px 8px; width: 215px; pointer-events: none; display: none; }
   #turnBox .tt { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
+  #turnBox .tt { pointer-events: auto; cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #turnBox .tt:last-child { margin-bottom: 0; }
   #turnBox .row { display: flex; align-items: center; gap: 6px; font-size: 15px; line-height: 1.35; color: #cfd8ff; }
   #turnBox .row i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
   #turnBox .row span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -737,6 +739,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=81"></script>
+<script type="module" src="tabletop.js?v=82"></script>
 </body>
 </html>
