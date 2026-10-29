@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=80';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=80';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=81';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=81';
 
-const VERSION = 80;                              // raised by bump.py on every publish
+const VERSION = 81;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -226,6 +226,17 @@ function playerTile(k, t) {
   return t === 'hiddenTrap' && D && b && b.id === D.board ? FLOOR_LOOKS[D.look].floor : null;
 }
 // players' copy of the turn order leaves out hidden minis (their turn shows as "the GM's turn")
+// one action a turn (Adam): attacking and Dash both spend it. In combat it is the current turn's; exploring, each ally's per party turn
+function actionSpent(f) {
+  const c = state.combat;
+  if (c) return c.order[c.turn]?.id === f.id && !!(c.dash || c.acted);
+  return !!(state.party?.dash?.[f.id] || state.party?.acted?.[f.id]);
+}
+function spendAction(f) {
+  const c = state.combat;
+  if (c) { if (c.order[c.turn]?.id === f.id) { c.acted = 1; pushCombat(); } }
+  else { (state.party.acted ||= {})[f.id] = 1; pushParty(); }
+}
 function combatView() {
   const c = state.combat;
   if (!c) return null;
@@ -486,6 +497,7 @@ function handle(msg, from) {
           c.dash = 0;
           addLog({ kind: 'sys', text: `${cur.name} takes back the Dash.` });
         } else {
+          if (c.acted) { note(from, `${cur.name} has already attacked this turn: no action left for a Dash.`); return; }
           c.dash = 1;
           addLog({ kind: 'sys', text: `${cur?.name || '?'} dashes (an action spent on extra movement).` });
         }
@@ -495,7 +507,7 @@ function handle(msg, from) {
         nextTurn();
         clearAreas();
         const nx = state.figures[c.order[c.turn].id];
-        c.from = { x: nx.x, z: nx.z }; c.dash = 0;
+        c.from = { x: nx.x, z: nx.z }; c.dash = 0; c.acted = 0;
       }
       pushCombat();
       break;
@@ -560,13 +572,16 @@ function handle(msg, from) {
         if (!isRanged(mv) && !nextToFig(f, tg)) { note(from, `${mv.name} is a contact move: ${f.name} has to stand next to ${tg.name}.`); return; }
         if (isRanged(mv) && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${f.name} can't see ${tg.name}: a ranged move needs line of sight.`); return; }
       }
+      if (msg.step !== 'dmg' && actionSpent(f)) { note(from, `${f.name} has already used its action this turn (an attack or a Dash).`); return; }
       const num = v => Math.max(0, Math.min(20, Math.round(+v) || 0));
       f.st = { ...(f.st || {}) }; f.st.attr = { ...(f.st.attr || {}) };
       for (const [k, v] of Object.entries(msg.attr || {})) if (ATTRS.includes(k)) f.st.attr[k] = num(v);
       if (gm && msg.def && ATTRS.includes(msg.def.name)) { tg.st = { ...(tg.st || {}) }; tg.st.attr = { ...(tg.st.attr || {}), [msg.def.name]: num(msg.def.v) }; pushFig(tg); }
-      f.st.moves = [mv.name, ...(f.st.moves || []).filter(x => x !== mv.name)].slice(0, 8);
+      // the move list keeps its order (Adam: moves kept changing places); a move typed into the search joins at the end
+      if (!(f.st.moves || []).includes(mv.name)) f.st.moves = [...(f.st.moves || []), mv.name].slice(0, 8);
       faceToward(f, tg);
       pushFig(f); save();
+      if (msg.step !== 'dmg') spendAction(f);
       attackRoll(f, tg, mv, msg, from);
       break;
     }
@@ -683,6 +698,7 @@ function handle(msg, from) {
         delete P.dash[f.id];
         addLog({ kind: 'sys', text: `${f.name} takes back the Dash.` });
       } else {
+        if (P.acted?.[f.id]) { note(from, `${f.name} has already attacked this turn: no action left for a Dash.`); return; }
         P.dash[f.id] = 1;
         if (!P.from[f.id]) P.from[f.id] = { x: f.x, z: f.z };
         addLog({ kind: 'sys', text: `${f.name} dashes (an action spent on extra movement).` });
@@ -1554,15 +1570,27 @@ function renderActions() {
   const f = actMini(); el.innerHTML = '';
   if (!f) return;
   $('actTitle').textContent = `🎯 Actions: ${f.name}`;
-  let group = '';
+  // easy to read (Adam): each group is a grid of same-size cards, name + what it rolls, the dice count in a badge
+  const ICON = { Combat: '⚔️', Explore: '🧭', Talk: '💬' };
+  let group = '', grid = null;
   for (const a of ACTIONS) {
-    if (a.group !== group) { group = a.group; const h = document.createElement('div'); h.className = 'actGroup'; h.textContent = group; el.appendChild(h); }
-    const b = document.createElement('button'); b.className = 'fit chip';
-    b.textContent = a.roll ? `${a.name} · ${poolOf(f, a)} 🎲` : a.name;
+    if (a.group !== group) {
+      group = a.group;
+      el.appendChild(Object.assign(document.createElement('div'), { className: 'actGroup', textContent: `${ICON[group] || ''} ${group}` }));
+      grid = el.appendChild(Object.assign(document.createElement('div'), { className: 'actGrid' }));
+    }
+    const b = document.createElement('button'); b.className = 'fit actCard';
+    const txt = document.createElement('span'); txt.className = 'an';
+    txt.append(Object.assign(document.createElement('b'), { textContent: a.name }),
+      Object.assign(document.createElement('small'), { textContent: (a.roll ? a.roll.join(' + ') : 'No roll') + (a.react ? ' · any time' : '') }));
+    // nothing folded away (Adam): what the action does is written on the card too
+    if (a.info) txt.append(Object.assign(document.createElement('i'), { textContent: a.info[0].toUpperCase() + a.info.slice(1) + '.' }));
+    b.append(txt);
+    if (a.roll) b.append(Object.assign(document.createElement('span'), { className: 'ad', textContent: `${poolOf(f, a)}🎲` }));
     b.title = (a.roll ? a.roll.join(' + ') : 'no roll') + (a.info ? ': ' + a.info : '');
     b.disabled = !!preview;
     b.onclick = () => { act({ t: 'action', id: f.id, key: a.key }); $('actPanel').style.display = 'none'; };
-    el.appendChild(b);
+    grid.appendChild(b);
   }
 }
 
@@ -1905,10 +1933,11 @@ function renderActBar() {
   if (!f) return;
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { dash: {} };
   const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
-  $('actAttack').disabled = !!preview || (c && !myTurn);
-  $('actDash').disabled = !!preview || (c && !myTurn);
+  const spent = c ? myTurn && !!(c.dash || c.acted) : !!(P.dash?.[f.id] || P.acted?.[f.id]), attacked = c ? myTurn && c.acted : P.acted?.[f.id];
+  $('actAttack').disabled = !!preview || (c && !myTurn) || spent;
+  $('actDash').disabled = !!preview || (c && !myTurn) || !!attacked;
   barLabel('actDash', dashed ? '↩' : '💨', dashed ? 'Undo dash' : 'Dash');
-  $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : `Pick who ${f.name} attacks`;
+  $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : spent ? `${f.name} has used its action this turn` : `Pick who ${f.name} attacks`;
   const n = Object.values(state.bag || {}).reduce((a, b) => a + b, 0) + (state.siteBag || []).filter(x => !x.key).reduce((a, x) => a + x.n, 0);
   barLabel('actBag', '🎒', `Bag${n ? ` (${n})` : ''}`);
   $('actMore').disabled = !!preview;

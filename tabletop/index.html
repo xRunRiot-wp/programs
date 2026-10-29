@@ -58,8 +58,18 @@
   @media (max-width: 700px) { #hint { right: 70px; font-size: 11px; } }
   #actPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(460px, calc(100% - 32px)); max-height: 55vh; overflow: auto; }
   @media (min-width: 701px) { #actPanel { left: calc(50% - 150px); } }
-  #actList { display: flex; flex-wrap: wrap; gap: 4px; }
-  #actList .chip { font-size: 13px; padding: 4px 10px; }
+  #actList { display: block; }
+  #actList .actGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  #actList .actCard { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px 6px 10px; min-width: 0; border-radius: 10px; }
+  #actList .actCard .an { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #actList .actCard b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #actList .actCard b { white-space: normal; }
+  #actList .actCard small { font-size: 11px; color: #ffd9a0; }
+  #actList .actCard i { font-size: 11px; font-style: normal; color: #c9c0a8; line-height: 1.25; margin-top: 2px; }
+  #actList .actCard { align-items: flex-start; }
+  #actList .actCard .ad { margin-top: 2px; }
+  #actList .actCard .ad { flex: none; font-weight: 700; font-size: 15px; background: #0006; border-radius: 8px; padding: 3px 7px; color: #ffd76a; }
+  @media (max-width: 420px) { #actList .actGrid { grid-template-columns: 1fr; } }
   .actGroup { width: 100%; color: var(--accent); font-size: 12px; font-weight: 700; margin-top: 6px; text-transform: uppercase; }
   #bagPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(400px, calc(100% - 32px)); max-height: 50vh; overflow: auto; }
   @media (min-width: 701px) { #bagPanel { left: calc(50% - 150px); } }
@@ -423,7 +433,7 @@
   <div id="actPanel" class="evcard" style="display:none">
     <div class="evt" id="actTitle"><i>🎯</i> <span>Actions</span></div>
     <div id="actList"></div>
-    <div class="evx" style="color:var(--dim);margin-top:6px">Dice = attribute + skill (hover a button to see which); 4, 5 and 6 are successes. Evade and Clash work outside your turn.</div>
+    <div class="evx" style="color:var(--dim);margin-top:6px">🎲 = dice you roll · each 4, 5 or 6 is a success · <b>any time</b> = also outside your turn</div>
     <div class="row evb"><button id="actClose" class="fit">Close</button></div>
   </div>
   <div id="actBar" style="display:none">
@@ -727,6 +737,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=80"></script>
+<script type="module" src="tabletop.js?v=81"></script>
 </body>
 </html>
