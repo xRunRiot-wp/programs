@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=60';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=60';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=61';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=61';
 
-const VERSION = 60;                              // raised by bump.py on every publish
+const VERSION = 61;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1660,6 +1660,19 @@ function makeFloor(b, D) {
   const others = rooms.filter(r => r !== start);
   const startCells = []; for (let i = start.x; i < start.x + start.w; i++) for (let j = start.y; j < start.y + start.h; j++) startCells.push([i, j]);
   for (const c of startCells) used.add(c.join(','));                   // the team's room stays clear
+  // lava / water: a few big pools grown inside rooms (Adam: single squares looked too small). The ring along
+  // the walls stays dry, so every doorway still connects.
+  if (look.pools) for (const r of [...others].sort(() => Math.random() - 0.5).slice(0, Math.min(rint(2, 3), others.length))) {
+    const cells = inner(r).filter(([i, j]) => !used.has(i + ',' + j)), ok = new Set(cells.map(c => c.join(',')));
+    if (cells.length < 6) continue;
+    const size = rint(Math.max(5, cells.length * 0.3 | 0), Math.max(6, cells.length * 0.55 | 0)), pool = [pick(cells)];
+    const inPool = new Set([pool[0].join(',')]);
+    for (let t = 0; t < 400 && pool.length < size; t++) {
+      const [i, j] = pick(pool), [di, dj] = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]), k = (i + di) + ',' + (j + dj);
+      if (ok.has(k) && !inPool.has(k)) { inPool.add(k); pool.push([i + di, j + dj]); }
+    }
+    for (const c of pool) { set[at(...c)] = look.pools; used.add(c.join(',')); }
+  }
   const st = free(inner(far)) || [far.cx, far.cy];
   set[at(...st)] = 'stairs'; used.add(st.join(','));
   const put = (n, type, list) => { for (let k = 0; k < n; k++) { const c = tryFree(list); if (c) set[at(...c)] = type; } };
@@ -1667,7 +1680,6 @@ function makeFloor(b, D) {
   put(D.events, 'event', () => inner(pick(others)));
   put(D.traps, 'hiddenTrap', () => (Math.random() < 0.4 && hall.size ? [...hall].map(k => k.split(',').map(Number)) : inner(pick(others))));
   put(rint(0, 2), pick(look.props), () => inner(pick(others)));
-  if (look.pools) put(rint(1, 3), look.pools, () => inner(pick(others)));
   for (const [k, v] of Object.entries(set)) { if (v) state.tiles[k] = v; else delete state.tiles[k]; }
   // players only see the team's room at first: the rest stays dark until an ally gets there
   const F = state.fog ||= { hid: {}, rooms: [] }, base = F.rooms.length;   // other layers keep their own dark squares
