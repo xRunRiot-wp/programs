@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=65';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=65';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=66';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=66';
 
-const VERSION = 65;                              // raised by bump.py on every publish
+const VERSION = 66;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3255,8 +3255,6 @@ function parseSpecies(e) {
 async function openAttack(id, target) {
   atk = { id, target, move: null };
   $('atkPanel').style.display = 'block';
-  $('atkPanel').classList.remove('search');
-  $('atkNums').open = false;
   $('atkMove').value = '';
   renderAttack();
   const list = await loadMoves(), f = state.figures[id];
@@ -3266,17 +3264,11 @@ async function openAttack(id, target) {
   const own = $('atkOwn'); own.innerHTML = '';
   for (const n of recent) {
     const m = list.find(x => x.name.toLowerCase() === n.toLowerCase());
-    const b = document.createElement('button'), dot = document.createElement('i'), nm = document.createElement('span'), sub = document.createElement('small');
-    b.className = 'mv'; b.dataset.name = m ? m.name : n; b.title = m ? `${m.type} · ${m.cat}` : 'Not found on the site';
-    nm.textContent = m ? m.name : `${n} (not found)`;
-    sub.textContent = m ? (m.cat === 'Status' ? 'Status' : `Pow ${m.power}`) : '';
-    dot.style.background = m ? TYPES[m.type] || '#888' : '#555';
-    b.append(dot, nm, sub);
+    const b = document.createElement('button'); b.className = 'fit chip'; b.textContent = m ? m.name : `${n} (not found)`;
     b.disabled = !m;
-    if (m) b.onclick = () => { $('atkMove').value = m.name; pickMove(); };
+    if (m) { b.style.borderColor = TYPES[m.type] || ''; b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
     own.appendChild(b);
   }
-  if (!recent.length) $('atkPanel').classList.add('search');
   if (!list.length) $('atkInfo').textContent = 'Could not load the moves from the Voice of the Forest site. Check the connection and try again.';
   else if (recent[0]) { $('atkMove').value = list.find(x => x.name.toLowerCase() === recent[0].toLowerCase())?.name || ''; pickMove(); }
 }
@@ -3284,7 +3276,7 @@ async function pickMove() {
   const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
   if (!atk || (atk.move?.name === m?.name && m)) return;
   atk.move = m || null;
-  for (const b of $('atkOwn').children) b.classList.toggle('on', b.dataset.name === m?.name);
+  for (const b of $('atkOwn').children) b.classList.toggle('on', b.textContent === m?.name);
   renderAttack();
 }
 function renderAttack() {
@@ -3321,20 +3313,17 @@ function renderAttack() {
     }
   }
   function calc() {
-    if (!m) { $('atkSum').textContent = 'Pick a move'; return; }
+    if (!m) { $('atkSum').textContent = 'Pick a move.'; return; }
     const val = (k, own) => +([...rows.querySelectorAll('input')].find(i => i.dataset.key === k && !!i.dataset.own === own)?.value) || 0;
     const acc = Math.max(1, m.acc.reduce((s, k) => s + val(k, true), 0));
     const stab = (f.st?.types || []).includes(m.type) ? 1 : 0, mu = matchup(m.type, tg.st?.types || []), pain = painOf(f);
     const dmg = Math.max(1, val(m.dmg, true) + m.power - val(defenceFor(m.cat), false) + stab);
     const notes = [stab && 'same type +1 die', mu.immune ? `${tg.name} is immune` : mu.mod > 0 ? `super effective +${mu.mod}` : mu.mod < 0 ? `not very effective ${mu.mod}` : '',
       pain && `pain -${pain} success${pain > 1 ? 'es' : ''}`].filter(Boolean);
-    // a short line in the window; the full rule is in its tooltip, the numbers fold out under it
-    $('atkSum').textContent = `Accuracy ${acc} dice` + (m.cat !== 'Status' ? ` · Damage ${dmg}${hideDef ? ` - ${defenceFor(m.cat)}` : ''} dice` : '') + (notes.length ? ` · ${notes.join(' · ')}` : '');
-    $('atkSum').title = `Accuracy: ${acc} dice, a hit needs 1 success (4-6; 4+ = critical, +2 damage dice)` +
-      (m.cat !== 'Status' ? `. Damage: ${dmg} dice${hideDef ? ` minus ${tg.name}'s ${defenceFor(m.cat)}` : ''}, each success = 1 damage` : '') + '. Open to change the numbers.';
+    $('atkSum').textContent = `Accuracy: ${acc} dice, a hit needs 1 success (4-6; 4+ = critical, +2 damage dice)` +
+      (m.cat !== 'Status' ? ` · Damage: ${dmg} dice${hideDef ? ` minus ${tg.name}'s ${defenceFor(m.cat)}` : ''}, each success = 1 damage` : '') + (notes.length ? ` · ${notes.join(' · ')}` : '');
   }
   calc();
-  $('atkAcc').textContent = m ? `🎲 Use ${m.name}` : '🎲 Pick a move';
   $('atkAcc').disabled = !m || !!preview;
   $('atkDmg').disabled = !!preview;
   $('atkDmg').style.display = rolledHit ? '' : 'none';
@@ -4169,7 +4158,6 @@ function wirePanel() {
   $('atkAcc').onclick = () => attackMsg('acc');
   $('atkDmg').onclick = () => attackMsg('dmg');
   $('atkClose').onclick = () => closeAttack();
-  $('atkOther').onclick = () => { $('atkPanel').classList.add('search'); $('atkMove').value = ''; $('atkMove').focus(); };
   $('libSave').onclick = () => {
     if (!selectedId) return;
     const group = $('miniGroup').value.trim() || 'Ungrouped';
