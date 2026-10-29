@@ -120,8 +120,23 @@
   .areaRow span:nth-child(2) { flex: 1; }
   #stChips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; background: #3a2f1a; border-color: #7a5a20; }
-  #atkOwn .chip { font-size: 13px; padding: 4px 10px; border-width: 2px; }
-  #atkOwn .chip.on { background: #6b5320; color: #fff; }
+  /* attack: a PMD move menu, one button per move */
+  #atkPanel .atkHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #atkClose { padding: 0 8px; font-size: 14px; line-height: 22px; }
+  #atkOwn { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 4px 0; }
+  #atkOwn .mv { display: flex; align-items: center; gap: 6px; padding: 6px 8px; text-align: left; background: #2f3d78; border: 2px solid #6f82d0; color: #fff; font: 700 16px var(--pix); min-width: 0; }
+  #atkOwn .mv span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #atkOwn .mv small { font-size: 12px; opacity: .75; font-weight: 400; }
+  #atkOwn .mv i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #atkOwn .mv.on { border-color: var(--accent); background: #4a5aa0; box-shadow: 0 0 0 1px var(--accent); }
+  #atkOther { font-size: 12px; padding: 2px 8px; }
+  #atkMove { width: 100%; margin-top: 4px; display: none; }
+  #atkPanel.search #atkMove { display: block; } #atkPanel.search #atkOther { display: none; }
+  #atkInfo { margin-top: 4px; font-size: 13px; }
+  #atkNums { margin-top: 4px; font-size: 13px; }
+  #atkNums summary { cursor: pointer; color: #fff; font: 700 15px var(--pix); }
+  #atkNums summary::marker { color: var(--accent); }
+  #atkPanel .evb button.primary { flex: 1; font: 700 18px var(--pix); }
   #turnList .turn { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
   #turnList .turn .nm { flex: 1; }
   #turnList .turn .ini { color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -300,17 +315,16 @@
   <div id="pauseBar" style="display:none"></div>
   <div id="eventBox" style="display:none"></div>
   <div id="atkPanel" class="evcard" style="display:none">
-    <div class="evt" id="atkTitle"></div>
-    <div id="atkOwn" class="row" style="flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
-    <input id="atkMove" list="atkMoves" placeholder="Or type any move to search" style="width:100%" autocomplete="off">
+    <div class="evt atkHead"><span id="atkTitle"></span><button id="atkClose" class="fit" title="Close">✕</button></div>
+    <div id="atkOwn"></div>
+    <button id="atkOther" class="fit">Other move…</button>
+    <input id="atkMove" list="atkMoves" placeholder="Type any move to search" autocomplete="off">
     <datalist id="atkMoves"></datalist>
-    <div class="evx" id="atkInfo" style="margin-top:4px"></div>
-    <div id="atkRows"></div>
-    <div class="evx" id="atkSum" style="margin-top:6px;color:var(--dim)"></div>
+    <div class="evx" id="atkInfo"></div>
+    <details id="atkNums"><summary id="atkSum"></summary><div id="atkRows"></div></details>
     <div class="row evb">
       <button id="atkAcc" class="primary">🎲 Roll accuracy</button>
       <button id="atkDmg" class="primary" style="display:none">🎲 Roll damage</button>
-      <button id="atkClose" class="fit">Close</button>
     </div>
   </div>
   <div id="warpBox" class="evcard" style="display:none"></div>
@@ -632,6 +646,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=64"></script>
+<script type="module" src="tabletop.js?v=65"></script>
 </body>
 </html>
