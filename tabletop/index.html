@@ -268,7 +268,28 @@
   #atkOwn .mvw .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   #atkOwn .mvw .inf { font-size: 12px; font-weight: 700; padding: 4px 8px; border-width: 2px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
   #atkOwn .mvw .inf.on { background: #6b5320; color: #fff; }
+  /* Pokemon battle look for the four moves: type-coloured rounded buttons, white outlined name, type + category below (Adam) */
+  #atkOwn { gap: 6px !important; }
+  #atkOwn .mvw .chip.pkmv { --tc: #888; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 12px 6px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 78%, #fff) 0%, var(--tc) 55%, color-mix(in srgb, var(--tc) 70%, #000) 100%);
+    border: 2px solid color-mix(in srgb, var(--tc) 55%, #000); border-right: 0; border-radius: 12px 0 0 12px; color: #fff;
+    box-shadow: inset 0 1px 0 #fff6, 0 2px 0 #0006; text-align: left; }
+  #atkOwn .mvw .chip.pkmv b { font-size: 16px; letter-spacing: .3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: -1px -1px 0 #0009, 1px -1px 0 #0009, -1px 1px 0 #0009, 1px 1px 0 #0009, 0 2px 0 #0008; }
+  #atkOwn .mvw .chip.pkmv small { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #fffe;
+    background: #0004; padding: 0 6px; border-radius: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  #atkOwn .mvw .chip.pkmv:hover:not(:disabled) { filter: brightness(1.12); }
+  #atkOwn .mvw .chip.pkmv.on { outline: 3px solid #fff; outline-offset: -1px; box-shadow: 0 0 0 2px #000, 0 0 12px #fffa; }
+  #atkOwn .mvw .chip.pkmv:disabled { filter: grayscale(1) brightness(.6); opacity: .7; cursor: not-allowed; }
+  #atkOwn .mvw .inf { --tc: #888; background: color-mix(in srgb, var(--tc) 55%, #000); color: #fff; border: 2px solid color-mix(in srgb, var(--tc) 55%, #000);
+    border-left: 1px solid #0006; border-radius: 0 12px 12px 0; box-shadow: 0 2px 0 #0006; }
+  #atkOwn .mvw .inf.on { background: #fff; color: #222; }
+  #atkOwn .mvw:has(.chip:disabled) .inf { filter: grayscale(1) brightness(.7); }
   #atkInfo:empty { display: none; }
+  /* the x in the moves window's corner closes it (Adam) */
+  #atkX { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 14px; line-height: 1; font-weight: 700; }
+  #atkX:hover { background: #a33; border-color: #f66; color: #fff; }
+  #atkTitle { padding-right: 30px; }
   @media (min-width: 701px) { #atkPanel, #warpBox { left: calc(50% - 150px); } }
   #atkRows { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 6px; }
   #atkRows label { font-size: 11px; }
@@ -306,6 +327,25 @@
     body.sideHidden:is(:not(.gm), .previewing) #turnBox { right: 62px; }
     body.sideHidden:is(:not(.gm), .previewing) :is(#actPanel, #bagPanel, #actBar, #floorTag, #status, #effPop, #atkPanel, #warpBox, #eventBox, #pauseBar) { left: 50% !important; }
     body.sideHidden:is(:not(.gm), .previewing) #actBar { width: max-content; }
+    /* side panel hidden: a combat window bottom right with the log, toggled by the sword button (Adam) */
+    body.sideHidden:is(:not(.gm), .previewing) #combatToggle { display: block; }
+    body.sideHidden.combatOpen:is(:not(.gm), .previewing) #combatBox { display: flex; }
+  }
+  #combatBox, #combatToggle { display: none; }
+  #combatToggle { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 44px; height: 44px; padding: 0; font-size: 22px; border-radius: 12px;
+    background: #1d2348; border: 2px solid #c8d0ff; color: #fff; box-shadow: 0 4px 12px #0009; }
+  body.combatOpen #combatToggle { background: #c8d0ff; color: #1d2348; }
+  #combatBox { position: absolute; right: 10px; bottom: 62px; z-index: 4; width: 300px; height: min(260px, 40%); flex-direction: column;
+    background: #1d2348ee; border: 2px solid #c8d0ff; border-radius: 12px; box-shadow: 0 6px 20px #000c; overflow: hidden; }
+  #combatBox .cbh { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 5px 10px; font-weight: 700; color: #ffd76a;
+    border-bottom: 1px solid #c8d0ff55; }
+  #combatX { width: 24px; height: 24px; padding: 0; border-radius: 50%; font-size: 12px; line-height: 1; }
+  #combatX:hover { background: #a33; border-color: #f66; color: #fff; }
+  #combatLog { flex: 1; overflow-y: auto; padding: 6px 10px; font-size: 13px; }
+  #combatLog div { margin-bottom: 3px; word-wrap: break-word; }
+  #combatLog .roll { color: var(--accent); }
+  #combatLog .sys { color: #aab; font-style: italic; }
+  @media (min-width: 701px) {
   }
 
   @media (max-width: 700px) {
@@ -349,9 +389,12 @@
   <div id="prompts"></div>
   <div id="hint"></div>
   <button id="toggleSide" title="Show or hide the side panel">&#9776;</button>
+  <div id="combatBox"><div class="cbh">&#9876; Combat <button id="combatX" class="fit" title="Hide the combat window">&#10005;</button></div><div id="combatLog"></div></div>
+  <button id="combatToggle" class="fit" title="Show or hide the combat window">&#9876;</button>
   <div id="pauseBar" style="display:none"></div>
   <div id="eventBox" style="display:none"></div>
   <div id="atkPanel" class="evcard" style="display:none">
+    <button id="atkX" class="fit" title="Close">✕</button>
     <div class="evt" id="atkTitle"></div>
     <div id="atkOwn" class="row" style="flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
     <input id="atkMove" list="atkMoves" placeholder="Or type any move to search" style="width:100%" autocomplete="off">
@@ -684,6 +727,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=74"></script>
+<script type="module" src="tabletop.js?v=75"></script>
 </body>
 </html>

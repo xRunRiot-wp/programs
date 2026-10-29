@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=74';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=74';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=75';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=75';
 
-const VERSION = 74;                              // raised by bump.py on every publish
+const VERSION = 75;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3631,15 +3631,18 @@ async function openAttack(id, target) {
   const r = reachOf(f, state.figures[target]);
   for (const n of recent) {
     const m = list.find(x => x.name.toLowerCase() === n.toLowerCase());
-    const b = document.createElement('button'); b.className = 'fit chip'; b.textContent = m ? m.name : `${n} (not found)`;
+    // Pokemon-style move button: filled with the move's type colour, name on top, type and category underneath (Adam)
+    const b = document.createElement('button'); b.className = 'fit chip pkmv'; b.dataset.mv = m ? m.name : '';
+    b.append(Object.assign(document.createElement('b'), { textContent: m ? m.name : `${n} (not found)` }));
+    if (m) b.append(Object.assign(document.createElement('small'), { textContent: `${m.type} · ${m.cat}` }));
     b.disabled = !m || !moveFits(m, r);
     if (m && !moveFits(m, r)) b.title = `Contact move: ${f.name} has to stand next to the target`;
-    if (m) { b.style.borderColor = TYPES[m.type] || ''; b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
+    if (m) { b.style.setProperty('--tc', TYPES[m.type] || '#888'); b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
     // the "i" next to a move opens its details; they stay folded away otherwise
     const w = document.createElement('span'), inf = document.createElement('button');
     w.className = 'mvw'; inf.className = 'fit inf'; inf.textContent = 'i'; inf.title = 'Show what this move does';
     inf.disabled = !m;
-    if (m) { inf.style.borderColor = TYPES[m.type] || ''; inf.onclick = () => { atk.info = atk.info === m.name ? '' : m.name; renderAttack(); }; }
+    if (m) { inf.style.setProperty('--tc', TYPES[m.type] || '#888'); inf.onclick = () => { atk.info = atk.info === m.name ? '' : m.name; renderAttack(); }; }
     w.append(b, inf);
     own.appendChild(w);
   }
@@ -3654,7 +3657,7 @@ async function pickMove() {
   const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
   if (!atk || (atk.move?.name === m?.name && m)) return;
   atk.move = m || null;
-  for (const w of $('atkOwn').children) w.firstChild.classList.toggle('on', w.firstChild.textContent === m?.name);
+  for (const w of $('atkOwn').children) w.firstChild.classList.toggle('on', w.firstChild.dataset.mv === m?.name);
   renderAttack();
 }
 function renderAttack() {
@@ -3666,9 +3669,9 @@ function renderAttack() {
   const m = atk.move, A = state.attack, rolledHit = !!(A && A.id === f.id && A.target === tg.id);
   $('atkTitle').textContent = `${f.name} attacks ${tg.name}`;
   $('atkInfo').innerHTML = '';
-  for (const w of $('atkOwn').children) w.lastChild.classList.toggle('on', !!atk.info && w.firstChild.textContent === atk.info);
+  for (const w of $('atkOwn').children) w.lastChild.classList.toggle('on', !!atk.info && w.firstChild.dataset.mv === atk.info);
   // details only for the move whose "i" is open, or a move typed into the search (it has no "i")
-  const im = atk.info ? movesCache.find(x => x.name === atk.info) : m && ![...$('atkOwn').children].some(w => w.firstChild.textContent === m.name) ? m : null;
+  const im = atk.info ? movesCache.find(x => x.name === atk.info) : m && ![...$('atkOwn').children].some(w => w.firstChild.dataset.mv === m.name) ? m : null;
   if (im) {
     const c = document.createElement('span'); c.className = 'typechip'; c.textContent = im.type; c.style.background = TYPES[im.type] || '#888';
     $('atkInfo').append(...(atk.info ? [Object.assign(document.createElement('b'), { textContent: im.name + ' ' })] : []), c,
@@ -4142,6 +4145,11 @@ function renderLogEntry(e) {
   el.appendChild(d);
   while (el.children.length > 200) el.firstChild.remove();
   if (atEnd) el.scrollTop = el.scrollHeight;
+  // the same line in the combat window, shown bottom right while the side panel is hidden (Adam)
+  const cl = $('combatLog'), cEnd = cl.scrollHeight - cl.scrollTop - cl.clientHeight < 30 || !cl.clientHeight;
+  cl.appendChild(d.cloneNode(true));
+  while (cl.children.length > 200) cl.firstChild.remove();
+  if (cEnd) cl.scrollTop = cl.scrollHeight;
   if (e.kind !== 'chat') showMsg(d.cloneNode(true));
 }
 // the newest lines also show over the board for a few seconds, like the dungeon's message box
@@ -4199,7 +4207,7 @@ function renderTurnBox() {
   if (n > max) { const m = document.createElement('div'); m.className = 'more'; m.textContent = `+${n - max} more`; rows.push(m); }
   box.replaceChildren(...rows);
 }
-function renderLog() { $('log').innerHTML = ''; state.log.filter(e => !e.to || !isHost || gmView() || e.to === viewerId()).forEach(renderLogEntry); }
+function renderLog() { $('log').innerHTML = ''; $('combatLog').innerHTML = ''; state.log.filter(e => !e.to || !isHost || gmView() || e.to === viewerId()).forEach(renderLogEntry); }
 
 function updateBoardInputs() {
   if (!isHost || !$('boardList')) return;
@@ -4461,6 +4469,15 @@ function wirePanel() {
     resize();
   };
   try { if (localStorage.getItem('tabletop-sideHidden')) document.body.classList.add('sideHidden'); } catch {}
+  // combat window (side panel hidden): the sword button opens and shuts it, remembered per browser
+  const combatWin = on => {
+    document.body.classList.toggle('combatOpen', on);
+    try { localStorage.setItem('tabletop-combatOpen', on ? '1' : '0'); } catch {}
+    if (on) $('combatLog').scrollTop = $('combatLog').scrollHeight;
+  };
+  $('combatToggle').onclick = () => combatWin(!document.body.classList.contains('combatOpen'));
+  $('combatX').onclick = () => combatWin(false);
+  try { document.body.classList.toggle('combatOpen', localStorage.getItem('tabletop-combatOpen') !== '0'); } catch { document.body.classList.add('combatOpen'); }
 
   $('selName').onchange = () => selectedId && act({ t: 'edit', id: selectedId, name: $('selName').value });
   $('selColor').oninput = () => selectedId && act({ t: 'edit', id: selectedId, color: $('selColor').value });
@@ -4559,6 +4576,7 @@ function wirePanel() {
   $('atkAcc').onclick = () => attackMsg('acc');
   $('atkDmg').onclick = () => attackMsg('dmg');
   $('atkClose').onclick = () => closeAttack();
+  $('atkX').onclick = () => closeAttack();
   $('libSave').onclick = () => {
     if (!selectedId) return;
     const group = $('miniGroup').value.trim() || 'Ungrouped';
