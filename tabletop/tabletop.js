@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=72';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=72';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=73';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=73';
 
-const VERSION = 72;                              // raised by bump.py on every publish
+const VERSION = 73;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1633,11 +1633,23 @@ const ITEM_FX = {
   'Foe-Hold Orb': { to: 'foes', add: 'Immobilized' }, 'Foe-Fear Orb': { to: 'foes', add: 'Terrified' }, 'Foe-Seal Orb': { to: 'foes', add: 'Sealed' },
   'Silence Orb': { to: 'foes', add: 'Sealed' }, 'Slow Orb': { to: 'foes', add: 'Slowed' }, 'Shocker Orb': { to: 'foes', add: 'Cowering' },
   'Health Orb': { to: 'allies', cure: 'all' },
+  'All-Hit Orb': { to: 'team', add: 'Sure Shot', gm: 'Sure Shot lasts the scene' }, 'Observer Orb': { to: 'foes', add: 'Flinch' },
+  'Decoy Orb': { to: 'foe', add: 'Decoy' }, 'Two-Edge Orb': { to: 'everyone', halve: true },
+  'One-Shot Orb': { to: 'foe', oneShot: true, gm: 'bosses are immune: undo it if the target is a boss' },
+  'Blowback Orb': { to: 'foe', dice: 2, gm: 'it is blasted back several squares into a wall: move it' },
+  'Hurl Orb': { to: 'foe', dice: 2, near: true, gm: 'it is thrown several squares: move it' },
+  'Switcher Orb': { to: 'foe', swap: true },
+  'Warp Orb': { to: 'self', warp: 'random' }, 'Warp Seed': { to: 'self', warp: 'random' },
+  'Pure Seed': { to: 'self', warp: 'stairs' }, 'Stayaway Orb': { to: 'self', warp: 'stairs' }, 'Via Seed': { to: 'self', warp: 'stairs', mates: true },
+  'Trapbust Orb': { to: 'area', tiles: 'trapbust' }, 'See-Trap Orb': { to: 'area', tiles: 'seetrap' },
+  'Fill-In Orb': { to: 'area', tiles: 'fill' }, 'Drought Orb': { to: 'area', tiles: 'drought' },
+  'Dropeye Seed': { to: 'self', add: 'Blinker', gm: 'they can see the whole floor layout; Blinker lasts a round' },
   ...Object.fromEntries(Object.entries(THROWN).map(([k, d]) => [k, { to: 'foe', thrown: d, ...(k === 'Cacnea Spike' ? { chance: 'Poison' } : {}) }])),
 };
 const FEEL = { Sleep: 'asleep', Paralysis: 'paralysed', Confused: 'confused', Petrified: 'petrified', Immobilized: 'held in place', Terrified: 'terrified',
   Sealed: 'sealed (no moves)', Slowed: 'slowed', Cowering: 'cowering', 'Sped Up': 'sped up', Invisible: 'invisible', 'Cross-Eyed': 'cross-eyed', Decoy: 'a decoy' };
 const feel = x => FEEL[x] || x;
+const ORB_RANGE = 15;
 const itemTarget = name => ITEM_FX[name]?.to || 'self';
 const foeOf = (a, b) => (sideOf(a) === 'enemy') !== (sideOf(b) === 'enemy') && sideOf(b) !== 'npc';
 // host: use an item. Returns false (and nothing is used up) when it can't work like that.
@@ -1645,12 +1657,14 @@ function useItem(f, name, tid, from) {
   const fx = ITEM_FX[name], to = fx?.to || 'self', tg = tid ? state.figures[tid] : null;
   const an = /^[aeiou]/i.test(name) ? 'an' : 'a';
   if (!fx) { addLog({ kind: 'sys', text: `${f.name} uses ${an} ${name}!${ITEMS[name] ? ` (${ITEMS[name]})` : ''}` }); return true; }
+  const near = x => distance(box(f), box(x), state.rules.diag) <= ORB_RANGE;
   if (fainted(f) && !(fx.revive && tg?.id === f.id)) { note(from, `${f.name} has fainted and can't use items.`); return false; }
   if (to === 'foe' || to === 'ally') {
     if (!tg) { note(from, `Pick who the ${name} is for.`); return false; }
     if (to === 'foe' && !foeOf(f, tg)) { note(from, `The ${name} has to go at a foe.`); return false; }
     if (to === 'ally' && foeOf(f, tg)) { note(from, `The ${name} is for an ally.`); return false; }
-    if (tg.id !== f.id && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${f.name} can't see ${tg.name}.`); return false; }
+    if (/Orb$/.test(name) ? !near(tg) : tg.id !== f.id && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${tg.name} is out of reach.`); return false; }
+    if (fx.near && !nextToFig(f, tg)) { note(from, `${f.name} has to stand next to ${tg.name}.`); return false; }
     if (fx.revive && !fainted(tg)) { note(from, `${tg.name} hasn't fainted.`); return false; }
   }
   const setSt = (x, st) => { x.st = { ...(x.st || {}), ...st }; pushFig(x); };
@@ -1661,20 +1675,55 @@ function useItem(f, name, tid, from) {
     const fxm = { t: 'fx', kind: 'Physical', type: 'Normal', from: f.id, to: x.id, text: `-${n}` }; sendAll(fxm); playFx(fxm);
     if (x.st?.hp != null) { const hp = Math.max(0, x.st.hp - n); setSt(x, { hp }); if (!hp) addLog({ kind: 'sys', text: `${x.name} faints!` }); }
   };
-  const seen = side => Object.values(state.figures).filter(x => x.id !== f.id && figVisible(x) && !fainted(x) && (side === 'foe' ? foeOf(f, x) : !foeOf(f, x) && sideOf(x) !== 'npc')
-    && lineOfSight(worldFor(f), f.x, f.z, x.x, x.z));
+  // orbs reach everyone within 15 squares of the user (Adam)
+  const seen = side => Object.values(state.figures).filter(x => x.id !== f.id && !x.hidden && !fainted(x) && near(x) &&
+    (side === 'all' ? sideOf(x) !== 'npc' : side === 'foe' ? foeOf(f, x) : !foeOf(f, x) && sideOf(x) !== 'npc'));
   const who = to === 'self' ? f : tg, head = `${f.name} uses ${an} ${name}`;
   if (fx.heal) { const hp0 = f.st?.hp; heal(f, fx.heal); addLog({ kind: 'sys', text: `${head}: ${f.st?.hpMax ? `HP ${hp0 ?? f.st.hpMax} -> ${f.st.hp}` : `heals ${fx.heal}`}.` }); }
   else if (fx.cure && to !== 'allies') { const n = cure(f, fx.cure); addLog({ kind: 'sys', text: `${head}: ${n ? 'cured!' : 'nothing to cure.'}` }); }
   else if (fx.revive) { setSt(tg, { hp: fx.revive === 'full' ? tg.st.hpMax : 1, ...(fx.revive === 'full' ? { status: [] } : {}) }); addLog({ kind: 'sys', text: `${head} on ${tg.name}: ${tg.name} gets back up with ${tg.st.hp} HP!` }); }
   else if (fx.add && to === 'self') { give(f); addLog({ kind: 'sys', text: `${head}: ${f.name} is ${feel(fx.add)}!` }); }
   else if (fx.dmg) { addLog({ kind: 'sys', text: `${head}: ${tg.name} takes ${fx.dmg} damage.` }); hurt(tg, fx.dmg); }
+  else if (fx.warp) {
+    const spot = fx.warp === 'stairs' ? stairsSpot(f) : randomSpot(f);
+    if (!spot) { note(from, fx.warp === 'stairs' ? 'There are no stairs on this floor.' : 'Nowhere to warp to.'); return false; }
+    const mates = fx.mates ? Object.values(state.figures).filter(x => x.id !== f.id && !foeOf(f, x) && sideOf(x) === 'player' && nextToFig(f, x)) : [];
+    moveTo(f, spot);
+    for (const x of mates) { const p = openSpot(x, f.x, f.z); if (p) moveTo(x, p); }
+    addLog({ kind: 'sys', text: `${head}: ${[f, ...mates].map(x => x.name).join(', ')} warp${mates.length ? '' : 's'} ${fx.warp === 'stairs' ? 'to the stairs' : 'away'}!` });
+  } else if (fx.swap) {
+    const a = { x: f.x, z: f.z }; moveTo(f, { x: tg.x, z: tg.z }); moveTo(tg, a);
+    addLog({ kind: 'sys', text: `${head}: ${f.name} and ${tg.name} swap places!` });
+  } else if (fx.oneShot) {
+    rollPhysics({ sides: 6, n: 1, chance: true, at: { x: tg.x, z: tg.z }, dir: { x: 0, z: -1 } }, from, (t, parts) => {
+      const six = parts.includes(6);
+      if (six) setTimeout(() => hurt(tg, tg.st?.hp ?? 0), 50);
+      return `${head} on ${tg.name}: rolled ${parts.join(', ')} - ${six ? `a 6! ${tg.name} faints!` : 'no 6, nothing happens.'}`;
+    });
+  } else if (fx.dice) {
+    rollPhysics({ sides: 6, n: fx.dice, pool: true, at: { x: tg.x, z: tg.z }, dir: { x: 0, z: -1 } }, from, (t, parts) => {
+      const d = parts.filter(v => v >= 4).length;
+      if (d) setTimeout(() => hurt(tg, d), 50);
+      return `${head} on ${tg.name}: ${fx.dice} damage dice - ${d} damage.`;
+    });
+  } else if (fx.halve) {
+    const xs = [f, ...seen('all')];
+    for (const x of xs) if (x.st?.hp) { const lost = Math.floor(x.st.hp / 2); if (lost) hurt(x, lost); }
+    addLog({ kind: 'sys', text: `${head}! Everyone within ${ORB_RANGE} squares loses half their HP: ${xs.map(x => x.name).join(', ')}.` });
+  } else if (fx.tiles) {
+    const n = itemTiles(f, fx.tiles);
+    addLog({ kind: 'sys', text: `${head}: ${{ trapbust: `${n} trap${n === 1 ? '' : 's'} destroyed`, seetrap: `${n} hidden trap${n === 1 ? '' : 's'} revealed`, fill: `${n} square${n === 1 ? '' : 's'} filled in`, drought: `${n} square${n === 1 ? '' : 's'} dried up` }[fx.tiles]}.` });
+  } else if (to === 'team') {
+    const xs = Object.values(state.figures).filter(x => sideOf(x) === 'player' && !fainted(x));
+    for (const x of xs) give(x);
+    addLog({ kind: 'sys', text: `${head}! ${xs.map(x => x.name).join(', ')}: ${feel(fx.add)}.` });
+  }
   else if (fx.add && to === 'foe') { give(tg); addLog({ kind: 'sys', text: `${head} on ${tg.name}: ${tg.name} is ${feel(fx.add)}!` }); }
   else if (to === 'foes' || to === 'allies') {
     const xs = seen(to === 'foes' ? 'foe' : 'ally');
     if (to === 'allies') xs.push(f);
     for (const x of xs) if (fx.add) give(x); else cure(x, fx.cure);
-    addLog({ kind: 'sys', text: `${head}! ${xs.length ? `${xs.map(x => x.name).join(', ')} ${fx.add ? `${xs.length === 1 ? 'is' : 'are'} ${feel(fx.add)}` : 'cured'}.` : 'Nobody in sight.'}` });
+    addLog({ kind: 'sys', text: `${head}! ${xs.length ? `${xs.map(x => x.name).join(', ')} ${fx.add ? `${xs.length === 1 ? 'is' : 'are'} ${feel(fx.add)}` : 'cured'}.` : `Nobody within ${ORB_RANGE} squares.`}` });
   } else if (fx.toss || fx.thrown) {
     // throwing: an accuracy roll, 1 success hits (seeds: Dexterity + Brawl, thrown items: Dexterity + Athletic)
     const roll = fx.toss ? ['Dexterity', 'Brawl'] : ['Dexterity', 'Athletic'], n = poolOf(f, { roll }), pain = painOf(f);
@@ -1695,6 +1744,62 @@ function useItem(f, name, tid, from) {
   }
   if (fx.gm) addLog({ kind: 'sys', text: `${name}: ${fx.gm}.`, to: state.gm });
   return true;
+}
+// a square a mini can stand on: on a board, not a wall / water / lava / pit, nobody there
+function standable(x, i, j) {
+  const c = fp(x), W = worldFor(x);
+  return cellsOf(i + c.w / 2, j + c.d / 2, c.w, c.d).every(([a, b]) => {
+    const t = state.tiles[a + ',' + b];
+    return W.onBoard(a, b) && !BLOCKS_MOVE.has(t) && t !== 'water' && t !== 'lava' && !W.occupied(a, b) && !fogged(a + ',' + b);
+  });
+}
+const spotAt = (x, i, j) => ({ x: i + fp(x).w / 2, z: j + fp(x).d / 2 });
+function openSpot(x, cx, cz) {                  // the nearest free square to a point
+  const i0 = Math.floor(cx), j0 = Math.floor(cz);
+  for (let r = 0; r < 12; r++) for (let i = i0 - r; i <= i0 + r; i++) for (let j = j0 - r; j <= j0 + r; j++)
+    if (Math.max(Math.abs(i - i0), Math.abs(j - j0)) === r && standable(x, i, j)) return spotAt(x, i, j);
+  return null;
+}
+function stairsSpot(x) {
+  const b = boardAt(x.x, x.z), k = Object.keys(state.tiles).find(k => state.tiles[k] === 'stairs' && boardAt(+k.split(',')[0] + 0.5, +k.split(',')[1] + 0.5) === b);
+  if (!k) return null;
+  const [i, j] = k.split(',').map(Number);
+  return standable(x, i, j) ? spotAt(x, i, j) : openSpot(x, i + 0.5, j + 0.5);
+}
+function randomSpot(x) {
+  const b = boardAt(x.x, x.z), all = [];
+  if (!b) return null;
+  for (let i = b.x; i < b.x + b.cols; i++) for (let j = b.z; j < b.z + b.rows; j++)
+    if ((state.dungeon?.board !== b.id || state.tiles[i + ',' + j]) && standable(x, i, j)) all.push([i, j]);
+  const p = all[Math.floor(Math.random() * all.length)];
+  return p ? spotAt(x, ...p) : null;
+}
+function moveTo(x, p) {
+  const ox = x.x, oz = x.z;
+  Object.assign(x, p);
+  pushFig(x); carry(x.id, x.x - ox, x.z - oz, 0, x);
+  if (x.owner || sideOf(x) === 'player') revealFog(x);
+  save();
+}
+// trap and terrain items: within 15 squares (Trapbust, Fill-In) or the whole floor (See-Trap, Drought)
+function itemTiles(f, kind) {
+  const b = boardAt(f.x, f.z), D = state.dungeon, floor = D && FLOOR_LOOKS[D.look] ? FLOOR_LOOKS[D.look].floor : 'dirt', set = {};
+  let n = 0;
+  for (const [k, t] of Object.entries(state.tiles)) {
+    const [i, j] = k.split(',').map(Number);
+    if (boardAt(i + 0.5, j + 0.5) !== b) continue;
+    const close = distance(box(f), { x: i + 0.5, z: j + 0.5, w: 1, d: 1 }, state.rules.diag) <= ORB_RANGE;
+    let to;
+    if (kind === 'trapbust' && close && (t === 'trap' || t === 'hiddenTrap')) to = null;
+    else if (kind === 'seetrap' && t === 'hiddenTrap') to = 'trap';
+    else if (kind === 'fill' && close && (t === 'water' || t === 'lava' || t === 'pit') && !fogged(k)) to = floor;
+    else if (kind === 'drought' && (t === 'water' || t === 'lava')) to = floor;
+    else continue;
+    if (to) state.tiles[k] = to; else delete state.tiles[k];
+    set[k] = to; n++;
+  }
+  if (n) { tilesChanged(); sendTiles(set); save(); }
+  return n;
 }
 function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
 function renderBag() {
@@ -3427,6 +3532,17 @@ function loadIndex() {
 }
 let movesCache = [];
 const loadMoves = () => loadIndex().then(x => (movesCache = x.moves));
+// every item in the campaign's item list goes into the bag's suggestions, with its rule text as the hint
+function loadItems() {
+  fetch(INDEX_URL).then(r => r.json()).then(E => {
+    for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name))
+      ITEMS[e.name] = (e.outcome || '').replace(/\s*\d[\d,]* Poké.*$/, '').trim();
+    const dl = $('bagItems'); if (!dl) return;
+    dl.innerHTML = '';
+    for (const name of Object.keys(ITEMS).sort()) { const o = document.createElement('option'); o.value = name; dl.appendChild(o); }
+    renderBag();
+  }).catch(() => {});
+}
 // "Attributes (start/max): Str 3/7, Dex 1/2, ..." + "Grass/Ice type. Base HP 5." + "Starter: Leer, Powder Snow | Beginner: ..."
 function parseSpecies(e) {
   const at = {}, names = { Str: 'Strength', Dex: 'Dexterity', Vit: 'Vitality', Spe: 'Special', Ins: 'Insight' };
@@ -4401,6 +4517,7 @@ function wirePanel() {
   $('actMore').onclick = () => { const b = $('actPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('bagPanel').style.display = 'none'; renderActions(); };
   $('actClose').onclick = () => { $('actPanel').style.display = 'none'; };
   for (const name of Object.keys(ITEMS)) { const o = document.createElement('option'); o.value = name; $('bagItems').appendChild(o); }
+  loadItems();
   $('bagAddBtn').onclick = () => { const name = $('bagName').value.trim(); if (name) act({ t: 'bagAdd', name, n: +$('bagN').value || 1 }); $('bagName').value = ''; $('bagN').value = '1'; };
   $('atkAcc').onclick = () => attackMsg('acc');
   $('atkDmg').onclick = () => attackMsg('dmg');
