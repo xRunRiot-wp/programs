@@ -235,9 +235,12 @@
   /* the moves window sits at the bottom, just above the player's button bar (Adam) */
   #atkPanel { top: auto; bottom: 50px; max-height: calc(100% - 200px); }
   body:not(.gm) #atkPanel, body.previewing #atkPanel { bottom: 122px; }
-  #atkOwn { justify-content: flex-start; }
-  #atkOwn .mvw { display: inline-flex; flex: none; }
-  #atkOwn .mvw button { flex: none; }
+  /* four moves in a 2x2 grid; the numbers behind them stay hidden (Adam) */
+  #atkOwn { display: grid !important; grid-template-columns: 1fr 1fr; gap: 4px !important; }
+  #atkOwn .mvw { display: flex; min-width: 0; }
+  #atkOwn .mvw .chip { flex: 1; min-width: 0; padding: 8px 10px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #atkOwn .mvw .inf { flex: none; }
+  #atkRows, #atkSum { display: none !important; }
   #atkOwn .mvw .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
   #atkOwn .mvw .inf { font-size: 12px; font-weight: 700; padding: 4px 8px; border-width: 2px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
   #atkOwn .mvw .inf.on { background: #6b5320; color: #fff; }
@@ -642,6 +645,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=67"></script>
+<script type="module" src="tabletop.js?v=68"></script>
 </body>
 </html>

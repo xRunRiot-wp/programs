@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=67';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=67';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=68';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=68';
 
-const VERSION = 67;                              // raised by bump.py on every publish
+const VERSION = 68;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3260,7 +3260,7 @@ async function openAttack(id, target) {
   renderAttack();
   const list = await loadMoves(), f = state.figures[id];
   const dl = $('atkMoves'); dl.innerHTML = '';
-  const recent = [...new Set([...(f?.st?.moves || []), ...(f?.st?.learn || [])])];
+  const recent = [...new Set([...(f?.st?.moves || []), ...(f?.st?.learn || [])])].slice(0, 4);   // a 2x2 of moves; others via the search
   for (const m of list) { const o = document.createElement('option'); o.value = m.name; dl.appendChild(o); }
   const own = $('atkOwn'); own.innerHTML = '';
   for (const n of recent) {
