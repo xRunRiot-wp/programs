@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=77';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=77';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=78';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=78';
 
-const VERSION = 77;                              // raised by bump.py on every publish
+const VERSION = 78;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3192,8 +3192,8 @@ function updateOverlays() {
   if (key === overlayKey) return;
   overlayKey = key;
   renderHud();
-  // Engaged: a player's mini next to a GM mini (both with stats)
-  const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null && (!isHost || gmView() || figVisible(f)));
+  // Engaged: a player's mini next to a GM mini (both with stats); fainted minis are out of it and engage no one (Adam)
+  const fighters = Object.values(state.figures).filter(f => f.st && f.st.dex != null && !fainted(f) && (!isHost || gmView() || figVisible(f)));
   const now = new Set();
   for (const a of fighters) for (const b of fighters)
     if (a !== b && !!a.owner !== !!b.owner && adjacent(box(a), box(b), state.rules.diag)) now.add(a.id);
