@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=70';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=70';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=71';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=71';
 
-const VERSION = 70;                              // raised by bump.py on every publish
+const VERSION = 71;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -553,6 +553,12 @@ function handle(msg, from) {
       if (!gm && sideOf(tg) === 'npc') { note(from, `${tg.name} is an NPC: stand next to them and click Talk instead.`); return; }
       const mv = cleanMove(msg.move);
       if (!mv) return;
+      // the rulebook: contact moves need the target next to you; ranged ones (every Special or Status move, and Physical
+      // moves marked "Ranged") only need line of sight
+      if (msg.step !== 'dmg') {
+        if (!isRanged(mv) && !nextToFig(f, tg)) { note(from, `${mv.name} is a contact move: ${f.name} has to stand next to ${tg.name}.`); return; }
+        if (isRanged(mv) && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${f.name} can't see ${tg.name}: a ranged move needs line of sight.`); return; }
+      }
       const num = v => Math.max(0, Math.min(20, Math.round(+v) || 0));
       f.st = { ...(f.st || {}) }; f.st.attr = { ...(f.st.attr || {}) };
       for (const [k, v] of Object.entries(msg.attr || {})) if (ATTRS.includes(k)) f.st.attr[k] = num(v);
@@ -1023,10 +1029,10 @@ function handle(msg, from) {
       const it = (state.siteBag || []).find(x => x.id === msg.item);
       if (!mayMove || !it || it.key) return;
       if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (!useItem(f, it.name, msg.target, from)) return;
       const raw = siteBagRaw[it.id], U = state.siteUsed ||= {};
       U[it.id] = { qty: Math.round(+raw?.qty) || 0, n: (U[it.id]?.n || 0) + 1 };
-      const what = ITEMS[it.name];
-      addLog({ kind: 'sys', text: `${f.name} uses ${/^[aeiou]/i.test(it.name) ? 'an' : 'a'} ${it.name} from ${it.owner === f.name ? 'their' : it.owner + "'s"} bag!${what ? ` (${what})` : ''} Take it off on the site too.` });
+      addLog({ kind: 'sys', text: `(${it.name} came from ${it.owner === f.name ? 'their' : it.owner + "'s"} bag on the site: take it off there too.)` });
       syncSiteBag();
       break;
     }
@@ -1034,9 +1040,9 @@ function handle(msg, from) {
       const name = clean(msg.name, 30), B = state.bag || {};
       if (!mayMove || !B[name]) return;
       if (state.combat && state.combat.order[state.combat.turn]?.id !== f.id && !gm) { note(from, `Wait for ${f.name}'s turn.`); return; }
+      if (state.paused && !gm) { note(from, 'Paused: the GM is resolving an event.'); return; }
+      if (!useItem(f, name, msg.target, from)) return;
       if (--B[name] <= 0) delete B[name];
-      const what = ITEMS[name];
-      addLog({ kind: 'sys', text: `${f.name} uses ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}!${what ? ` (${what})` : ''}` });
       pushBag();
       break;
     }
@@ -1179,6 +1185,14 @@ function matchup(type, foeTypes) {
 }
 // pain: at half HP or less 1 success is lost, at 1 HP 2 -- only when hurt (a mini with 1 max HP at full health feels no pain)
 const painOf = f => { const h = f.st?.hp, m = f.st?.hpMax; return h == null || !m || h <= 0 || h >= m ? 0 : h <= 1 ? 2 : h <= m / 2 ? 1 : 0; };
+const isRanged = mv => mv.cat !== 'Physical' || /ranged/i.test(mv.effect || '');
+// successes taken off an accuracy roll: the move's Reduced Accuracy ("-2 Accuracy") and the Whiffer / Blinker / Confused statuses
+function accuracyCut(f, mv) {
+  const sts = f.st?.status || [];
+  const move = [...(mv.effect || '').matchAll(/-(\d+) Accuracy/gi)].reduce((s, m) => s + +m[1], 0);
+  const status = (sts.includes('Whiffer') ? 1 : 0) + (sts.includes('Blinker') ? 2 : 0) + (sts.includes('Confused') ? 1 : 0);
+  return { move, status };
+}
 function cleanMove(m) {
   if (!m || typeof m !== 'object') return null;
   const name = clean(m.name, 40);
@@ -1206,15 +1220,19 @@ async function attackRoll(f, tg, mv, msg, from) {
       const vs = { t: 'vs', a: f.id, b: tg.id };
       if (figVisible(f) && figVisible(tg)) sendAll(vs);
       showVs(vs);
-      const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0)), pain = painOf(f);
+      const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0)), pain = painOf(f), cut = accuracyCut(f, mv);
+      // Never Fail moves (and the Sure Shot status) always hit; High Critical crits on 1 fewer success
+      const sure = /never fail/i.test(mv.effect || '') || (f.st.status || []).includes('Sure Shot'), critAt = /high critical/i.test(mv.effect || '') ? 3 : 4;
       let hits = 0;
       await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
-        hits = Math.max(0, parts.filter(v => v >= 4).length - pain);
+        hits = Math.max(0, parts.filter(v => v >= 4).length - pain - cut.move - cut.status);
+        if (sure) hits = Math.max(1, hits);
+        const minus = [pain && `pain -${pain}`, cut.move && `reduced accuracy -${cut.move}`, cut.status && `status -${cut.status}`, sure && 'never fails'].filter(Boolean).join(', ');
         return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}` +
-          `${pain ? ` (pain: -${pain})` : ''}, ${hits ? (hits >= 4 && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : 'miss.'}`;
+          `${minus ? ` (${minus})` : ''}, ${hits ? (hits >= critAt && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : 'miss.'}`;
       });
       if (!hits || mv.cat === 'Status') { const fx = { t: 'fx', kind: mv.cat, miss: !hits, type: mv.type, from: f.id, to: tg.id }; sendAll(fx); playFx(fx); }
-      state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from, crit: hits >= 4 } : null;
+      state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from, crit: hits >= critAt } : null;
       pushAttack();
       if (hits && mv.cat === 'Status') await chanceRoll(f, tg, mv, from, at, dir);
     } else {
@@ -1536,11 +1554,148 @@ function renderActions() {
   }
 }
 
-// ---------- the team's bag (Mystery Dungeon items; what they do is up to the GM) ----------
-const ITEMS = { 'Oran Berry': 'restores some HP', 'Sitrus Berry': 'restores a lot of HP', 'Apple': 'fills the belly', 'Big Apple': 'fills the belly a lot',
-  'Pecha Berry': 'cures Poison', 'Cheri Berry': 'cures Paralysis', 'Rawst Berry': 'cures Burn', 'Chesto Berry': 'cures Sleep', 'Aspear Berry': 'cures Frozen',
-  'Heal Seed': 'cures every status', 'Reviver Seed': 'revives a fainted ally', 'Blast Seed': 'damages the foe in front', 'Sleep Seed': 'puts a foe to Sleep',
-  'Escape Orb': 'the team escapes the dungeon', 'Gravelerock': 'thrown at a foe', 'Max Elixir': 'restores the moves\' PP' };
+// ---------- the team's bag (Mystery Dungeon items; ITEM_FX below makes them work by the campaign's item list) ----------
+// the hint for each item, from the campaign site's item list
+const ITEMS = {
+  "Apple": "Common food. If Hunger is in effect restores 50 Hunger",
+  "Big Apple": "Common food worth 10 Apples. If Hunger is in effect restores 100 Hunger for the party",
+  "Oran Berry": "Heals 1 damage",
+  "Sitrus Berry": "Heals 3 damage or 1 Lethal damage",
+  "Figy Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
+  "Wiki Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
+  "Mago Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
+  "Aguav Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
+  "Iapapa Berry": "Heals 2 damage. If the eater dislikes the flavor (GM's call, by Nature) it also becomes Confused",
+  "Cheri Berry": "Heals Paralysis",
+  "Chesto Berry": "Heals Sleep",
+  "Pecha Berry": "Heals Poison",
+  "Rawst Berry": "Heals Burn 1 and Burn 2",
+  "Aspear Berry": "Heals Frozen Solid",
+  "Persim Berry": "Heals Confusion",
+  "Lum Berry": "Heals all status ailments at once",
+  "Heal Seed": "Cures all status conditions",
+  "Eyedrop Seed": "Reveals every trap and hidden item on the floor to the eater; cures Blinker",
+  "Tiny Reviver Seed": "A fainted Pokémon gets back up with 1 HP. Can't stop going Primal. Becomes a Plain Seed",
+  "Reviver Seed": "Heals all HP and Lethal HP, can prevent going Primal, and heals 50 Hunger",
+  "Quick Seed": "The eater is Sped Up for the scene",
+  "Vanish Seed": "The eater becomes Invisible for the scene",
+  "Blast Seed": "Eat it to sneeze fire: deal 1 HP damage to a foe directly (no reaction)",
+  "Sleep Seed": "Roll Dexterity + Brawl to toss it into a foe's mouth; inflicts Sleep",
+  "Stun Seed": "Roll Dexterity + Brawl to toss it into a foe's mouth; inflicts Paralysis",
+  "Totter Seed": "Throw it (Dexterity + Brawl): the target is Confused",
+  "X-Eye Seed": "Throw it: the target is Cross-Eyed",
+  "Decoy Seed": "Throw it: the target becomes a Decoy",
+  "Slumber Orb": "All foes in range fall Asleep",
+  "Totter Orb": "All foes in range are Confused",
+  "Petrify Orb": "All foes in range are Petrified",
+  "Foe-Hold Orb": "All foes in range are Immobilized",
+  "Foe-Fear Orb": "All foes in range are Terrified",
+  "Foe-Seal Orb": "All foes in range have their moves Sealed",
+  "Silence Orb": "All foes in range can't use moves (Sealed)",
+  "Slow Orb": "All foes in range are Slowed",
+  "Shocker Orb": "All foes in range are Cowering",
+  "Health Orb": "Everyone in the blast has all status conditions healed",
+  "Stick": "Thrown in a straight line: 1 damage",
+  "Geo Pebble": "Accurate small stone thrown in a straight line: 1 fixed damage",
+  "Gravelerock": "Heavier stone that arcs over others: 2 fixed damage",
+  "Iron Thorn": "Ranged physical projectile: 2 fixed damage",
+  "Dull Iron Thorn": "A blunt Iron Thorn: 1 fixed damage",
+  "Silver Spike": "Scarcer, sharper projectile: 3 fixed damage",
+  "Golden Spike": "Premium projectile: 4 fixed damage, or sell it",
+  "Cacnea Spike": "A barbed spike: 2 fixed damage, roll 1 chance die to Poison",
+  "Corsola Twig": "Coastal projectile: 2 fixed damage; can pierce through one foe",
+  "Rare Fossil": "Heavy and valuable: 3 fixed damage, or sell it",
+  "Escape Orb": "Escape back to the Guild. Depending on the mission, this can fail it",
+  "Max Elixir": "restores the moves' PP",
+  "Leppa Berry": "Restores 1 spent Will point (in the games it restores a move's PP)",
+  "Encourage Seed": "For the rest of the scene all your moves gain High Critical",
+  "All-Hit Orb": "All your teammates never miss with their moves for a scene",
+  "Warp Seed": "Warps the eater to a random spot on the floor",
+  "Pure Seed": "Warps the eater straight to the stairs",
+  "Luminous Orb": "Reveals the paths on the current floor, but not traps, treasure or hostile Pokémon" };
+// what each item does, from the campaign site's item list. to: who it works on (self = the mini that eats it,
+// ally / foe = one picked mini, foes / allies = everyone of that side the user can see). Items not listed are logged for the GM.
+const THROWN = { Stick: 1, 'Geo Pebble': 1, Gravelerock: 2, 'Iron Thorn': 2, 'Dull Iron Thorn': 1, 'Silver Spike': 3, 'Golden Spike': 4, 'Cacnea Spike': 2, 'Corsola Twig': 2, 'Rare Fossil': 3 };
+const ITEM_FX = {
+  'Oran Berry': { to: 'self', heal: 1 }, 'Sitrus Berry': { to: 'self', heal: 3 },
+  'Figy Berry': { to: 'self', heal: 2, gm: 'if the flavour is disliked it also becomes Confused' }, 'Wiki Berry': { to: 'self', heal: 2, gm: 'if the flavour is disliked it also becomes Confused' },
+  'Mago Berry': { to: 'self', heal: 2, gm: 'if the flavour is disliked it also becomes Confused' }, 'Aguav Berry': { to: 'self', heal: 2, gm: 'if the flavour is disliked it also becomes Confused' },
+  'Iapapa Berry': { to: 'self', heal: 2, gm: 'if the flavour is disliked it also becomes Confused' },
+  'Cheri Berry': { to: 'self', cure: ['Paralysis'] }, 'Chesto Berry': { to: 'self', cure: ['Sleep'] }, 'Pecha Berry': { to: 'self', cure: ['Poison', 'Badly Poisoned'] },
+  'Rawst Berry': { to: 'self', cure: ['Burn'] }, 'Aspear Berry': { to: 'self', cure: ['Frozen'] }, 'Persim Berry': { to: 'self', cure: ['Confused'] },
+  'Lum Berry': { to: 'self', cure: 'all' }, 'Heal Seed': { to: 'self', cure: 'all' }, 'Eyedrop Seed': { to: 'self', cure: ['Blinker'], gm: 'reveal every trap and hidden item to them' },
+  'Tiny Reviver Seed': { to: 'ally', revive: 1 }, 'Reviver Seed': { to: 'ally', revive: 'full' },
+  'Quick Seed': { to: 'self', add: 'Sped Up' }, 'Vanish Seed': { to: 'self', add: 'Invisible' },
+  'Blast Seed': { to: 'foe', dmg: 1 },
+  'Sleep Seed': { to: 'foe', toss: 'Sleep' }, 'Stun Seed': { to: 'foe', toss: 'Paralysis' }, 'Totter Seed': { to: 'foe', toss: 'Confused' },
+  'X-Eye Seed': { to: 'foe', add: 'Cross-Eyed' }, 'Decoy Seed': { to: 'foe', add: 'Decoy' },
+  'Slumber Orb': { to: 'foes', add: 'Sleep' }, 'Totter Orb': { to: 'foes', add: 'Confused' }, 'Petrify Orb': { to: 'foes', add: 'Petrified' },
+  'Foe-Hold Orb': { to: 'foes', add: 'Immobilized' }, 'Foe-Fear Orb': { to: 'foes', add: 'Terrified' }, 'Foe-Seal Orb': { to: 'foes', add: 'Sealed' },
+  'Silence Orb': { to: 'foes', add: 'Sealed' }, 'Slow Orb': { to: 'foes', add: 'Slowed' }, 'Shocker Orb': { to: 'foes', add: 'Cowering' },
+  'Health Orb': { to: 'allies', cure: 'all' },
+  ...Object.fromEntries(Object.entries(THROWN).map(([k, d]) => [k, { to: 'foe', thrown: d, ...(k === 'Cacnea Spike' ? { chance: 'Poison' } : {}) }])),
+};
+const FEEL = { Sleep: 'asleep', Paralysis: 'paralysed', Confused: 'confused', Petrified: 'petrified', Immobilized: 'held in place', Terrified: 'terrified',
+  Sealed: 'sealed (no moves)', Slowed: 'slowed', Cowering: 'cowering', 'Sped Up': 'sped up', Invisible: 'invisible', 'Cross-Eyed': 'cross-eyed', Decoy: 'a decoy' };
+const feel = x => FEEL[x] || x;
+const itemTarget = name => ITEM_FX[name]?.to || 'self';
+const foeOf = (a, b) => (sideOf(a) === 'enemy') !== (sideOf(b) === 'enemy') && sideOf(b) !== 'npc';
+// host: use an item. Returns false (and nothing is used up) when it can't work like that.
+function useItem(f, name, tid, from) {
+  const fx = ITEM_FX[name], to = fx?.to || 'self', tg = tid ? state.figures[tid] : null;
+  const an = /^[aeiou]/i.test(name) ? 'an' : 'a';
+  if (!fx) { addLog({ kind: 'sys', text: `${f.name} uses ${an} ${name}!${ITEMS[name] ? ` (${ITEMS[name]})` : ''}` }); return true; }
+  if (fainted(f) && !(fx.revive && tg?.id === f.id)) { note(from, `${f.name} has fainted and can't use items.`); return false; }
+  if (to === 'foe' || to === 'ally') {
+    if (!tg) { note(from, `Pick who the ${name} is for.`); return false; }
+    if (to === 'foe' && !foeOf(f, tg)) { note(from, `The ${name} has to go at a foe.`); return false; }
+    if (to === 'ally' && foeOf(f, tg)) { note(from, `The ${name} is for an ally.`); return false; }
+    if (tg.id !== f.id && !lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z)) { note(from, `${f.name} can't see ${tg.name}.`); return false; }
+    if (fx.revive && !fainted(tg)) { note(from, `${tg.name} hasn't fainted.`); return false; }
+  }
+  const setSt = (x, st) => { x.st = { ...(x.st || {}), ...st }; pushFig(x); };
+  const heal = (x, n) => { const st = x.st || {}; if (st.hpMax) setSt(x, { hp: Math.min(st.hpMax, (st.hp ?? st.hpMax) + n) }); };
+  const cure = (x, list) => { const sts = x.st?.status || [], left = list === 'all' ? [] : sts.filter(v => !list.includes(v)); if (left.length !== sts.length) setSt(x, { status: left }); return sts.length - left.length; };
+  const give = x => { const sts = x.st?.status || []; if (!sts.includes(fx.add)) setSt(x, { status: [...sts, fx.add] }); };
+  const hurt = (x, n) => {
+    const fxm = { t: 'fx', kind: 'Physical', type: 'Normal', from: f.id, to: x.id, text: `-${n}` }; sendAll(fxm); playFx(fxm);
+    if (x.st?.hp != null) { const hp = Math.max(0, x.st.hp - n); setSt(x, { hp }); if (!hp) addLog({ kind: 'sys', text: `${x.name} faints!` }); }
+  };
+  const seen = side => Object.values(state.figures).filter(x => x.id !== f.id && figVisible(x) && !fainted(x) && (side === 'foe' ? foeOf(f, x) : !foeOf(f, x) && sideOf(x) !== 'npc')
+    && lineOfSight(worldFor(f), f.x, f.z, x.x, x.z));
+  const who = to === 'self' ? f : tg, head = `${f.name} uses ${an} ${name}`;
+  if (fx.heal) { const hp0 = f.st?.hp; heal(f, fx.heal); addLog({ kind: 'sys', text: `${head}: ${f.st?.hpMax ? `HP ${hp0 ?? f.st.hpMax} -> ${f.st.hp}` : `heals ${fx.heal}`}.` }); }
+  else if (fx.cure && to !== 'allies') { const n = cure(f, fx.cure); addLog({ kind: 'sys', text: `${head}: ${n ? 'cured!' : 'nothing to cure.'}` }); }
+  else if (fx.revive) { setSt(tg, { hp: fx.revive === 'full' ? tg.st.hpMax : 1, ...(fx.revive === 'full' ? { status: [] } : {}) }); addLog({ kind: 'sys', text: `${head} on ${tg.name}: ${tg.name} gets back up with ${tg.st.hp} HP!` }); }
+  else if (fx.add && to === 'self') { give(f); addLog({ kind: 'sys', text: `${head}: ${f.name} is ${feel(fx.add)}!` }); }
+  else if (fx.dmg) { addLog({ kind: 'sys', text: `${head}: ${tg.name} takes ${fx.dmg} damage.` }); hurt(tg, fx.dmg); }
+  else if (fx.add && to === 'foe') { give(tg); addLog({ kind: 'sys', text: `${head} on ${tg.name}: ${tg.name} is ${feel(fx.add)}!` }); }
+  else if (to === 'foes' || to === 'allies') {
+    const xs = seen(to === 'foes' ? 'foe' : 'ally');
+    if (to === 'allies') xs.push(f);
+    for (const x of xs) if (fx.add) give(x); else cure(x, fx.cure);
+    addLog({ kind: 'sys', text: `${head}! ${xs.length ? `${xs.map(x => x.name).join(', ')} ${fx.add ? `${xs.length === 1 ? 'is' : 'are'} ${feel(fx.add)}` : 'cured'}.` : 'Nobody in sight.'}` });
+  } else if (fx.toss || fx.thrown) {
+    // throwing: an accuracy roll, 1 success hits (seeds: Dexterity + Brawl, thrown items: Dexterity + Athletic)
+    const roll = fx.toss ? ['Dexterity', 'Brawl'] : ['Dexterity', 'Athletic'], n = poolOf(f, { roll }), pain = painOf(f);
+    const at = { x: (f.x + tg.x) / 2, z: (f.z + tg.z) / 2 }, dir = { x: Math.sign(tg.x - f.x) * 0.7, z: Math.sign(tg.z - f.z) * 0.7 || -1 };
+    rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
+      const hits = Math.max(0, parts.filter(v => v >= 4).length - pain);
+      setTimeout(() => {
+        if (!hits) { const m = { t: 'fx', kind: 'Physical', miss: true, type: 'Normal', from: f.id, to: tg.id }; sendAll(m); playFx(m); return; }
+        if (fx.toss) give(tg); else hurt(tg, fx.thrown);
+        if (fx.chance) rollPhysics({ sides: 6, n: 1, chance: true, at, dir }, from, (t2, p2) => {
+          if (p2.includes(6) && !(tg.st?.status || []).includes(fx.chance)) setSt(tg, { status: [...(tg.st?.status || []), fx.chance] });
+          return `${name} chance die (a 6 triggers it): ${p2.join(', ')} - ${p2.includes(6) ? `${tg.name} gets ${fx.chance}!` : 'no effect'}`;
+        });
+      }, 50);
+      return `${head} on ${tg.name}: ${roll.join(' + ')} ${n} ${n === 1 ? 'die' : 'dice'} - ${hits} success${hits === 1 ? '' : 'es'}${pain ? ` (pain: -${pain})` : ''}, ` +
+        (hits ? (fx.toss ? `${tg.name} is ${feel(fx.toss)}!` : `${fx.thrown} damage!`) : 'miss.');
+    });
+  }
+  if (fx.gm) addLog({ kind: 'sys', text: `${name}: ${fx.gm}.`, to: state.gm });
+  return true;
+}
 function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
 function renderBag() {
   const el = $('bagList'); if (!el) return;
@@ -1553,7 +1708,7 @@ function renderBag() {
     const t = document.createElement('span'); t.textContent = `${name} ×${n}`; t.title = ITEMS[name] || '';
     const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
     use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it` : 'Pick your mini first';
-    use.onclick = () => { const f = actMini(); if (f) act({ t: 'bagUse', id: f.id, name }); };
+    use.onclick = () => useFrom(name, { t: 'bagUse', name });
     const out = document.createElement('button'); out.className = 'fit'; out.textContent = '−'; out.title = 'Take one out (dropped or given away)';
     out.disabled = !!preview;
     out.onclick = () => act({ t: 'bagAdd', name, n: -1 });
@@ -1569,13 +1724,23 @@ function renderBag() {
       if (!it.key) {
         const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
         use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it (take it off on the site too)` : 'Pick your mini first';
-        use.onclick = () => { const f = actMini(); if (f) act({ t: 'siteUse', id: f.id, item: it.id }); };
+        use.onclick = () => useFrom(it.name, { t: 'siteUse', item: it.id });
         d.append(use);
       }
       el.appendChild(d);
     }
   }
   renderActBar();
+}
+// using an item: one that goes at a foe or an ally waits for a tap on that mini
+let itemFor = null;
+function useFrom(name, msg) {
+  const f = actMini(); if (!f) return;
+  const to = itemTarget(name);
+  if (to !== 'ally' && to !== 'foe') { act({ ...msg, id: f.id }); return; }
+  select(f.id); itemFor = { ...msg, id: f.id };
+  $('bagPanel').style.display = 'none';
+  status(`${touchy ? 'Tap' : 'Click'} the ${to === 'foe' ? 'foe' : 'ally'} for the ${name} (Esc to cancel)`);
 }
 // the mini the bottom bar acts for: your picked mini, else your first one
 function actMini() {
@@ -3568,6 +3733,13 @@ function onDown(e) {
     if (p && !preview) act({ t: 'ping', x: p.x, z: p.z });
     return;
   }
+  if (itemFor) {                                // picking who an item goes to
+    const to = figAt(e), m = itemFor;
+    itemFor = null; status('');
+    e.stopPropagation();
+    if (to) act({ ...m, target: to });
+    return;
+  }
   if (attackFor) {                              // picking who the selected mini attacks
     const to = figAt(e), id = attackFor;
     attackFor = null; status('');
@@ -4144,7 +4316,7 @@ function wirePanel() {
   };
   $('selDetach').onclick = () => selectedId && act({ t: 'attach', id: selectedId, to: null });
   addEventListener('keydown', e => {
-    if (e.key === 'Escape' && (attachFor || attackFor)) { attachFor = attackFor = null; status(''); }
+    if (e.key === 'Escape' && (attachFor || attackFor || itemFor)) { attachFor = attackFor = itemFor = null; status(''); }
     if (e.key === 'Escape' && (areaDraft || pingArm)) { pingArm = false; endAreaDraft(); }
     else if (e.key === 'Escape' && selectedId && !attachFor && !attackFor && document.activeElement?.tagName !== 'INPUT') select(null);
   });
