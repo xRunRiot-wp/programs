@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=66';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=66';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=67';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=67';
 
-const VERSION = 66;                              // raised by bump.py on every publish
+const VERSION = 67;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3241,7 +3241,8 @@ function loadIndex() {
     return { moves, species };
   }).catch(() => { indexP = null; return { moves: [], species: [] }; });
 }
-const loadMoves = () => loadIndex().then(x => x.moves);
+let movesCache = [];
+const loadMoves = () => loadIndex().then(x => (movesCache = x.moves));
 // "Attributes (start/max): Str 3/7, Dex 1/2, ..." + "Grass/Ice type. Base HP 5." + "Starter: Leer, Powder Snow | Beginner: ..."
 function parseSpecies(e) {
   const at = {}, names = { Str: 'Strength', Dex: 'Dexterity', Vit: 'Vitality', Spe: 'Special', Ins: 'Insight' };
@@ -3253,7 +3254,7 @@ function parseSpecies(e) {
   return { name: e.name, attr: at, types, hp, moves };
 }
 async function openAttack(id, target) {
-  atk = { id, target, move: null };
+  atk = { id, target, move: null, info: '' };
   $('atkPanel').style.display = 'block';
   $('atkMove').value = '';
   renderAttack();
@@ -3267,7 +3268,13 @@ async function openAttack(id, target) {
     const b = document.createElement('button'); b.className = 'fit chip'; b.textContent = m ? m.name : `${n} (not found)`;
     b.disabled = !m;
     if (m) { b.style.borderColor = TYPES[m.type] || ''; b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
-    own.appendChild(b);
+    // the "i" next to a move opens its details; they stay folded away otherwise
+    const w = document.createElement('span'), inf = document.createElement('button');
+    w.className = 'mvw'; inf.className = 'fit inf'; inf.textContent = 'i'; inf.title = 'Show what this move does';
+    inf.disabled = !m;
+    if (m) { inf.style.borderColor = TYPES[m.type] || ''; inf.onclick = () => { atk.info = atk.info === m.name ? '' : m.name; renderAttack(); }; }
+    w.append(b, inf);
+    own.appendChild(w);
   }
   if (!list.length) $('atkInfo').textContent = 'Could not load the moves from the Voice of the Forest site. Check the connection and try again.';
   else if (recent[0]) { $('atkMove').value = list.find(x => x.name.toLowerCase() === recent[0].toLowerCase())?.name || ''; pickMove(); }
@@ -3276,7 +3283,7 @@ async function pickMove() {
   const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
   if (!atk || (atk.move?.name === m?.name && m)) return;
   atk.move = m || null;
-  for (const b of $('atkOwn').children) b.classList.toggle('on', b.textContent === m?.name);
+  for (const w of $('atkOwn').children) w.firstChild.classList.toggle('on', w.firstChild.textContent === m?.name);
   renderAttack();
 }
 function renderAttack() {
@@ -3288,9 +3295,13 @@ function renderAttack() {
   const m = atk.move, A = state.attack, rolledHit = !!(A && A.id === f.id && A.target === tg.id);
   $('atkTitle').textContent = `${f.name} attacks ${tg.name}`;
   $('atkInfo').innerHTML = '';
-  if (m) {
-    const c = document.createElement('span'); c.className = 'typechip'; c.textContent = m.type; c.style.background = TYPES[m.type] || '#888';
-    $('atkInfo').append(c, ` ${m.cat}${m.cat !== 'Status' ? ` · Power ${m.power}` : ''}${m.effect && m.effect !== '-' ? ' · ' + m.effect : ''}`);
+  for (const w of $('atkOwn').children) w.lastChild.classList.toggle('on', !!atk.info && w.firstChild.textContent === atk.info);
+  // details only for the move whose "i" is open, or a move typed into the search (it has no "i")
+  const im = atk.info ? movesCache.find(x => x.name === atk.info) : m && ![...$('atkOwn').children].some(w => w.firstChild.textContent === m.name) ? m : null;
+  if (im) {
+    const c = document.createElement('span'); c.className = 'typechip'; c.textContent = im.type; c.style.background = TYPES[im.type] || '#888';
+    $('atkInfo').append(...(atk.info ? [Object.assign(document.createElement('b'), { textContent: im.name + ' ' })] : []), c,
+      ` ${im.cat}${im.cat !== 'Status' ? ` · Power ${im.power}` : ''}${im.effect && im.effect !== '-' ? ' · ' + im.effect : ''}`);
   }
   const a = f.st?.attr || {}, rows = $('atkRows');
   const hideDef = !gmView() && sideOf(tg) === 'enemy';   // players never see an enemy's Vitality / Insight (Adam)

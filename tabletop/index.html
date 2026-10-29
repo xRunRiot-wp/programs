@@ -232,6 +232,16 @@
   #atkPanel, #warpBox { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(460px, calc(100% - 32px));
     max-height: 70%; overflow-y: auto; filter: drop-shadow(0 6px 20px #000c); margin: 0; }
   #warpBox { top: 30%; border-color: #5fe0ff; }
+  /* the moves window sits at the bottom, just above the player's button bar (Adam) */
+  #atkPanel { top: auto; bottom: 50px; max-height: calc(100% - 200px); }
+  body:not(.gm) #atkPanel, body.previewing #atkPanel { bottom: 122px; }
+  #atkOwn { justify-content: flex-start; }
+  #atkOwn .mvw { display: inline-flex; flex: none; }
+  #atkOwn .mvw button { flex: none; }
+  #atkOwn .mvw .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  #atkOwn .mvw .inf { font-size: 12px; font-weight: 700; padding: 4px 8px; border-width: 2px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  #atkOwn .mvw .inf.on { background: #6b5320; color: #fff; }
+  #atkInfo:empty { display: none; }
   @media (min-width: 701px) { #atkPanel, #warpBox { left: calc(50% - 150px); } }
   #atkRows { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 6px; }
   #atkRows label { font-size: 11px; }
@@ -632,6 +642,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=66"></script>
+<script type="module" src="tabletop.js?v=67"></script>
 </body>
 </html>
