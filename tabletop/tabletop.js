@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=71';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=71';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=72';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=72';
 
-const VERSION = 71;                              // raised by bump.py on every publish
+const VERSION = 72;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3437,6 +3437,35 @@ function parseSpecies(e) {
   const moves = (e.learn || '').split('|').flatMap(r => r.replace(/^[^:]*:/, '').split(',')).map(x => x.trim()).filter(Boolean);
   return { name: e.name, attr: at, types, hp, moves };
 }
+// can this mini hit that one: 'both' = next to it (contact and ranged moves), 'ranged' = only ranged moves (in sight), 'none'
+function reachOf(f, tg) {
+  if (!f || !tg) return 'none';
+  if (nextToFig(f, tg)) return 'both';
+  return lineOfSight(worldFor(f), f.x, f.z, tg.x, tg.z) ? 'ranged' : 'none';
+}
+const moveFits = (mv, r) => r === 'both' || (r === 'ranged' && isRanged(mv));
+// while picking who to attack: a red ring under foes any move can hit, orange under foes only ranged moves reach
+let aimRings = [], aimKey = '';
+function updateAimRings() {
+  const f = attackFor && state.figures[attackFor], key = f ? `${f.id}|${figsVersion}` : '';
+  if (key !== aimKey) {
+    aimKey = key;
+    for (const m of aimRings) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+    aimRings = [];
+    if (f) for (const x of Object.values(state.figures)) {
+      const g = figMeshes.get(x.id);
+      if (x.id === f.id || !g?.visible || !foeOf(f, x) || fainted(x)) continue;
+      const r = reachOf(f, x);
+      if (r === 'none') continue;
+      const c = fp(x), rad = 0.42 * Math.max(c.w, c.d) + 0.12;
+      const m = new THREE.Mesh(new THREE.RingGeometry(rad, rad + 0.1, 48), new THREE.MeshBasicMaterial({ color: r === 'both' ? '#ff4a3d' : '#ffa31a', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthTest: false }));
+      m.rotation.x = -Math.PI / 2; m.renderOrder = 3; m.userData.fig = x.id;
+      scene.add(m); aimRings.push(m);
+    }
+  }
+  const pulse = 0.55 + Math.sin(performance.now() / 180) * 0.35;
+  for (const m of aimRings) { const g = figMeshes.get(m.userData.fig); if (g) m.position.set(g.position.x, g.position.y + 0.04, g.position.z); m.material.opacity = pulse; }
+}
 async function openAttack(id, target) {
   atk = { id, target, move: null, info: '' };
   $('atkPanel').style.display = 'block';
@@ -3447,10 +3476,12 @@ async function openAttack(id, target) {
   const recent = [...new Set([...(f?.st?.moves || []), ...(f?.st?.learn || [])])].slice(0, 4);   // a 2x2 of moves; others via the search
   for (const m of list) { const o = document.createElement('option'); o.value = m.name; dl.appendChild(o); }
   const own = $('atkOwn'); own.innerHTML = '';
+  const r = reachOf(f, state.figures[target]);
   for (const n of recent) {
     const m = list.find(x => x.name.toLowerCase() === n.toLowerCase());
     const b = document.createElement('button'); b.className = 'fit chip'; b.textContent = m ? m.name : `${n} (not found)`;
-    b.disabled = !m;
+    b.disabled = !m || !moveFits(m, r);
+    if (m && !moveFits(m, r)) b.title = `Contact move: ${f.name} has to stand next to the target`;
     if (m) { b.style.borderColor = TYPES[m.type] || ''; b.onclick = () => { $('atkMove').value = m.name; pickMove(); }; }
     // the "i" next to a move opens its details; they stay folded away otherwise
     const w = document.createElement('span'), inf = document.createElement('button');
@@ -3461,7 +3492,11 @@ async function openAttack(id, target) {
     own.appendChild(w);
   }
   if (!list.length) $('atkInfo').textContent = 'Could not load the moves from the Voice of the Forest site. Check the connection and try again.';
-  else if (recent[0]) { $('atkMove').value = list.find(x => x.name.toLowerCase() === recent[0].toLowerCase())?.name || ''; pickMove(); }
+  else {
+    const first = recent.map(n => list.find(x => x.name.toLowerCase() === n.toLowerCase())).find(m => m && moveFits(m, r));
+    if (first) { $('atkMove').value = first.name; pickMove(); }
+    else if (recent.length) { status('Only ranged moves reach from here: move next to the target to use a contact move.'); setTimeout(() => status(''), 4000); }
+  }
 }
 async function pickMove() {
   const list = await loadMoves(), m = list.find(x => x.name.toLowerCase() === $('atkMove').value.trim().toLowerCase());
@@ -3641,6 +3676,7 @@ function tick(now) {
   updatePrompts();
   if (tileGroup) { const b = Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = o.userData.bob + b; }
   updateOverlays();
+  updateAimRings();
   // a bobbing marker over whoever's turn it is
   const shownCombat = isHost && !gmView() ? combatView() : state.combat;
   const cur = shownCombat && figMeshes.get(shownCombat.order[shownCombat.turn]?.id);
@@ -3744,7 +3780,9 @@ function onDown(e) {
     const to = figAt(e), id = attackFor;
     attackFor = null; status('');
     e.stopPropagation();
-    if (to && to !== id) openAttack(id, to);
+    const r = to && to !== id && reachOf(state.figures[id], state.figures[to]);
+    if (r === 'none') { const t = state.figures[to]; status(`${t.name} is out of reach: no line of sight.`); setTimeout(() => status(''), 3000); }
+    else if (r) openAttack(id, to);
     select(id);
     return;
   }
@@ -4342,13 +4380,13 @@ function wirePanel() {
   $('selAttack').onclick = () => {
     if (!selectedId) return;
     attackFor = selectedId;
-    status(`${touchy ? 'Tap' : 'Click'} the mini ${state.figures[selectedId].name} attacks (Esc to cancel)`);
+    status(`${touchy ? 'Tap' : 'Click'} a foe: red ring = any move, orange ring = ranged moves only, no ring = out of reach (Esc to cancel)`);
   };
   $('atkMove').oninput = () => pickMove();
   $('actAttack').onclick = () => {
     const f = actMini(); if (!f) return;
     select(f.id); attackFor = f.id;
-    status(`${touchy ? 'Tap' : 'Click'} the mini ${f.name} attacks (Esc to cancel)`);
+    status(`${touchy ? 'Tap' : 'Click'} a foe: red ring = any move, orange ring = ranged moves only, no ring = out of reach (Esc to cancel)`);
   };
   $('actDash').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatDash' } : { t: 'partyDash', id: f.id }); };
   $('actEnd').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatNext' } : { t: 'partyDone', id: f.id }); };
