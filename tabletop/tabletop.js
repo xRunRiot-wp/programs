@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=83';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=83';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=84';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=84';
 
-const VERSION = 83;                              // raised by bump.py on every publish
+const VERSION = 84;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4687,9 +4687,7 @@ function wirePanel() {
   $('selFight').onclick = () => selectedId && act({ t: 'combatJoin', id: selectedId });
   $('selDel').onclick = () => { if (selectedId && confirm('Delete this mini?')) act({ t: 'del', id: selectedId }); };
   // a real player window next to the GM's: moves, End turn and Dash all work there
-  // a normal browser tab, not a pop-up window: Adam's pop-up kept dropping behind other windows on his second monitor;
-  // the tab can be dragged out into its own window
-  $('previewBtn').onclick = () => window.open(location.origin + location.pathname + '?room=' + roomCode + '&test=1', 'tabletop-test-player');
+  $('previewBtn').onclick = () => window.open(location.origin + location.pathname + '?room=' + roomCode + '&test=1', 'tabletop-test-player', 'width=1100,height=750');
   $('peekBtn').onclick = () => setPreview(true);
   $('previewBack').onclick = () => setPreview(false);
   $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
