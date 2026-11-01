@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=93';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=93';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=94';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=94';
 
-const VERSION = 93;                              // raised by bump.py on every publish
+const VERSION = 94;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4572,6 +4572,39 @@ new MutationObserver(() => { $('bagShade').style.display = $('bagPanel').style.d
   .observe($('bagPanel'), { attributes: true, attributeFilter: ['style'] });
 $('bagShade').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); $('bagPanel').style.display = 'none'; });
 $('bagShade').addEventListener('contextmenu', e => e.preventDefault());
+// the Controls window: every control, for a mouse or a touch screen, plus the keys
+function renderControls() {
+  const gm = gmView(), T = touchy;
+  const sec = (title, rows) => `<h4>${title}</h4>` + rows.filter(Boolean).map(([k, v]) => `<div class="cr"><b>${k}</b><span>${v}</span></div>`).join('');
+  $('ctrlList').innerHTML =
+    sec('Board', T ? [
+      ['Drag a mini', 'Move it'], ['Hold a mini', 'Turn it'], ['Tap a mini', 'Pick it'], ['Tap an enemy', 'Line of sight to it'],
+      ['One finger', 'Pan the camera'], ['Two fingers', 'Zoom and rotate'],
+    ] : [
+      ['Drag a mini', 'Move it'], ['Click a mini', 'Pick it'], ['Right-click a mini', 'Turn it'], ['Right-drag', 'Rotate the camera'],
+      ['Drag empty space', 'Pan the camera'], ['Scroll', 'Zoom'], ['Alt + click', 'Ping a spot for everyone'],
+    ]) +
+    sec('Button bar', [
+      ['<kbd>A</kbd> Attack', 'Pick a foe: red ring = any move, orange = ranged only'], ['<kbd>D</kbd> Dash', 'Spend your action on extra movement'],
+      ['<kbd>Q</kbd> Actions', 'Evade, Clash, Search, Sneak and the rest'], ['<kbd>B</kbd> Bag', 'Your item cards: click one to play it'],
+      ['<kbd>E</kbd> End turn', 'Done for this turn'],
+    ]) +
+    sec('Other keys', [
+      ['<kbd>Esc</kbd>', 'Cancel picking a target, put a mini down, hide the ending screen'],
+      ['<kbd>Enter</kbd>', 'Send a chat message'],
+      gm && ['<kbd>Delete</kbd>', 'Delete the picked mini'],
+    ]) +
+    (gm ? sec('DM', [
+      ['🎮 (bottom left)', 'Turn the players\' button bar on for yourself'], ['Log title', 'Drag the log; – minimizes it'], ['⠿ on the bar', 'Drag the bar'],
+      ['Double-click a title/grip', 'Snap it back to its corner'], ['Search settings', 'Find any setting on any tab'],
+    ]) : sec('Windows', [
+      ['☰ (top right)', 'Hide or show the side panel'], ['⚔ (bottom right)', 'Combat log while the side panel is hidden'],
+    ]));
+}
+const showControls = on => { $('ctrlPanel').style.display = $('ctrlShade').style.display = on ? 'block' : 'none'; if (on) renderControls(); };
+$('ctrlBtn').onclick = () => showControls($('ctrlPanel').style.display === 'none');
+$('ctrlX').onclick = $('ctrlShade').onclick = () => showControls(false);
+addEventListener('keydown', e => { if (e.key === 'Escape' && $('ctrlPanel').style.display !== 'none') showControls(false); });
 // drag a floating window by its handle; where it was left is remembered in this browser
 function makeDraggable(el, handle, key, on = () => true) {
   const put = (x, y) => {

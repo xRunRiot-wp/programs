@@ -255,6 +255,16 @@
   #hud .hpb { height: 9px; background: #0b1020; border: 1px solid #6f82d0; border-radius: 5px; margin-top: 4px; overflow: hidden; }
   #hud .hpb i { display: block; height: 100%; background: #3fbf4f; transition: width .3s; }
   /* turn order at the top right, same window as the HUD */
+  /* Controls (Adam): a button at the top right for everyone, opening a list of every control */
+  #ctrlBtn { position: absolute; top: 10px; right: 310px; z-index: 3; font-size: 14px; line-height: 1; padding: 8px 11px; }
+  #ctrlShade { position: absolute; inset: 0; z-index: 9; background: #0006; }
+  #ctrlPanel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; width: min(520px, calc(100% - 32px)); max-height: 80%; overflow: auto; margin: 0; }
+  #ctrlX { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border-radius: 50%; font-weight: 700; }
+  #ctrlList h4 { margin: 10px 0 4px; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  #ctrlList .cr { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #ffffff14; font-size: 13px; }
+  #ctrlList .cr b { flex: none; min-width: 150px; color: #fff; }
+  #ctrlList kbd { display: inline-block; min-width: 18px; padding: 1px 6px; border: 1px solid #fff6; border-bottom-width: 2px; border-radius: 4px; background: #0006; font: 700 12px var(--pix); text-align: center; }
+  body.gm:not(.previewing) #turnBox { right: 440px; }
   #turnBox { position: absolute; right: 310px; top: 10px; z-index: 4; padding: 6px 10px 8px; width: 215px; pointer-events: none; display: none; }
   #turnBox .tt { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 3px; }
   #turnBox .tt { pointer-events: auto; cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -396,11 +406,13 @@
   /* players on a computer: the same button hides the side panel and the board fills the screen (Adam) */
   @media (min-width: 701px) {
     body:not(.gm) #toggleSide, body.previewing #toggleSide { display: block; right: 310px; }
-    body:not(.gm) #turnBox, body.previewing #turnBox { right: 362px; }
+    body:not(.gm) #turnBox, body.previewing #turnBox { right: 492px; }
+    body:not(.gm) #ctrlBtn, body.previewing #ctrlBtn { right: 362px; }
+    body.sideHidden:is(:not(.gm), .previewing) #ctrlBtn { right: 62px; }
     body.sideHidden:is(:not(.gm), .previewing) #side { display: none !important; }
     body.sideHidden:is(:not(.gm), .previewing) #view, body.sideHidden:is(:not(.gm), .previewing) #prompts { right: 0 !important; }
     body.sideHidden:is(:not(.gm), .previewing) #toggleSide { right: 10px; }
-    body.sideHidden:is(:not(.gm), .previewing) #turnBox { right: 62px; }
+    body.sideHidden:is(:not(.gm), .previewing) #turnBox { right: 192px; }
     body.sideHidden:is(:not(.gm), .previewing) :is(#actPanel, #bagPanel, #actBar, #floorTag, #status, #effPop, #atkPanel, #warpBox, #eventBox, #pauseBar) { left: 50% !important; }
     body.sideHidden:is(:not(.gm), .previewing) #actBar { width: max-content; }
     /* side panel hidden: a combat window bottom right with the log, toggled by the sword button (Adam) */
@@ -429,6 +441,7 @@
     #side { width: min(320px, 92vw); transform: translateX(100%); transition: transform .2s; z-index: 2; }
     #side.open { transform: none; }
     #toggleSide { display: block; }
+    #ctrlBtn { right: 56px !important; font-size: 20px; padding: 6px 9px; } #ctrlBtn span { display: none; }
   }
 </style>
 </head>
@@ -465,6 +478,13 @@
   <div id="prompts"></div>
   <div id="hint"></div>
   <button id="toggleSide" title="Show or hide the side panel">&#9776;</button>
+  <button id="ctrlBtn" title="Controls">⌨️ <span>Controls</span></button>
+  <div id="ctrlShade" style="display:none"></div>
+  <div id="ctrlPanel" class="evcard" style="display:none">
+    <button id="ctrlX" class="fit" title="Close">✕</button>
+    <div class="evt">⌨️ Controls</div>
+    <div id="ctrlList"></div>
+  </div>
   <button id="gmBarBtn" class="fit">🎮</button>
   <div id="combatBox"><div class="cbh">&#9876; Combat <button id="combatX" class="fit" title="Hide the combat window">&#10005;</button></div><div id="combatLog"></div></div>
   <button id="combatToggle" class="fit" title="Show or hide the combat window">&#9876;</button>
@@ -809,6 +829,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=93"></script>
+<script type="module" src="tabletop.js?v=94"></script>
 </body>
 </html>
