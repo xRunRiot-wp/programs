@@ -123,7 +123,11 @@
   /* the GM's panel is split into tabs: only the picked tab's sections show (players see everything) */
   #gmTabs { display: none; gap: 4px; flex-wrap: wrap; margin-top: 10px; }
   body.gm:not(.previewing) #gmTabs { display: flex; }
-  #gmTabs button { flex: 1 1 auto; padding: 6px 8px; font-size: 13px; }
+  #gmTabs button { flex: 1 1 auto; padding: 6px 4px; font-size: 12px; }
+  #side { overflow-x: hidden; }
+  /* the Floors tab's rows of number boxes fit the panel's width */
+  #floorSec .row > div { flex: 1 1 0; min-width: 0; }
+  #floorSec .row input, #floorSec .row select { width: 100%; min-width: 0; box-sizing: border-box; }
   #gmTabs button.on { background: var(--accent); color: #1a1408; border-color: var(--accent); font-weight: 700; }
   body.gm:not(.previewing) section[data-tab]:not(.tabOn) { display: none !important; }
   /* in the GM's Combat tab, players, dice and log sit on top (under the room box) */
@@ -131,6 +135,11 @@
   body.gm:not(.previewing) #side > section { flex-shrink: 0; }
   body.gm:not(.previewing) #side > section:first-child { order: -2; }
   body.gm:not(.previewing) #side > section.tblSec { order: -1; }
+  /* the GM's log is on every tab, stuck to the bottom of the side panel so it never scrolls away (Adam) */
+  body.gm:not(.previewing) #side > #logSec { order: 99; position: sticky; bottom: -16px; z-index: 2; background: var(--panel);
+    margin: auto -12px -16px; padding: 6px 12px 10px; border-top: 2px solid var(--accent); border-bottom: 0; box-shadow: 0 -6px 12px #0006; }
+  body.gm:not(.previewing) #side > #logSec h3 { margin: 0 0 4px; }
+  body.gm:not(.previewing) #logSec #log { height: 130px; }
   body.gm:not(.previewing) section.fold > .foldBody { display: block; }
   body.gm:not(.previewing) section.fold > h3 { cursor: default; }
   body.gm:not(.previewing) section.fold > h3::before { content: ''; }
@@ -468,7 +477,7 @@
         <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
       </div>
       <nav id="gmTabs" class="gm-only">
-        <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="boards">Boards</button>
+        <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="floors">Floors</button><button data-tab="boards">Boards</button>
       </nav>
     </section>
 
@@ -604,7 +613,7 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">Place <b style="color:#ffd23f">? Event</b> markers (Terrain &gt; Events). When an ally next to one clicks Interact, a big throw button pops up over the table (only you see it and the die); the event card with the rules and helper rolls then shows in the same spot.</div>
     </section>
 
-    <section class="gm-only" data-tab="combat">
+    <section id="floorSec" class="gm-only" data-tab="floors">
       <h3>Random floor</h3>
       <div class="row">
         <div><label>Dungeon name</label><input id="floorName" maxlength="30" placeholder="Mystery Dungeon"></div>
@@ -721,7 +730,7 @@
       <div style="color:var(--dim);font-size:12px;margin-top:4px">Areas clear by themselves at the next turn. Minis inside get a pulsing ring.</div>
     </section>
 
-    <section class="tblSec" data-tab="combat">
+    <section id="logSec" data-tab="minis combat terrain floors boards">
       <h3>Log</h3>
       <div id="log"></div>
       <div class="row" style="margin-top:6px">
@@ -740,6 +749,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=85"></script>
+<script type="module" src="tabletop.js?v=86"></script>
 </body>
 </html>
