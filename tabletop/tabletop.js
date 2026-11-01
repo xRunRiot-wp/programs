@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=88';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=88';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=89';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=89';
 
-const VERSION = 88;                              // raised by bump.py on every publish
+const VERSION = 89;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1889,38 +1889,55 @@ function renderEnding() {
   box.className = `show ${E.kind}`;
 }
 function pushBag() { renderBag(); sendAll({ t: 'bag', bag: state.bag, siteBag: state.siteBag || [] }); save(); }
+// the bag as a hand of playable cards (Adam): each card shows the item's kind, what it does, who it goes at;
+// clicking a card plays it (a card aimed at a foe or an ally then waits for a tap on that mini)
+const CARD_KIND = [
+  [/Berry$/, 'berry', '🍓', 'Berry'], [/Seed$/, 'seed', '🌰', 'Seed'], [/Orb$/, 'orb', '🔮', 'Orb'],
+  [/Thorn|Spike|Pebble|Gravelerock|Stick|Twig|Fossil|Rock$/, 'throw', '🗡️', 'Thrown'],
+  [/Apple|Gummi|Meat|Rocks|Food|Candy|Jerky|Honey|Banana|Chestnut/, 'food', '🍎', 'Food'],
+  [/^TM|Wand|Scarf|Band|Ribbon|Specs|Lens|Bow|Glasses/, 'gear', '✨', 'Gear'],
+];
+const cardKind = name => CARD_KIND.find(k => k[0].test(name)) || [null, 'misc', '🎒', 'Item'];
+const CARD_TO = { self: 'Yourself', ally: 'An ally', allies: 'You + allies', team: 'Whole team', foe: 'One foe', foes: 'Foes in range', area: 'The area', everyone: 'Everyone in range' };
+function itemCard(name, n, sub, onPlay, onOut, playable, tip) {
+  const [, kind, ico, label] = cardKind(name), tier = ITEM_TIER[name];
+  const c = document.createElement('div'); c.className = `icard k-${kind}` + (playable ? '' : ' off');
+  c.title = tip;
+  const top = document.createElement('div'); top.className = 'ictop';
+  top.append(Object.assign(document.createElement('span'), { textContent: label }), Object.assign(document.createElement('b'), { textContent: `×${n}` }));
+  const art = Object.assign(document.createElement('div'), { className: 'icart', textContent: ico });
+  const nm = Object.assign(document.createElement('div'), { className: 'icname', textContent: name });
+  const fx = Object.assign(document.createElement('div'), { className: 'icfx', textContent: ITEMS[name] || 'The GM decides what it does.' });
+  const foot = document.createElement('div'); foot.className = 'icfoot';
+  foot.append(Object.assign(document.createElement('span'), { textContent: sub || `🎯 ${CARD_TO[itemTarget(name)] || 'Yourself'}` }));
+  if (tier) foot.append(Object.assign(document.createElement('i'), { className: 't-' + tier.replace(' ', ''), textContent: tier }));
+  c.append(top, art, nm, fx, foot);
+  if (onOut) {
+    const out = Object.assign(document.createElement('button'), { className: 'fit icout', textContent: '−', title: 'Take one out (dropped or given away)' });
+    out.disabled = !!preview;
+    out.onclick = e => { e.stopPropagation(); onOut(); };
+    c.append(out);
+  }
+  if (playable) { c.tabIndex = 0; c.onclick = onPlay; c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(); } }; }
+  return c;
+}
 function renderBag() {
   const el = $('bagList'); if (!el) return;
   el.innerHTML = '';
   const items = Object.entries(state.bag || {}).sort((a, b) => a[0].localeCompare(b[0]));
   if (!items.length) { el.innerHTML = '<div style="color:var(--dim)">The bag is empty.</div>'; }
-  const me = actMini();
-  for (const [name, n] of items) {
-    const d = document.createElement('div'); d.className = 'bagRow';
-    const t = document.createElement('span'); t.textContent = `${name} ×${n}`; t.title = ITEMS[name] || '';
-    const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
-    use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it` : 'Pick your mini first';
-    use.onclick = () => useFrom(name, { t: 'bagUse', name });
-    const out = document.createElement('button'); out.className = 'fit'; out.textContent = '−'; out.title = 'Take one out (dropped or given away)';
-    out.disabled = !!preview;
-    out.onclick = () => act({ t: 'bagAdd', name, n: -1 });
-    d.append(t, use, out); el.appendChild(d);
-  }
+  const me = actMini(), can = !!me && !preview;
+  const hand = el.appendChild(Object.assign(document.createElement('div'), { className: 'ihand' }));
+  for (const [name, n] of items)
+    hand.append(itemCard(name, n, '', () => useFrom(name, { t: 'bagUse', name }), () => act({ t: 'bagAdd', name, n: -1 }), can,
+      me ? `Click to play: ${me.name} uses it` : 'Pick your mini first'));
   const site = state.siteBag || [];
   if (site.length) {
     const h = document.createElement('div'); h.className = 'bagHead'; h.textContent = 'From the site'; el.appendChild(h);
-    for (const it of site) {
-      const d = document.createElement('div'); d.className = 'bagRow';
-      const t = document.createElement('span'); t.textContent = `${it.name} ×${it.n} · ${it.owner}`; t.title = it.key ? 'Key item' : ITEMS[it.name] || '';
-      d.append(t);
-      if (!it.key) {
-        const use = document.createElement('button'); use.className = 'fit primary'; use.textContent = 'Use';
-        use.disabled = !me || !!preview; use.title = me ? `${me.name} uses it (take it off on the site too)` : 'Pick your mini first';
-        use.onclick = () => useFrom(it.name, { t: 'siteUse', item: it.id });
-        d.append(use);
-      }
-      el.appendChild(d);
-    }
+    const sh = el.appendChild(Object.assign(document.createElement('div'), { className: 'ihand' }));
+    for (const it of site)
+      sh.append(itemCard(it.name, it.n, it.key ? `🔑 Key item · ${it.owner}` : `👤 ${it.owner}`, () => useFrom(it.name, { t: 'siteUse', item: it.id }), null,
+        can && !it.key, it.key ? 'Key item' : me ? `Click to play: ${me.name} uses it (take it off on the site too)` : 'Pick your mini first'));
   }
   renderActBar();
 }

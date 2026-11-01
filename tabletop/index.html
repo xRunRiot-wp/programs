@@ -71,7 +71,28 @@
   #actList .actCard .ad { flex: none; font-weight: 700; font-size: 15px; background: #0006; border-radius: 8px; padding: 3px 7px; color: #ffd76a; }
   @media (max-width: 420px) { #actList .actGrid { grid-template-columns: 1fr; } }
   .actGroup { width: 100%; color: var(--accent); font-size: 12px; font-weight: 700; margin-top: 6px; text-transform: uppercase; }
-  #bagPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(400px, calc(100% - 32px)); max-height: 50vh; overflow: auto; }
+  #bagPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(600px, calc(100% - 32px)); max-height: 62vh; overflow: auto; }
+  /* item cards (Adam: playable cards) */
+  .ihand { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 6px; }
+  .icard { --kc: #5a6b8c; position: relative; display: flex; flex-direction: column; min-height: 196px; padding: 6px 8px 7px; border-radius: 12px; cursor: pointer;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 45%, #1a1d2e) 0%, #171a28 70%); border: 2px solid var(--kc);
+    box-shadow: 0 3px 0 #0008, inset 0 1px 0 #fff3; transition: transform .12s, box-shadow .12s; outline: none; }
+  .icard:hover, .icard:focus-visible { transform: translateY(-5px) rotate(-1deg); box-shadow: 0 9px 16px #000a, 0 0 0 2px #fff8, inset 0 1px 0 #fff3; }
+  .icard.off { cursor: default; filter: saturate(.55) brightness(.8); }
+  .icard.off:hover { transform: none; box-shadow: 0 3px 0 #0008; }
+  .k-berry { --kc: #3f9a4e; } .k-seed { --kc: #a0743c; } .k-orb { --kc: #8a4fd0; } .k-throw { --kc: #8d939e; } .k-food { --kc: #d0702c; } .k-gear { --kc: #d4ad3a; }
+  .ictop { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #fffc; }
+  .ictop b { background: #000a; color: #ffd76a; border-radius: 8px; padding: 0 6px; font-size: 12px; letter-spacing: 0; }
+  .icart { font-size: 34px; text-align: center; line-height: 1.25; margin: 2px 0; filter: drop-shadow(0 2px 2px #0009); }
+  .icname { font-weight: 700; font-size: 14px; text-align: center; color: #fff; line-height: 1.15; margin-bottom: 4px; }
+  .icfx { flex: 1; font-size: 11px; line-height: 1.3; color: #d8dcf0; background: #0005; border-radius: 6px; padding: 4px 6px; }
+  .icfoot { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin-top: 5px; font-size: 10.5px; color: #fffd; }
+  .icfoot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icfoot i { font-style: normal; font-weight: 700; border-radius: 6px; padding: 0 5px; background: #0007; flex: none; }
+  .t-Mundane { color: #bbb; } .t-Common { color: #e8e8e8; } .t-Uncommon { color: #6fe08a; } .t-Rare { color: #6fb6ff; } .t-VeryRare { color: #d38cff; }
+  .icout { position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; padding: 0; border-radius: 50%; font-weight: 700; line-height: 1; display: none; }
+  .icard:hover .icout, .icard:focus-within .icout { display: block; }
+  @media (hover: none) { .icout { display: block; } }
   @media (min-width: 701px) { #bagPanel { left: calc(50% - 150px); } }
   #actBar { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); gap: 8px; z-index: 4; background: #000a; padding: 8px; border-radius: 12px; }
   #actBar button { font-size: 16px; padding: 10px 14px; min-width: 88px; }
@@ -759,6 +780,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=88"></script>
+<script type="module" src="tabletop.js?v=89"></script>
 </body>
 </html>
