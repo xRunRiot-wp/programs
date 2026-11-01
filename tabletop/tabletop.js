@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=86';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=86';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=87';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=87';
 
-const VERSION = 86;                              // raised by bump.py on every publish
+const VERSION = 87;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -2195,16 +2195,32 @@ function checkLurkers() {
   return true;
 }
 // host: an undiscovered enemy's turn: it walks to a random square it can reach
-function wander(x) {
-  if (fainted(x)) return;
+// an undiscovered enemy roams: it picks a random direction (of 8) and walks as far that way as its move allows;
+// a blocked direction is swapped for another (Adam: they should roam in a random direction)
+const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+function wander(x, quiet) {
+  if (fainted(x)) return false;
   const { w, d } = fp(x), ox = x.x, oz = x.z;
-  const spots = [...reachable(worldFor(x), x.x, x.z, w, d, moveBudget(x), state.rules.diag).keys()].filter(k => k !== `${x.x},${x.z}`);
-  if (!spots.length) return;
-  const [nx, nz] = spots[Math.floor(Math.random() * spots.length)].split(',').map(Number);
-  x.x = nx; x.z = nz;
+  const spots = [...reachable(worldFor(x), x.x, x.z, w, d, moveBudget(x), state.rules.diag).keys()].filter(k => k !== `${x.x},${x.z}`).map(k => k.split(',').map(Number));
+  if (!spots.length) return false;
+  const dirs = DIRS8.map(v => [v, Math.random()]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
+  let pick = null;
+  for (const [dx, dz] of dirs) {
+    const len = Math.hypot(dx, dz), score = ([sx, sz]) => ((sx - ox) * dx + (sz - oz) * dz) / len;
+    const best = Math.max(...spots.map(score));
+    if (best < 1) continue;                      // can't get even a square that way
+    const far = spots.filter(p => score(p) >= best - 0.75 && Math.abs((p[0] - ox) * dz - (p[1] - oz) * dx) / len <= 1.5);
+    const pool = far.length ? far : spots.filter(p => score(p) >= best - 0.75);
+    pick = pool[Math.floor(Math.random() * pool.length)];
+    break;
+  }
+  if (!pick) pick = spots[Math.floor(Math.random() * spots.length)];
+  faceToward(x, { x: pick[0], z: pick[1] });
+  x.x = pick[0]; x.z = pick[1];
   pushFig(x);
   carry(x.id, x.x - ox, x.z - oz, 0, x);
-  addLog({ kind: 'sys', text: `${x.name} (undiscovered) wanders about.`, to: state.gm });
+  if (!quiet) addLog({ kind: 'sys', text: `${x.name} (undiscovered) wanders about.`, to: state.gm });
+  return true;
 }
 // host: next turn; undiscovered enemies (always at the end) take theirs by themselves
 function nextTurn() {
@@ -2270,6 +2286,9 @@ function worldFor(f) {
 function nextPartyTurn() {
   state.party = { turn: state.party.turn + 1, from: {}, dash: {}, done: {} };
   addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
+  // while exploring, undiscovered enemies roam too, once each party turn
+  const roamers = Object.values(state.figures).filter(x => lurks(x) && !fainted(x)).filter(x => wander(x, true));
+  if (roamers.length) addLog({ kind: 'sys', text: `Undiscovered enemies wander about: ${roamers.map(x => x.name).join(', ')}.`, to: state.gm });
   countDown(); clearAreas();
   pushParty();
 }
