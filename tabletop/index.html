@@ -162,10 +162,17 @@
   body.gm:not(.previewing) #side > section:first-child { order: -2; }
   body.gm:not(.previewing) #side > section.tblSec { order: -1; }
   /* the GM's log is on every tab, stuck to the bottom of the side panel so it never scrolls away (Adam) */
-  body.gm:not(.previewing) #side > #logSec { order: 99; position: sticky; bottom: -16px; z-index: 2; background: var(--panel);
-    margin: auto -12px -16px; padding: 6px 12px 10px; border-top: 2px solid var(--accent); border-bottom: 0; box-shadow: 0 -6px 12px #0006; }
-  body.gm:not(.previewing) #side > #logSec h3 { margin: 0 0 4px; }
-  body.gm:not(.previewing) #logSec #log { height: 130px; }
+  /* the GM's log floats over the board, bottom right, and can be dragged anywhere by its title (Adam) */
+  body.gm:not(.previewing) #side > #logSec { position: fixed; right: 312px; bottom: 10px; width: 340px; z-index: 5; display: block !important;
+    background: var(--panel); border: 2px solid var(--accent); border-radius: 12px; padding: 6px 10px 8px; box-shadow: 0 6px 20px #000c; }
+  body.gm:not(.previewing) #side > #logSec h3 { margin: 0 0 4px; cursor: move; user-select: none; touch-action: none; }
+  body.gm:not(.previewing) #side > #logSec h3::after { content: ' ⠿ drag'; color: var(--dim); font-size: 10px; letter-spacing: 0; text-transform: none; }
+  body.gm:not(.previewing) #logSec #log { height: 150px; }
+  @media (max-width: 700px) { body.gm:not(.previewing) #side > #logSec { position: static; width: auto; border: 0; box-shadow: none; } }
+  /* the GM's button bar: bottom left, dragged by its grip (Adam) */
+  #barGrip { display: none; cursor: move; touch-action: none; user-select: none; color: #cfd8ff; font-size: 18px; padding: 0 4px; align-self: center; }
+  body.gmBar #barGrip { display: block; }
+  body.gmBar #actBar { left: 10px !important; bottom: 10px; transform: none; width: max-content; }
   body.gm:not(.previewing) section.fold > .foldBody { display: block; }
   body.gm:not(.previewing) section.fold > h3 { cursor: default; }
   body.gm:not(.previewing) section.fold > h3::before { content: ''; }
@@ -476,6 +483,7 @@
     <div class="row evb"><button id="actClose" class="fit">Close</button></div>
   </div>
   <div id="actBar" style="display:none">
+    <span id="barGrip" title="Drag to move the bar">⠿</span>
     <button id="actAttack" class="primary" data-key="A" title="Attack (A)"><i>⚔</i> <span>Attack</span></button>
     <button id="actDash" data-key="D" title="Dash (D)"><i>💨</i> <span>Dash</span></button>
     <button id="actMore" data-key="Q" title="Actions (Q)">🎯 Actions</button>
@@ -780,6 +788,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=89"></script>
+<script type="module" src="tabletop.js?v=90"></script>
 </body>
 </html>

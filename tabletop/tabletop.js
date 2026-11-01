@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=89';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=89';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=90';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=90';
 
-const VERSION = 89;                              // raised by bump.py on every publish
+const VERSION = 90;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1967,7 +1967,9 @@ function renderActBar() {
   const bar = $('actBar'); if (!bar) return;
   const f = actMini();
   bar.style.display = f && (!gmView() || gmBar) ? 'flex' : 'none';
+  const wasBar = document.body.classList.contains('gmBar');
   document.body.classList.toggle('gmBar', gmView() && gmBar);
+  if (wasBar !== document.body.classList.contains('gmBar') && typeof placeBar === 'function') placeBar();
   if (!f) return;
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { dash: {} };
   const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
@@ -4498,6 +4500,7 @@ function renderRules() {
 function setPreview(on, as = '') {
   preview = on ? { as } : null;
   document.body.classList.toggle('gm', gmView());
+  if (typeof placeLog === 'function') placeLog();
   document.body.classList.toggle('previewing', !!preview);
   select(null);
   $('previewAs').innerHTML = '<option value="">Any player</option>';
@@ -4532,6 +4535,7 @@ function enterGame() {
   $('game').style.display = 'block';
   $('hint').textContent = hintText();
   document.body.classList.toggle('gm', isHost);
+  if (typeof placeLog === 'function') placeLog();
   $('roomCode').textContent = roomCode;
   $('whoAmI').textContent = isHost ? `You are the GM (${myName}). You can move everything.` : `You are ${myName}. You can move your own mini (white ring).`;
   if (!renderer) { initView(); wirePanel(); }
@@ -4547,6 +4551,35 @@ async function checkVersion() {
 }
 
 for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
+// drag a floating window by its handle; where it was left is remembered in this browser
+function makeDraggable(el, handle, key, on = () => true) {
+  const put = (x, y) => {
+    const r = el.getBoundingClientRect();
+    x = Math.max(0, Math.min(innerWidth - r.width, x)); y = Math.max(0, Math.min(innerHeight - r.height, y));
+    el.style.setProperty('left', x + 'px', 'important'); el.style.top = y + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto'; el.style.transform = 'none';
+  };
+  const restore = () => {
+    if (!on()) { for (const k of ['left', 'top', 'right', 'bottom', 'transform']) el.style.removeProperty(k); return; }
+    try { const p = JSON.parse(localStorage.getItem(key) || 'null'); if (p) put(p.x, p.y); } catch {}
+  };
+  handle.addEventListener('pointerdown', e => {
+    if (!on() || e.button) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const move = ev => put(ev.clientX - dx, ev.clientY - dy);
+    const up = () => {
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+      const q = el.getBoundingClientRect();
+      try { localStorage.setItem(key, JSON.stringify({ x: q.left, y: q.top })); } catch {}
+    };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+  });
+  handle.addEventListener('dblclick', () => { try { localStorage.removeItem(key); } catch {} for (const k of ['left', 'top', 'right', 'bottom', 'transform']) el.style.removeProperty(k); });
+  addEventListener('resize', restore);
+  return restore;
+}
+var placeLog = makeDraggable($('logSec'), $('logSec').querySelector('h3'), 'tabletop-logPos', () => document.body.classList.contains('gm') && !preview && innerWidth > 700);
+var placeBar = makeDraggable($('actBar'), $('barGrip'), 'tabletop-barPos', () => document.body.classList.contains('gmBar'));
 // search the GM's settings (Adam): typing shows every section, on any tab, whose text matches; empty goes back to the tab
 function searchSettings() {
   const q = $('setSearch').value.trim().toLowerCase();
