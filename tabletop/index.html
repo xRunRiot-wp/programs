@@ -280,6 +280,22 @@
   body.previewing #turnBox { right: 310px; }
   @media (max-width: 700px) { #turnBox, body.previewing #turnBox { right: 10px; top: 48px; width: 170px; } #turnBox .row { font-size: 13px; } }
   #hud .ht { font-size: 14px; color: #cfd8ff; margin-top: 3px; }
+  /* player friendly (Adam): action ready/used, status chips, low HP, your-turn glow and banner */
+  #hudAct { font-size: 12px; margin-top: 3px; color: #8fe39b; }
+  #hudAct.used { color: #9aa3c4; }
+  #hudSt { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; pointer-events: auto; }
+  #hudSt span { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #6b2f9a; color: #fff; cursor: help; }
+  #hud.low .hpb { animation: lowHp 1s ease-in-out infinite; }
+  @keyframes lowHp { 50% { box-shadow: 0 0 0 2px #d8412f, 0 0 10px #d8412f; } }
+  #hud.myturn { box-shadow: 0 0 0 2px #ffd76a, 0 0 16px #ffd76a88; }
+  #hud.out { filter: grayscale(.8); }
+  #yourTurn { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -50%); z-index: 7; pointer-events: none; display: none;
+    font: 700 44px var(--pix); color: #ffd76a; text-shadow: 0 4px 0 #000, 0 0 24px #ffb000; white-space: nowrap; }
+  #yourTurn.show { display: block; animation: yourTurn 1.8s ease forwards; }
+  @keyframes yourTurn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+    25% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -70%); } }
+  @media (min-width: 701px) { #yourTurn { left: calc(50% - 150px); } body.sideHidden:not(.gm) #yourTurn { left: 50%; } }
+  @media (max-width: 700px) { #yourTurn { font-size: 30px; } }
   #status { top: auto; bottom: 120px; left: 50%; transform: translateX(-50%); font-size: 16px; padding: 6px 14px; z-index: 7; }
   @media (min-width: 701px) { #status { left: calc(50% - 150px); } }
   /* newest log lines over the board, like the dungeon's message box */
@@ -467,7 +483,8 @@
 <div id="game">
   <div id="view"></div>
   <div id="status"></div>
-<div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div></div>
+<div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div><div id="hudAct"></div><div id="hudSt"></div></div>
+<div id="yourTurn"></div>
 <div id="msgBox"></div>
 <div id="vsBox"></div>
 <div id="effPop"></div>
@@ -829,6 +846,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=94"></script>
+<script type="module" src="tabletop.js?v=95"></script>
 </body>
 </html>

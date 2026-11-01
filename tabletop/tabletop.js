@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=94';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=94';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=95';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=95';
 
-const VERSION = 94;                              // raised by bump.py on every publish
+const VERSION = 95;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -3698,6 +3698,7 @@ function lootSuggest(tier) {
 }
 function loadItems() {
   fetch(INDEX_URL).then(r => r.json()).then(E => {
+    for (const e of E) if (e.kind === 'Status' && e.name) STATUS_HELP[e.name] = e.outcome || '';
     for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name)) {
       ITEM_TIER[e.name] = tierOfItem(e.outcome);
       ITEMS[e.name] = (e.outcome || '').replace(/\s*\d[\d,]* Poké.*$/, '').replace(/,? and heals \d+ Hunger/i, '').split(/(?<=\.)\s+/).filter(x => !/hunger|starving/i.test(x)).join(' ').trim() || 'No effect here (no hunger in this game).';
@@ -4310,8 +4311,24 @@ function renderHud() {
   const c = isHost && !gmView() ? combatView() : state.combat, D = state.dungeon;
   const cur = c && state.figures[c.order[c.turn]?.id];
   const turn = c ? (cur?.id === f.id ? 'Your turn!' : `${cur && figVisible(cur) ? cur.name : 'Enemy'}'s turn`) : state.party?.done?.[f.id] ? 'Waiting for the others' : 'Exploring';
-  $('hudTurn').textContent = [D ? `B${D.floor}F` : '', turn, (st.status || []).join(', ')].filter(Boolean).join(' · ');
+  const out = fainted(f), mine = c ? cur?.id === f.id : !state.party?.done?.[f.id];
+  $('hudTurn').textContent = [D ? `B${D.floor}F` : '', out ? 'Fainted' : turn].filter(Boolean).join(' · ');
+  // whether this turn's action (an attack or a Dash) is still free
+  const spent = actionSpent(f);
+  $('hudAct').textContent = out ? '' : c && !mine ? '' : spent ? '✖ Action used this turn' : '✔ Action ready (attack or Dash)';
+  $('hudAct').className = spent ? 'used' : '';
+  $('hudSt').replaceChildren(...(st.status || []).map(n => Object.assign(document.createElement('span'), { textContent: n, title: STATUS_HELP[n] || n })));
+  hud.classList.toggle('low', !out && max > 0 && (hp ?? max) / max <= 0.25);
+  hud.classList.toggle('out', out);
+  hud.classList.toggle('myturn', !!(c && mine && !out));
+  // a big "Your turn!" when combat comes round to you
+  const key = c ? `${c.round}|${c.turn}` : '';
+  if (c && mine && !out && key !== lastTurnKey) { const y = $('yourTurn'); y.textContent = `${f.name}'s turn!`; y.className = ''; void y.offsetWidth; y.className = 'show'; }
+  lastTurnKey = c && mine ? key : '';
 }
+let lastTurnKey = '';
+// what each status does, for the HUD chips: the rulebook's own text, filled in by loadItems()
+const STATUS_HELP = {};
 // the turn order at the top right of the board (combat only), in the same window style as the HUD
 function renderTurnBox() {
   const box = $('turnBox');
@@ -4549,6 +4566,7 @@ function readMap(file) {
 function enterGame() {
   $('lobby').style.display = 'none';
   $('game').style.display = 'block';
+  if (typeof firstControls === 'function') firstControls();
   $('hint').textContent = hintText();
   document.body.classList.toggle('gm', isHost);
   if (typeof placeLog === 'function') placeLog();
@@ -4600,6 +4618,11 @@ function renderControls() {
     ]) : sec('Windows', [
       ['☰ (top right)', 'Hide or show the side panel'], ['⚔ (bottom right)', 'Combat log while the side panel is hidden'],
     ]));
+}
+function firstControls() {
+  if (gmView()) return;
+  try { if (localStorage.getItem('tabletop-seenControls')) return; localStorage.setItem('tabletop-seenControls', '1'); } catch { return; }
+  setTimeout(() => showControls(true), 1500);
 }
 const showControls = on => { $('ctrlPanel').style.display = $('ctrlShade').style.display = on ? 'block' : 'none'; if (on) renderControls(); };
 $('ctrlBtn').onclick = () => showControls($('ctrlPanel').style.display === 'none');
