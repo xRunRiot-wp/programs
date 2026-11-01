@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=92';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=92';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=93';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=93';
 
-const VERSION = 92;                              // raised by bump.py on every publish
+const VERSION = 93;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1970,7 +1970,9 @@ function useFrom(name, msg) {
 let gmBar = false; try { gmBar = localStorage.getItem('tabletop-gmBar') === '1'; } catch {}
 function actMini() {
   const sel = selectedId && state.figures[selectedId], me = viewerId();
-  if (gmView() && gmBar) return sel?.st ? sel : state.combat ? state.figures[state.combat.order[state.combat.turn]?.id] || null : null;
+  // nothing picked: whoever's turn it is in combat, else the first player mini, else any mini with stats (Adam: the switch only glowed)
+  if (gmView() && gmBar) return (sel?.st && sel) || (state.combat && state.figures[state.combat.order[state.combat.turn]?.id])
+    || Object.values(state.figures).find(f => f.owner && f.st) || Object.values(state.figures).find(f => f.st) || null;
   if (sel && (sel.owner === me || (gmView() && sel.owner))) return sel;
   return Object.values(state.figures).find(f => f.owner && f.owner === me) || null;
 }
@@ -4858,7 +4860,8 @@ function wirePanel() {
   };
   $('peekBtn').onclick = () => setPreview(true);
   const gmBarBtn = () => { $('gmBarBtn').classList.toggle('on', gmBar); $('gmBarBtn').title = gmBar ? 'Hide the button bar' : "Show the players' button bar (Attack, Dash, Actions, Bag, End turn) for the picked mini"; };
-  $('gmBarBtn').onclick = () => { gmBar = !gmBar; try { localStorage.setItem('tabletop-gmBar', gmBar ? '1' : '0'); } catch {} gmBarBtn(); renderActBar(); };
+  $('gmBarBtn').onclick = () => { gmBar = !gmBar;
+    if (gmBar && !actMini()) { status('Add a mini with stats first: the bar acts for the mini you pick.'); setTimeout(() => status(''), 4000); } try { localStorage.setItem('tabletop-gmBar', gmBar ? '1' : '0'); } catch {} gmBarBtn(); renderActBar(); };
   gmBarBtn();
   $('previewBack').onclick = () => setPreview(false);
   $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
