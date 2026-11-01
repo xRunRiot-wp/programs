@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=87';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=87';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=88';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=88';
 
-const VERSION = 87;                              // raised by bump.py on every publish
+const VERSION = 88;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -664,9 +664,22 @@ function handle(msg, from) {
       const pend = state.pending.find(x => x.id === msg.pid);
       if (pend?.kind === 'goal' && msg.tell && !state.warpUsed[pend.key]) startWarp(pend.key);
       state.pending = state.pending.filter(x => x.id !== msg.pid);
-      if (msg.tool) handle({ t: 'eventTool', tool: msg.tool, mod: msg.mod }, from);
+      if (msg.tool) handle({ t: 'eventTool', tool: msg.tool, mod: msg.mod, who: pend?.who }, from);
       if (msg.tell) addLog({ kind: 'sys', text: msg.tell });
       renderEvent(); save();
+      break;
+    }
+    case 'lootGive': {                          // GM: the rolled loot goes into the team's bag
+      const L = gm && (state.pending || []).find(x => x.id === msg.pid && x.kind === 'loot');
+      const name = clean(msg.name, 30);
+      if (!L || !name) return;
+      const B = state.bag ||= {};
+      B[name] = Math.min(999, (B[name] || 0) + 1);
+      addLog({ kind: 'sys', text: `📦 ${L.who} found ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name} in the chest! It's in the bag.` });
+      L.given++;
+      if (L.tier !== 'Motherlode' || L.given >= 3) state.pending = state.pending.filter(x => x !== L);
+      else L.pick = L.given === 2 ? '' : lootSuggest('Rare');
+      pushBag(); renderEvent(); save();
       break;
     }
     case 'partyNext': {
@@ -752,6 +765,10 @@ function handle(msg, from) {
       } else if (msg.tool === 'loot') {
         const a = d(), b = d(), mod = Math.max(-1, Math.min(2, Math.round(+msg.mod) || 0)), sum = a + b + mod;
         text = `rolled loot 2d6${mod ? (mod > 0 ? ' + ' + mod : ' - ' + -mod) : ''} = ${sum}: ${lootFor(sum)}`;
+        // the chest now actually gives something (Adam): a loot card waits for the GM to hand the item to the team's bag
+        const tier = sum <= 2 ? 'Mundane' : sum <= 6 ? 'Common' : sum <= 8 ? 'Uncommon' : sum <= 10 ? 'Rare' : sum === 11 ? 'Very Rare' : 'Motherlode';
+        (state.pending ||= []).push({ id: rid(8), kind: 'loot', who: msg.who || state.event?.who || 'The team', tier, sum, pick: lootSuggest(tier), given: 0 });
+        renderEvent();
       } else if (msg.tool === 'threat') {
         state.threat = Math.max(0, Math.min(6, (state.threat || 0) + (msg.delta || 1)));
         text = `Threat Counter: ${state.threat}/6${state.threat >= 6 ? ' - something disastrous happens!' : ''}`;
@@ -1918,8 +1935,11 @@ function useFrom(name, msg) {
   status(`${touchy ? 'Tap' : 'Click'} the ${to === 'foe' ? 'foe' : 'ally'} for the ${name} (Esc to cancel)`);
 }
 // the mini the bottom bar acts for: your picked mini, else your first one
+// the GM can turn the players' button bar on for themselves (Adam): it then works for the picked mini, or whoever's turn it is
+let gmBar = false; try { gmBar = localStorage.getItem('tabletop-gmBar') === '1'; } catch {}
 function actMini() {
   const sel = selectedId && state.figures[selectedId], me = viewerId();
+  if (gmView() && gmBar) return sel?.st ? sel : state.combat ? state.figures[state.combat.order[state.combat.turn]?.id] || null : null;
   if (sel && (sel.owner === me || (gmView() && sel.owner))) return sel;
   return Object.values(state.figures).find(f => f.owner && f.owner === me) || null;
 }
@@ -1929,7 +1949,8 @@ function barLabel(id, ico, txt) { const b = $(id); b.innerHTML = `<i>${ico}</i> 
 function renderActBar() {
   const bar = $('actBar'); if (!bar) return;
   const f = actMini();
-  bar.style.display = f && !gmView() ? 'flex' : 'none';
+  bar.style.display = f && (!gmView() || gmBar) ? 'flex' : 'none';
+  document.body.classList.toggle('gmBar', gmView() && gmBar);
   if (!f) return;
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { dash: {} };
   const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
@@ -3624,10 +3645,28 @@ function loadIndex() {
 let movesCache = [];
 const loadMoves = () => loadIndex().then(x => (movesCache = x.moves));
 // every item in the campaign's item list goes into the bag's suggestions, with its rule text as the hint
+// each item's rarity, from its rulebook text: the rarity word, or its price against the Loot Rolling Guide's limits
+const ITEM_TIER = {};
+function tierOfItem(text) {
+  const w = /\b(Mundane|Common|Uncommon|Very Rare|Rare)\b/.exec(text || '');
+  if (w) return w[1];
+  const p = /(\d[\d,]*) Poké/.exec(text || '');
+  if (!p) return '';
+  const v = +p[1].replace(/,/g, '');
+  return v <= 100 ? 'Common' : v <= 300 ? 'Uncommon' : v <= 1000 ? 'Rare' : 'Very Rare';
+}
+function lootSuggest(tier) {
+  const want = tier === 'Motherlode' ? 'Rare' : tier;
+  const pool = Object.keys(ITEMS).filter(n => ITEM_TIER[n] === want);
+  const all = pool.length ? pool : Object.keys(ITEMS);
+  return all.length ? all[Math.floor(Math.random() * all.length)] : '';
+}
 function loadItems() {
   fetch(INDEX_URL).then(r => r.json()).then(E => {
-    for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name))
+    for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name)) {
+      ITEM_TIER[e.name] = tierOfItem(e.outcome);
       ITEMS[e.name] = (e.outcome || '').replace(/\s*\d[\d,]* Poké.*$/, '').replace(/,? and heals \d+ Hunger/i, '').split(/(?<=\.)\s+/).filter(x => !/hunger|starving/i.test(x)).join(' ').trim() || 'No effect here (no hunger in this game).';
+    }
     const dl = $('bagItems'); if (!dl) return;
     dl.innerHTML = '';
     for (const name of Object.keys(ITEMS).sort()) { const o = document.createElement('option'); o.value = name; dl.appendChild(o); }
@@ -4377,7 +4416,8 @@ function renderEvent() {
   box.innerHTML = '';
   for (const p of P) {
     const kind = p.kind || 'event', d = document.createElement('div'); d.className = 'evwait';
-    const label = { event: `${p.who} checked a ?`, chest: `${p.who} opened a chest`, clue: `${p.who} found a clue`, goal: `${p.who} reached the Dungeon Goal` }[kind];
+    const label = { event: `${p.who} checked a ?`, chest: `${p.who} opened a chest`, clue: `${p.who} found a clue`, goal: `${p.who} reached the Dungeon Goal`,
+      loot: `Loot: ${p.tier} (rolled ${p.sum})${p.tier === 'Motherlode' ? ` - two Rare items + a TM (${p.given}/3 given)` : ''}` }[kind];
     d.innerHTML = '<span></span><span class="evbtns"></span>';
     d.firstChild.textContent = label;
     const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; d.lastChild.appendChild(b); };
@@ -4386,6 +4426,15 @@ function renderEvent() {
     if (kind === 'clue') {
       add('Next clue: roll where', () => act({ t: 'pendingDone', pid: p.id, tool: 'direction' }), 'primary');
       add('It leads to the goal', () => act({ t: 'pendingDone', pid: p.id, tell: `The clue points the way to the Dungeon Goal!` }));
+    }
+    if (kind === 'loot') {
+      // an item of that rarity is filled in (change it to any item); Give puts it in the team's bag
+      const inp = document.createElement('input');
+      inp.setAttribute('list', 'bagItems'); inp.value = p.pick || ''; inp.placeholder = p.given === 2 ? 'The TM' : 'Item name';
+      inp.style.cssText = 'flex:1;min-width:120px';
+      d.lastChild.appendChild(inp);
+      add('🎁 Give', () => inp.value.trim() && act({ t: 'lootGive', pid: p.id, name: inp.value.trim() }), 'primary');
+      add('🎲', () => { inp.value = lootSuggest(p.given === 2 ? '' : p.tier) || inp.value; });
     }
     if (kind === 'goal') add('Mission complete!', () => act({ t: 'pendingDone', pid: p.id, tell: `${p.who} reached the Dungeon Goal: mission complete!` }), 'primary');
     if (kind !== 'event') add('Dismiss', () => act({ t: 'pendingDone', pid: p.id }));
@@ -4481,6 +4530,21 @@ async function checkVersion() {
 }
 
 for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
+// search the GM's settings (Adam): typing shows every section, on any tab, whose text matches; empty goes back to the tab
+function searchSettings() {
+  const q = $('setSearch').value.trim().toLowerCase();
+  document.body.classList.toggle('searching', !!q);
+  let n = 0;
+  for (const sec of document.querySelectorAll('#side > section[data-tab]')) {
+    if (sec.id === 'logSec') continue;
+    const words = (sec.textContent + ' ' + [...sec.querySelectorAll('[title],[placeholder]')].map(e => (e.title || '') + ' ' + (e.placeholder || '')).join(' ')).toLowerCase();
+    const hit = !!q && q.split(/\s+/).every(w => words.includes(w));
+    sec.classList.toggle('hit', hit); n += hit;
+  }
+  $('setSearchNone').style.display = q && !n ? '' : 'none';
+}
+$('setSearch').oninput = searchSettings;
+$('setSearch').onkeydown = e => { if (e.key === 'Escape') { $('setSearch').value = ''; searchSettings(); } };
 { let t = 'minis'; try { t = localStorage.getItem('tabletop.gmTab') || t; } catch {} setTab(t); }
 // Terrain and Boards fold away: click the title to open or close (remembered per browser)
 function wireFolds() {
@@ -4715,6 +4779,9 @@ function wirePanel() {
     setTimeout(() => $('testLinkBtn').textContent = '🔗 Test link', 1500);
   };
   $('peekBtn').onclick = () => setPreview(true);
+  const gmBarBtn = () => { $('gmBarBtn').classList.toggle('on', gmBar); $('gmBarBtn').title = gmBar ? 'Hide the button bar' : "Show the players' button bar (Attack, Dash, Actions, Bag, End turn) for the picked mini"; };
+  $('gmBarBtn').onclick = () => { gmBar = !gmBar; try { localStorage.setItem('tabletop-gmBar', gmBar ? '1' : '0'); } catch {} gmBarBtn(); renderActBar(); };
+  gmBarBtn();
   $('previewBack').onclick = () => setPreview(false);
   $('previewAs').onchange = () => setPreview(true, $('previewAs').value);
   for (const k of ['dex', 'alert', 'hp', 'hpMax']) $('st_' + k).onchange = () => selectedId && act({ t: 'stats', id: selectedId, [k]: $('st_' + k).value });

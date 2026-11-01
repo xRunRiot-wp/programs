@@ -130,6 +130,11 @@
   #floorSec .row input, #floorSec .row select { width: 100%; min-width: 0; box-sizing: border-box; }
   #gmTabs button.on { background: var(--accent); color: #1a1408; border-color: var(--accent); font-weight: 700; }
   body.gm:not(.previewing) section[data-tab]:not(.tabOn) { display: none !important; }
+  /* while searching the settings, the matching sections show from every tab (the log stays) */
+  body.gm.searching:not(.previewing) #side > section[data-tab]:not(#logSec):not(.hit) { display: none !important; }
+  body.gm.searching:not(.previewing) #side > section[data-tab].hit { display: block !important; }
+  body.gm.searching:not(.previewing) #side > section.hit.fold > .foldBody { display: block; }
+  body.gm.searching:not(.previewing) #gmTabs button.on { background: none; color: inherit; border-color: var(--line); }
   /* in the GM's Combat tab, players, dice and log sit on top (under the room box) */
   body.gm:not(.previewing) #side { display: flex; flex-direction: column; }
   body.gm:not(.previewing) #side > section { flex-shrink: 0; }
@@ -255,7 +260,8 @@
     pointer-events: none; opacity: 0; transition: opacity .5s; }
   #msgBox.on { opacity: 1; }
   #msgBox div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  body:not(.gm) #msgBox, body.previewing #msgBox { bottom: 118px; }    /* players: above the button bar */
+  body:not(.gm) #msgBox, body.previewing #msgBox, body.gmBar #msgBox { bottom: 118px; }
+  #gmTop { flex-wrap: wrap; } #gmTop #previewBtn { flex: 1 1 100%; }    /* players: above the button bar */
   @media (max-width: 1100px) { #msgBox { display: none; } }
   #tileTypes .tilehead { grid-column: 1 / -1; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 0; }
   #tileTypes button { padding: 4px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -279,7 +285,8 @@
   #warpBox { top: 30%; border-color: #5fe0ff; }
   /* the moves window sits at the bottom, just above the player's button bar (Adam) */
   #atkPanel { top: auto; bottom: 50px; max-height: calc(100% - 200px); }
-  body:not(.gm) #atkPanel, body.previewing #atkPanel { bottom: 122px; }
+  body:not(.gm) #atkPanel, body.previewing #atkPanel, body.gmBar #atkPanel { bottom: 122px; }
+  #gmBarBtn.on { background: var(--accent); color: #1a1408; border-color: var(--accent); }
   /* four moves in a 2x2 grid; the numbers behind them stay hidden (Adam) */
   #atkOwn { display: grid !important; grid-template-columns: 1fr 1fr; gap: 4px !important; }
   #atkOwn .mvw { display: flex; min-width: 0; }
@@ -471,14 +478,17 @@
       </div>
       <div id="whoAmI" style="color:var(--dim);font-size:12px;margin-top:4px"></div>
       <div style="color:var(--dim);font-size:11px;margin-top:2px">Version <span id="verLabel"></span></div>
-      <div class="row gm-only" style="margin-top:8px">
+      <div id="gmTop" class="row gm-only" style="margin-top:8px">
         <button id="previewBtn" title="Opens a window where you play as a test player: everything works there">👁 Play as a test player</button>
         <button id="testLinkBtn" class="fit" title="Copy the test player's link, to open it in another browser">🔗 Test link</button>
+        <button id="gmBarBtn" class="fit">🎮 Bar</button>
         <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
       </div>
       <nav id="gmTabs" class="gm-only">
         <button data-tab="minis">Minis</button><button data-tab="combat">Combat</button><button data-tab="terrain">Terrain</button><button data-tab="floors">Floors</button><button data-tab="boards">Boards</button>
       </nav>
+      <input id="setSearch" class="gm-only" type="search" placeholder="🔍 Search settings (e.g. traps, fog, walls)" autocomplete="off" style="width:100%;margin-top:8px">
+      <div id="setSearchNone" class="gm-only" style="display:none;color:var(--dim);font-size:12px;margin-top:4px">Nothing matches.</div>
     </section>
 
     <section id="selSec" data-tab="minis combat" style="display:none">
@@ -749,6 +759,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=87"></script>
+<script type="module" src="tabletop.js?v=88"></script>
 </body>
 </html>
