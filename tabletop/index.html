@@ -168,11 +168,17 @@
   body.gm:not(.previewing) #side > #logSec h3 { margin: 0 0 4px; cursor: move; user-select: none; touch-action: none; }
   body.gm:not(.previewing) #side > #logSec h3::after { content: ' ⠿ drag'; color: var(--dim); font-size: 10px; letter-spacing: 0; text-transform: none; }
   body.gm:not(.previewing) #logSec #log { height: 150px; }
+  #logMin { display: none; float: right; width: 22px; height: 20px; padding: 0; line-height: 1; font-size: 13px; }
+  body.gm:not(.previewing) #logMin { display: block; }
+  /* minimized: just the title bar (Adam) */
+  body.gm.logMin:not(.previewing) #logSec > :not(h3) { display: none !important; }
+  body.gm.logMin:not(.previewing) #side > #logSec { width: 170px; padding-bottom: 4px; }
+  body.gm.logMin:not(.previewing) #side > #logSec h3 { margin: 0; }
   @media (max-width: 700px) { body.gm:not(.previewing) #side > #logSec { position: static; width: auto; border: 0; box-shadow: none; } }
   /* the GM's button bar: bottom left, dragged by its grip (Adam) */
   #barGrip { display: none; cursor: move; touch-action: none; user-select: none; color: #cfd8ff; font-size: 18px; padding: 0 4px; align-self: center; }
   body.gmBar #barGrip { display: block; }
-  body.gmBar #actBar { left: 10px !important; bottom: 10px; transform: none; width: max-content; }
+  body.gmBar #actBar { left: 64px !important; bottom: 10px; transform: none; width: max-content; }
   body.gm:not(.previewing) section.fold > .foldBody { display: block; }
   body.gm:not(.previewing) section.fold > h3 { cursor: default; }
   body.gm:not(.previewing) section.fold > h3::before { content: ''; }
@@ -314,7 +320,14 @@
   /* the moves window sits at the bottom, just above the player's button bar (Adam) */
   #atkPanel { top: auto; bottom: 50px; max-height: calc(100% - 200px); }
   body:not(.gm) #atkPanel, body.previewing #atkPanel, body.gmBar #atkPanel { bottom: 122px; }
-  #gmBarBtn.on { background: var(--accent); color: #1a1408; border-color: var(--accent); }
+  /* the GM's button-bar switch sits on the board, bottom left (Adam) */
+  #gmBarBtn { display: none; position: absolute; left: 10px; bottom: 10px; z-index: 4; width: 46px; height: 46px; padding: 0; font-size: 24px; border-radius: 12px;
+    background: #1d2348; border: 2px solid #c8d0ff; box-shadow: 0 4px 12px #0009; }
+  body.gm:not(.previewing) #gmBarBtn { display: block; }
+  body.gm:not(.previewing) #hint { left: 64px; }
+  body.gm:not(.previewing):not(.gmBar) #msgBox { bottom: 64px; }
+  #gmBarBtn.on { background: #c8d0ff; border-color: #fff; }
+  @media (max-width: 700px) { #gmBarBtn { bottom: 70px; } }
   /* four moves in a 2x2 grid; the numbers behind them stay hidden (Adam) */
   #atkOwn { display: grid !important; grid-template-columns: 1fr 1fr; gap: 4px !important; }
   #atkOwn .mvw { display: flex; min-width: 0; }
@@ -445,6 +458,7 @@
   <div id="prompts"></div>
   <div id="hint"></div>
   <button id="toggleSide" title="Show or hide the side panel">&#9776;</button>
+  <button id="gmBarBtn" class="fit">🎮</button>
   <div id="combatBox"><div class="cbh">&#9876; Combat <button id="combatX" class="fit" title="Hide the combat window">&#10005;</button></div><div id="combatLog"></div></div>
   <button id="combatToggle" class="fit" title="Show or hide the combat window">&#9876;</button>
   <div id="pauseBar" style="display:none"></div>
@@ -510,7 +524,6 @@
       <div id="gmTop" class="row gm-only" style="margin-top:8px">
         <button id="previewBtn" title="Opens a window where you play as a test player: everything works there">👁 Play as a test player</button>
         <button id="testLinkBtn" class="fit" title="Copy the test player's link, to open it in another browser">🔗 Test link</button>
-        <button id="gmBarBtn" class="fit">🎮 Bar</button>
         <button id="peekBtn" class="fit" title="Look at the table as players see it, in this window (look only)">Peek</button>
       </div>
       <nav id="gmTabs" class="gm-only">
@@ -770,7 +783,7 @@
     </section>
 
     <section id="logSec" data-tab="minis combat terrain floors boards">
-      <h3>Log</h3>
+      <h3>Log <button id="logMin" class="fit" title="Minimize the log">–</button></h3>
       <div id="log"></div>
       <div class="row" style="margin-top:6px">
         <input id="chatIn" maxlength="300" placeholder="Say something">
@@ -788,6 +801,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=90"></script>
+<script type="module" src="tabletop.js?v=91"></script>
 </body>
 </html>

@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=90';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=90';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=91';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=91';
 
-const VERSION = 90;                              // raised by bump.py on every publish
+const VERSION = 91;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -4563,7 +4563,7 @@ function makeDraggable(el, handle, key, on = () => true) {
     try { const p = JSON.parse(localStorage.getItem(key) || 'null'); if (p) put(p.x, p.y); } catch {}
   };
   handle.addEventListener('pointerdown', e => {
-    if (!on() || e.button) return;
+    if (!on() || e.button || e.target.closest('button')) return;
     e.preventDefault();
     const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
     const move = ev => put(ev.clientX - dx, ev.clientY - dy);
@@ -4578,6 +4578,15 @@ function makeDraggable(el, handle, key, on = () => true) {
   addEventListener('resize', restore);
   return restore;
 }
+// the log's minimize button (remembered)
+try { document.body.classList.toggle('logMin', localStorage.getItem('tabletop-logMin') === '1'); } catch {}
+$('logMin').onclick = () => {
+  const m = document.body.classList.toggle('logMin');
+  $('logMin').textContent = m ? '▢' : '–'; $('logMin').title = m ? 'Open the log' : 'Minimize the log';
+  try { localStorage.setItem('tabletop-logMin', m ? '1' : '0'); } catch {}
+  placeLog();
+};
+if (document.body.classList.contains('logMin')) { $('logMin').textContent = '▢'; $('logMin').title = 'Open the log'; }
 var placeLog = makeDraggable($('logSec'), $('logSec').querySelector('h3'), 'tabletop-logPos', () => document.body.classList.contains('gm') && !preview && innerWidth > 700);
 var placeBar = makeDraggable($('actBar'), $('barGrip'), 'tabletop-barPos', () => document.body.classList.contains('gmBar'));
 // search the GM's settings (Adam): typing shows every section, on any tab, whose text matches; empty goes back to the tab
