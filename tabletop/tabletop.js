@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=91';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=91';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=92';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=92';
 
-const VERSION = 91;                              // raised by bump.py on every publish
+const VERSION = 92;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
@@ -1918,8 +1918,22 @@ function itemCard(name, n, sub, onPlay, onOut, playable, tip) {
     out.onclick = e => { e.stopPropagation(); onOut(); };
     c.append(out);
   }
-  if (playable) { c.tabIndex = 0; c.onclick = onPlay; c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(); } }; }
+  if (playable) { c.tabIndex = 0; c.onclick = () => { playedCard(c, name); onPlay(); }; c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(); } }; }
   return c;
+}
+// a played card flies up to the middle of the screen with a big stamp, so it's clear it was used (Adam)
+function playedCard(card, name) {
+  const r = card.getBoundingClientRect(), aim = ['ally', 'foe'].includes(itemTarget(name));
+  const k = card.cloneNode(true); k.classList.add('icfly'); k.querySelector('.icout')?.remove();
+  Object.assign(k.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  k.append(Object.assign(document.createElement('div'), { className: 'icstamp' + (aim ? ' aim' : ''), textContent: aim ? 'PICK A TARGET' : 'USED!' }));
+  document.body.append(k);
+  requestAnimationFrame(() => {
+    k.style.left = (innerWidth - r.width * 1.5) / 2 + 'px'; k.style.top = (innerHeight - r.height * 1.5) / 2 - 40 + 'px';
+    k.style.transform = 'scale(1.5) rotate(-3deg)';
+  });
+  setTimeout(() => { k.style.opacity = '0'; k.style.transform = 'scale(1.7) rotate(-3deg) translateY(-30px)'; }, 1100);
+  setTimeout(() => k.remove(), 1700);
 }
 function renderBag() {
   const el = $('bagList'); if (!el) return;
@@ -4551,6 +4565,11 @@ async function checkVersion() {
 }
 
 for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
+// while the bag is open, a see-through cover lies over the board: a click on it only closes the bag (Adam)
+new MutationObserver(() => { $('bagShade').style.display = $('bagPanel').style.display === 'none' ? 'none' : 'block'; })
+  .observe($('bagPanel'), { attributes: true, attributeFilter: ['style'] });
+$('bagShade').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); $('bagPanel').style.display = 'none'; });
+$('bagShade').addEventListener('contextmenu', e => e.preventDefault());
 // drag a floating window by its handle; where it was left is remembered in this browser
 function makeDraggable(el, handle, key, on = () => true) {
   const put = (x, y) => {

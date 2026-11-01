@@ -72,7 +72,14 @@
   @media (max-width: 420px) { #actList .actGrid { grid-template-columns: 1fr; } }
   .actGroup { width: 100%; color: var(--accent); font-size: 12px; font-weight: 700; margin-top: 6px; text-transform: uppercase; }
   #bagPanel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(600px, calc(100% - 32px)); max-height: 62vh; overflow: auto; }
+  #bagShade { position: absolute; inset: 0; z-index: 5; background: #0003; }
   /* item cards (Adam: playable cards) */
+  .icfly { position: fixed; z-index: 30; pointer-events: none; margin: 0; transition: left .35s ease, top .35s ease, transform .35s ease, opacity .5s ease;
+    box-shadow: 0 0 0 3px #fff, 0 0 40px #ffd76a, 0 14px 30px #000c; }
+  .icstamp { position: absolute; left: 50%; top: 64%; transform: translate(-50%, -50%) rotate(-14deg); padding: 3px 10px; border: 3px solid #6fe08a; border-radius: 8px;
+    color: #6fe08a; background: #0b1a10d9; font: 700 20px var(--pix); letter-spacing: 1px; white-space: nowrap; animation: stampIn .3s ease-out .15s both; }
+  .icstamp.aim { border-color: #ffd76a; color: #ffd76a; background: #1d1606d9; font-size: 13px; }
+  @keyframes stampIn { from { transform: translate(-50%, -50%) rotate(-14deg) scale(2.6); opacity: 0; } }
   .ihand { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 6px; }
   .icard { --kc: #5a6b8c; position: relative; display: flex; flex-direction: column; min-height: 196px; padding: 6px 8px 7px; border-radius: 12px; cursor: pointer;
     background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 45%, #1a1d2e) 0%, #171a28 70%); border: 2px solid var(--kc);
@@ -479,6 +486,7 @@
     </div>
   </div>
   <div id="warpBox" class="evcard" style="display:none"></div>
+  <div id="bagShade" style="display:none"></div>
   <div id="bagPanel" class="evcard" style="display:none">
     <div class="evt">🎒 Team bag</div>
     <div id="bagList"></div>
@@ -801,6 +809,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=91"></script>
+<script type="module" src="tabletop.js?v=92"></script>
 </body>
 </html>
