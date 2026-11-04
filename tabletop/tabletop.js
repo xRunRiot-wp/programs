@@ -5,12 +5,17 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=95';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=95';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=96';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=96';
 
-const VERSION = 95;                              // raised by bump.py on every publish
+const VERSION = 96;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
-const PREFIX = 'tabletop-v1-';                 // keeps our room ids apart from other PeerJS users
+const PREFIX = 'tabletop-v1-';
+// several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
+const PEER_OPTS = { config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:global.stun.twilio.com:3478' }] } };
+let joinTimer = null, joinTries = 0, welcomed = false;                 // keeps our room ids apart from other PeerJS users
 const PALETTE = ['#e0a64b', '#4b9be0', '#d9534f', '#5cb85c', '#a66be0', '#e07a4b', '#4be0c8', '#e04b9b'];
 const SIZE_CELLS = { '0.7': 1, '1': 1, '2': 2, '3': 3 };
 const MAX_CELLS = 12;
@@ -150,7 +155,7 @@ async function startHost(name) {
 }
 
 function openPeer(id, tries) {
-  peer = new Peer(id);
+  peer = new Peer(id, PEER_OPTS);
   peer.on('open', () => {
     hostId = id;
     cannonP ||= import('cannon-es');            // the physics for dice, loaded ahead of the first throw
@@ -177,7 +182,8 @@ function openPeer(id, tries) {
 
 function startClient(name, code) {
   isHost = false; myName = name; roomCode = code; hostId = PREFIX + code;
-  peer = new Peer();
+  clearTimeout(joinTimer); try { peer?.destroy(); } catch {}   // pressing Join again starts clean
+  peer = new Peer(PEER_OPTS);
   peer.on('open', () => connectToHost());
   peer.on('error', err => {
     if (err.type === 'peer-unavailable') {
@@ -189,9 +195,20 @@ function startClient(name, code) {
 
 function connectToHost() {
   hostConn = peer.connect(hostId, { reliable: true });
-  hostConn.on('open', () => { status(''); hostConn.send({ t: 'hello', clientId, name: myName, test: testWindow }); });
-  hostConn.on('data', onClientData);
+  // a link that never opens (or never answers) used to leave 'Joining...' forever: retry, then say what to check
+  clearTimeout(joinTimer);
+  if (!welcomed) joinTimer = setTimeout(() => {
+    if (welcomed || !peer || peer.destroyed) return;
+    joinTries++;
+    const c = hostConn; hostConn = null; try { c.close(); } catch {}
+    if (joinTries < 4) { lobbyMsg(`Still reaching the GM's game... (try ${joinTries + 1} of 4)`); connectToHost(); }
+    else { joinTries = 0; lobbyMsg("Couldn't reach the GM's game. Check the GM still has it open, then press Join again. If it keeps failing, one of your internet connections is blocking direct links: try a phone hotspot."); }
+  }, 12000);
+  const conn = hostConn;
+  hostConn.on('open', () => { status(''); conn.send({ t: 'hello', clientId, name: myName, test: testWindow }); });
+  hostConn.on('data', msg => { if (hostConn === conn) onClientData(msg); });
   hostConn.on('close', () => {
+    if (hostConn !== conn) return;              // an abandoned try from the join watchdog
     status('Lost the GM. Trying again...');
     setTimeout(() => { if (peer && !peer.destroyed) connectToHost(); }, 3000);
   });
@@ -315,6 +332,7 @@ function onHostData(conn, msg) {
 function onClientData(msg) {
   switch (msg.t) {
     case 'welcome':
+      welcomed = true; joinTries = 0; clearTimeout(joinTimer); lobbyMsg('');
       state = Object.assign(freshState(), msg.state);
       if ($('game').style.display !== 'block') enterGame(); else rebuildAll();
       break;
