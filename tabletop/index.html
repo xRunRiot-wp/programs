@@ -249,7 +249,28 @@
   #floorBanner { font-family: var(--pix); background: radial-gradient(#000c, #000e); }
   #floorBanner .fl { color: var(--accent); }
   /* the player's mini at the top left, like the dungeon HUD */
-  #hud { position: absolute; left: 10px; top: 10px; z-index: 4; padding: 6px 12px 8px; min-width: 190px; pointer-events: none; display: none; }
+  #hud { position: absolute; left: 10px; top: 10px; z-index: 4; padding: 6px 12px 8px 6px; min-width: 190px; pointer-events: none; display: none; gap: 8px; align-items: flex-start; }
+  #hudPic { width: 52px; height: 52px; border-radius: 8px; border: 3px solid #3d7be0; background: #0b1020; object-fit: cover; flex: none; box-sizing: border-box; }
+  #hud .hb { flex: 1; min-width: 0; }
+  /* the rest of the team, under your own tile (blue border: party member, green: temporary ally) */
+  #teamTiles { position: absolute; left: 10px; top: 10px; z-index: 4; display: none; flex-direction: column; gap: 6px; pointer-events: none; font-family: var(--pix); }
+  #teamTiles .tt { display: flex; gap: 6px; align-items: center; padding: 4px 8px 5px 4px; min-width: 170px; max-width: 220px; pointer-events: auto; }
+  #teamTiles .tt .pic { width: 38px; height: 38px; border-radius: 6px; border: 3px solid var(--bc); background: #0b1020; object-fit: cover; flex: none; box-sizing: border-box; display: block; }
+  #teamTiles .tt.party { --bc: #3d7be0; } #teamTiles .tt.ally { --bc: #3fbf4f; }
+  #teamTiles .tt .ti { flex: 1; min-width: 0; }
+  #teamTiles .tt .tn { font-size: 13px; font-weight: 700; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; }
+  #teamTiles .tt .tn span { overflow: hidden; text-overflow: ellipsis; }
+  #teamTiles .tt .tn small { color: var(--accent); font-size: 11px; flex: none; }
+  #teamTiles .tt .hpb { height: 6px; background: #0b1020; border: 1px solid #6f82d0; border-radius: 4px; margin-top: 3px; overflow: hidden; }
+  #teamTiles .tt .hpb i { display: block; height: 100%; }
+  #teamTiles .tt .ts { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 3px; }
+  #teamTiles .tt .ts span { font-size: 9px; padding: 0 4px; border-radius: 6px; cursor: help; }
+  #teamTiles .tt em { font-style: normal; font-size: 9px; padding: 0 5px; border-radius: 6px; background: #2e7d32; color: #fff; }
+  #teamTiles .tt em.go { background: #ffd76a; color: #1a1a1a; }
+  #teamTiles .tt.turn { box-shadow: 0 0 0 2px #ffd76a, 0 0 12px #ffd76a88; }
+  #teamTiles .tt.done { opacity: .8; } #teamTiles .tt.out { filter: grayscale(.85); opacity: .7; }
+  #teamTiles .more { font-size: 12px; color: #cfd8ff; padding-left: 4px; }
+  @media (max-width: 700px) { #teamTiles { display: none !important; } #hudPic { width: 40px; height: 40px; } }
   #hud .hn { font-size: 18px; font-weight: 700; display: flex; justify-content: space-between; gap: 10px; }
   #hud .hn small { color: var(--accent); font-size: 14px; }
   #hud .hpb { height: 9px; background: #0b1020; border: 1px solid #6f82d0; border-radius: 5px; margin-top: 4px; overflow: hidden; }
@@ -284,7 +305,7 @@
   #hudAct { font-size: 12px; margin-top: 3px; color: #8fe39b; }
   #hudAct.used { color: #9aa3c4; }
   #hudSt { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; pointer-events: auto; }
-  #hudSt span { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #6b2f9a; color: #fff; cursor: help; }
+  #hudSt span { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #6b2f9a; color: #fff; cursor: help; }   /* each status gets its own colour from statusLook() */
   #hud.low .hpb { animation: lowHp 1s ease-in-out infinite; }
   @keyframes lowHp { 50% { box-shadow: 0 0 0 2px #d8412f, 0 0 10px #d8412f; } }
   #hud.myturn { box-shadow: 0 0 0 2px #ffd76a, 0 0 16px #ffd76a88; }
@@ -511,7 +532,8 @@
 <div id="game">
   <div id="view"></div>
   <div id="status"></div>
-<div id="hud"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div><div id="hudAct"></div><div id="hudSt"></div></div>
+<div id="hud"><img id="hudPic" alt=""><div class="hb"><div class="hn"><span id="hudName"></span><small id="hudHp"></small></div><div class="hpb"><i id="hudBar"></i></div><div class="ht" id="hudTurn"></div><div id="hudAct"></div><div id="hudSt"></div></div></div>
+<div id="teamTiles"></div>
 <div id="yourTurn"></div>
 <div id="msgBox"></div>
 <div id="vsBox"></div>
@@ -880,6 +902,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=104"></script>
+<script type="module" src="tabletop.js?v=105"></script>
 </body>
 </html>

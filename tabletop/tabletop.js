@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=104';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=104';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=105';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=105';
 
-const VERSION = 104;                              // raised by bump.py on every publish
+const VERSION = 105;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -415,6 +415,11 @@ function handle(msg, from) {
       const limited = state.rules.limit && !!state.combat && state.combat.order.some(o => o.id === f.id) && !(gm && msg.free);
       const exploring = !gm && state.rules.limit && !state.combat && !!f.owner;    // party turn: from where it started
       if (limited && turn?.id !== f.id) { pushFig(f); if (msg.done || !gm) note(from, `It's not ${f.name}'s turn.` + (gm ? ' Hold Shift while dragging to put it there anyway.' : '')); return; }
+      if (exploring && (state.party.foes || state.party.done?.[f.id])) {   // the enemies' turn, or this ally already ended its turn
+        pushFig(f);
+        if (msg.done) note(from, state.party.foes ? "It's the enemies' turn: wait for the next party turn." : `${f.name} has ended its turn: press Not done to keep moving.`);
+        return;
+      }
       if (f._from == null) f._from = { x: ox, z: oz };
       if (!gm && !state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
@@ -2033,6 +2038,7 @@ function barLabel(id, ico, txt) { const b = $(id); b.innerHTML = `<i>${ico}</i> 
 function movesLeft(f) {
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { from: {}, dash: {} };
   if (c && c.order[c.turn]?.id !== f.id) return 0;
+  if (!c && f.owner && (P.foes || P.done?.[f.id])) return 0;   // the enemies' turn, or this ally ended its turn
   const o = c ? c.from : P.from?.[f.id] || { x: f.x, z: f.z };
   if (!o) return 0;
   const budget = moveBudget(f) * (1 + (c ? c.dash || 0 : P.dash?.[f.id] ? 1 : 0)) - (o.used || 0), { w, d } = fp(f);
@@ -3468,15 +3474,37 @@ function frameBoard() {
   controls.target.set(cx, 0, cz);
 }
 
+// how each status shows as a badge: short code, background, text colour
+const STATUS_LOOK = {
+  Burn: ['BRN', '#e2531d'], 'Burn 1': ['BRN', '#e2531d'], 'Burn 2': ['BRN2', '#c8401a'], 'Burn 3': ['BRN3', '#a8300f'],
+  Poison: ['PSN', '#9b4fd6'], 'Badly Poisoned': ['TOX', '#7a2fb0'], Paralysis: ['PAR', '#e5c12c', '#1a1a1a'], Frozen: ['FRZ', '#6fd3f0', '#10303a'],
+  Sleep: ['SLP', '#7f8fa6'], Confused: ['CNF', '#e86fb0'], Flinch: ['FLN', '#c9a227', '#1a1a1a'], Infatuated: ['LOVE', '#ff6f9a'],
+  Disabled: ['DIS', '#6b6f7a'], Immobilized: ['STUCK', '#8a6a3a'], Slowed: ['SLOW', '#5a6fd6'], 'Sped Up': ['FAST', '#3fbf4f'],
+  Petrified: ['STONE', '#8c8f94'], Cowering: ['COWER', '#a0785a'], Terrified: ['FEAR', '#7a4a8a'], Whiffer: ['WHIFF', '#8a7f6a'],
+  'Sure Shot': ['SURE', '#2e9e8f'], Blinker: ['BLIND', '#444b5a'], 'Cross-Eyed': ['X-EYE', '#b06ad0'], Muzzled: ['MUZZ', '#7a6f60'],
+  Sealed: ['SEAL', '#6b6f7a'], Wrapped: ['WRAP', '#a3742c'], 'Leech Seed': ['SEED', '#4f9a3a'], Decoy: ['DECOY', '#b5651d'],
+  Invisible: ['INVIS', '#6aa0c8'], Sleepless: ['AWAKE', '#c9a227', '#1a1a1a'], 'Perish Song': ['PERISH', '#3b3f4a'],
+  Engaged: ['ENGAGED', '#c0392b'], Fainted: ['FAINTED', '#555b66'],
+};
+function statusLook(n) {
+  const L = STATUS_LOOK[n];
+  return L ? { code: L[0], bg: L[1], fg: L[2] || '#ffffff' } : { code: n.replace(/[^A-Za-z]/g, '').slice(0, 5).toUpperCase() || '?', bg: '#6b2f9a', fg: '#ffffff' };
+}
+const badge = n => { const L = statusLook(n), b = document.createElement('span'); b.textContent = L.code; b.title = n + (STATUS_HELP[n] ? `: ${STATUS_HELP[n]}` : ''); b.style.background = L.bg; b.style.color = L.fg; return b; };
 function labelSprite(text, extra) {
-  const tags = extra?.tags?.join(' · ') || '', bar = extra?.hpMax > 0;
-  const H = 64 + (bar ? 22 : 0) + (tags ? 30 : 0);
+  // statuses as coloured badges under the HP bar (Joseph: show enemies' statuses on their bars), wrapping onto more rows
+  const bar = extra?.hpMax > 0, meas = document.createElement('canvas').getContext('2d');
+  meas.font = 'bold 19px system-ui, sans-serif';
+  const chips = (extra?.tags || []).map(n => { const L = statusLook(n); return { ...L, w: meas.measureText(L.code).width + 14 }; });
+  const rowsOf = [];
+  for (const ch of chips) { const r = rowsOf[rowsOf.length - 1]; if (r && r.w + ch.w + 4 <= 232) { r.list.push(ch); r.w += ch.w + 4; } else rowsOf.push({ list: [ch], w: ch.w }); }
+  const tags = chips.length > 0;
+  const H = 64 + (bar ? 22 : 0) + rowsOf.length * 28 + (tags ? 4 : 0);
   const c = document.createElement('canvas'); c.width = 256; c.height = H;
   const g = c.getContext('2d');
   g.font = 'bold 30px system-ui, sans-serif';
   let w = g.measureText(text).width + 24;
-  g.font = 'bold 20px system-ui, sans-serif';
-  if (tags) w = Math.max(w, g.measureText(tags).width + 20);
+  if (tags) w = Math.max(w, ...rowsOf.map(r => r.w + 16));
   if (bar) w = Math.max(w, 150);
   w = Math.min(248, w);
   g.fillStyle = 'rgba(10,12,16,0.75)';
@@ -3491,7 +3519,16 @@ function labelSprite(text, extra) {
     g.fillStyle = k > 0.5 ? '#5cb85c' : k > 0.25 ? '#e0c04b' : '#d9534f'; g.fillRect(128 - bw / 2, y, bw * k, 12);
     y += 22;
   }
-  if (tags) { g.font = 'bold 20px system-ui, sans-serif'; g.fillStyle = '#ffd27a'; g.fillText(tags, 128, y + 8, 236); }
+  g.font = 'bold 19px system-ui, sans-serif';
+  for (const r of rowsOf) {
+    let x = 128 - r.w / 2;
+    for (const ch of r.list) {
+      g.fillStyle = ch.bg; g.beginPath(); g.roundRect(x, y - 2, ch.w, 24, 8); g.fill();
+      g.fillStyle = ch.fg; g.fillText(ch.code, x + ch.w / 2, y + 10, ch.w - 4);
+      x += ch.w + 4;
+    }
+    y += 28;
+  }
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   s.scale.set(2, 2 * H / 256, 1); s.renderOrder = 10;
@@ -4803,11 +4840,57 @@ function showMsg(line) {
   msgTimer = setTimeout(() => { box.classList.remove('on'); setTimeout(() => { if (!box.classList.contains('on')) box.innerHTML = ''; }, 600); }, 7000);
 }
 // the player's own mini at the top left: name, HP, statuses and whose turn it is
-function renderHud() {
+function renderHud() { renderHudOwn(); renderTeamTiles(); }
+// the rest of the team under your own tile (Joseph: blue border = party member, green = temporary ally), with their
+// HP, statuses and whether they've ended their turn; the GM sees the whole team there
+let teamKey = '';
+function renderTeamTiles() {
+  const box = $('teamTiles');
+  if (!box) return;
+  const me = !gmView() && actMini();
+  const list = Object.values(state.figures).filter(f => sideOf(f) === 'player' && !f.parent && f.id !== me?.id
+    && (!isHost || (gmView() ? gmSees(boardAt(f.x, f.z)) : figVisible(f))));
+  const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || {}, cur = c && c.order[c.turn]?.id;
+  const rows = list.slice(0, 6).map(f => { const st = f.st || {}; return { f, max: st.hpMax || 0, hp: st.hp ?? st.hpMax, sts: (st.status || []).slice(0, 4), done: !c && !!P.done?.[f.id], turn: cur === f.id, out: fainted(f), pic: miniShot(f) }; });
+  const hud = $('hud'), top = hud && hud.style.display !== 'none' ? hud.offsetTop + hud.offsetHeight + 8 : 10;
+  const key = JSON.stringify([top, list.length, rows.map(r => [r.f.id, r.f.name, r.f.owner ? 1 : 0, r.max, r.hp, r.sts, r.done, r.turn, r.out, r.pic.length])]);
+  if (key === teamKey) return;
+  teamKey = key;
+  box.style.display = rows.length ? 'flex' : 'none';
+  box.style.top = top + 'px';
+  const tiles = rows.map(r => {
+    const d = document.createElement('div');
+    d.className = 'tt pmd ' + (r.f.owner ? 'party' : 'ally') + (r.done ? ' done' : '') + (r.turn ? ' turn' : '') + (r.out ? ' out' : '');
+    d.title = r.f.owner ? `${r.f.name}: party member` : `${r.f.name}: temporary ally`;
+    const im = document.createElement(r.pic ? 'img' : 'b'); im.className = 'pic'; if (r.pic) { im.src = r.pic; im.alt = ''; } else im.style.background = r.f.color || '#888';
+    const info = document.createElement('div'); info.className = 'ti';
+    const nm = document.createElement('div'); nm.className = 'tn';
+    const nmS = document.createElement('span'); nmS.textContent = r.f.name; nm.append(nmS);
+    if (r.max) { const hp = document.createElement('small'); hp.textContent = `${r.hp}/${r.max}`; nm.append(hp); }
+    info.append(nm);
+    if (r.max) {
+      const k = Math.max(0, Math.min(1, r.hp / r.max)), hb = document.createElement('div'), fill = document.createElement('i');
+      hb.className = 'hpb'; fill.style.width = (k * 100) + '%'; fill.style.background = k > 0.5 ? '#3fbf4f' : k > 0.25 ? '#e5b62c' : '#d8412f'; hb.append(fill); info.append(hb);
+    }
+    const tags = [...(r.out ? ['Fainted'] : []), ...r.sts];
+    if (tags.length || r.done || r.turn) {
+      const ts = document.createElement('div'); ts.className = 'ts';
+      ts.append(...tags.map(badge));
+      if (r.turn) ts.append(Object.assign(document.createElement('em'), { textContent: 'TURN', className: 'go' }));
+      else if (r.done) ts.append(Object.assign(document.createElement('em'), { textContent: 'DONE' }));
+      info.append(ts);
+    }
+    d.append(im, info);
+    return d;
+  });
+  if (list.length > rows.length) tiles.push(Object.assign(document.createElement('div'), { className: 'more', textContent: `+${list.length - rows.length} more` }));
+  box.replaceChildren(...tiles);
+}
+function renderHudOwn() {
   renderTurnBox();
   const hud = $('hud'), f = !gmView() && actMini();
   if (!hud) return;
-  hud.style.display = f ? 'block' : 'none';
+  hud.style.display = f ? 'flex' : 'none';
   if (!f) return;
   const st = f.st || {}, hp = st.hp, max = st.hpMax;
   $('hudName').textContent = f.name;
@@ -4825,7 +4908,10 @@ function renderHud() {
   const spent = actionSpent(f);
   $('hudAct').textContent = out ? '' : c && !mine ? '' : spent ? '✖ Action used this turn' : '✔ Action ready (attack or Dash)';
   $('hudAct').className = spent ? 'used' : '';
-  $('hudSt').replaceChildren(...(st.status || []).map(n => Object.assign(document.createElement('span'), { textContent: n, title: STATUS_HELP[n] || n })));
+  $('hudSt').replaceChildren(...(st.status || []).map(n => { const b = badge(n); b.textContent = n; return b; }));
+  const pic = miniShot(f);                        // the mini's own picture, framed like the teammates' tiles
+  if (pic && $('hudPic').getAttribute('src') !== pic) $('hudPic').src = pic;
+  $('hudPic').style.display = pic ? '' : 'none';
   hud.classList.toggle('low', !out && max > 0 && (hp ?? max) / max <= 0.25);
   hud.classList.toggle('out', out);
   hud.classList.toggle('myturn', !!(c && mine && !out));
