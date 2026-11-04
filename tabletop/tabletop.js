@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=106';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=106';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=107';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=107';
 
-const VERSION = 106;                              // raised by bump.py on every publish
+const VERSION = 107;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -105,6 +105,17 @@ const BUILTIN = {
   golett: { name: 'Golett', file: 'models/golett.glb', species: 'Golett' },
   magnemite: { name: 'Magnemite', file: 'models/magnemite.glb', species: 'Magnemite' },
 };
+// Pixelmon models (Joseph 11-04: "put the pixelmon models on the website for everyone"; he has permission, credit:
+// the Pixelmon team). models/pixelmon/<key>.glb.gz (gzipped, opened with the browser's DecompressionStream) + index.json
+let PIXMON = {};
+const pixKey = name => String(name || '').toLowerCase().replace(/♀/g, 'female').replace(/♂/g, 'male').replace(/[^a-z0-9]/g, '');
+fetch('models/pixelmon/index.json').then(r => r.ok ? r.json() : {}).then(j => { PIXMON = j || {}; }).catch(() => {});
+// model for a species: a Pixelmon one first, else one of BUILTIN
+function builtinKey(species) {
+  const k = pixKey(species);
+  if (k && PIXMON[k]) return 'pix:' + k;
+  return Object.keys(BUILTIN).find(b => BUILTIN[b].species === species);
+}
 const modelData = new Map();                    // model id -> .glb bytes (ArrayBuffer)
 const okColor = c => /^#[0-9a-f]{6}$/i.test(c) ? c : '#888888';
 
@@ -1459,7 +1470,7 @@ function syncSite() {
       if (k === 'name') f.name = v.name;
       else { f.st = { ...(f.st || {}) }; f.st[k] = v[k]; }
     }
-    const auto = !f.model && v.species !== old.species && Object.keys(BUILTIN).find(k => BUILTIN[k].species === v.species);
+    const auto = !f.model && v.species !== old.species && builtinKey(v.species);
     if (auto) useBuiltin(auto, f.id);
     f.sync = v;
     if (!changed) continue;
@@ -2413,7 +2424,7 @@ function makeFloor(b, D) {
       const f = state.figures[id], sp = f && species.find(x => x.name.toLowerCase() === f.name.toLowerCase());
       if (!sp) continue;
       handle({ t: 'species', id, name: sp.name, attr: sp.attr, hp: sp.hp, types: sp.types, moves: sp.moves }, state.gm);
-      const bi = Object.keys(BUILTIN).find(k => BUILTIN[k].species === sp.name);
+      const bi = builtinKey(sp.name);
       if (bi) useBuiltin(bi, id);
     }
   });
@@ -3732,6 +3743,17 @@ function playAnim(u, name, once) {
   A.cur = next; A.now = name; A.until = once ? performance.now() + clip.duration * 1000 : 0;
 }
 async function useBuiltin(key, figId) {
+  if (key && key.startsWith('pix:')) {
+    const k = key.slice(4);
+    try {
+      const r = await fetch('models/pixelmon/' + k + '.glb.gz');
+      if (!r.ok) throw 0;
+      const data = await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      const nm = (PIXMON[k]?.name || k) + ' (Pixelmon)';
+      act({ t: 'model', id: await modelId(data), name: nm, data, figId });
+    } catch { status('That model could not be loaded.'); setTimeout(() => status(''), 4000); }
+    return;
+  }
   const b = BUILTIN[key];
   if (!b) return;
   try {
@@ -4774,6 +4796,12 @@ function showSelected() {
     for (const [id, m] of Object.entries(state.models)) { const o = document.createElement('option'); o.value = id; o.textContent = m.name; sm.appendChild(o); }
     const have = new Set(Object.values(state.models).map(m => m.name));
     for (const [key, b] of Object.entries(BUILTIN)) if (!have.has(b.name)) { const o = document.createElement('option'); o.value = 'builtin:' + key; o.textContent = b.name; sm.appendChild(o); }
+    const pk = Object.keys(PIXMON);
+    if (pk.length) {
+      const g = document.createElement('optgroup'); g.label = 'Pixelmon (' + pk.length + ')';
+      for (const k of pk.sort((a, b) => (PIXMON[a].name || a).localeCompare(PIXMON[b].name || b))) { const nm = (PIXMON[k]?.name || k) + ' (Pixelmon)'; if (have.has(nm)) continue; const o = document.createElement('option'); o.value = 'builtin:pix:' + k; o.textContent = nm; g.appendChild(o); }
+      sm.appendChild(g);
+    }
     sm.value = f.model || '';
   }
   if (isHost) {
