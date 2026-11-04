@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=96';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=96';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=97';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=97';
 
-const VERSION = 96;                              // raised by bump.py on every publish
+const VERSION = 97;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -116,7 +116,7 @@ function freshState() {
     pending: [], event: null, threat: 0, paused: false,                       // GM-only: events waiting / shown
     attack: null, warp: null, warpUsed: {}, library: {}, boardLib: {},       // attack in progress, warp-out vote, GM's saved minis and boards
     areas: {},                                                               // area shapes on the table (burst / cone / line)
-    dungeon: null, bag: {}, fog: null, live: 1, prep: {} };   // live = the layer the team is on; prep = random floors waiting on other layers          // fog = the random floor's squares players haven't seen yet (host only)                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
+    dungeon: null, bag: {}, fog: null, live: 1, prep: {}, bg: '' };   // live = the layer the team is on; prep = random floors waiting on other layers          // fog = the random floor's squares players haven't seen yet (host only)                                               // bag = the team's items: name -> how many                                                         // the random dungeon: name, floor number, settings, its board
 }
 
 // =====================================================================
@@ -221,7 +221,7 @@ function viewFor() {
   for (const [k, t] of Object.entries(state.tiles)) { const v = playerTile(k, t); if (v) tiles[k] = v; }
   return { boards: state.boards.filter(shown), figures, players: state.players, log: state.log.filter(l => !l.to), gm: state.gm,
     models: state.models, tiles, combat: combatView(), rules: state.rules, explored: state.explored, party: state.party, pending: [], event: null, threat: 0, paused: state.paused,
-    attack: state.attack, warp: state.warp, ending: state.ending || null, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bag: state.bag, siteBag: state.siteBag || [] };
+    attack: state.attack, warp: state.warp, ending: state.ending || null, warpUsed: {}, library: {}, boardLib: {}, areas: areasView(), dungeon: state.dungeon, bg: state.bg || '', bag: state.bag, siteBag: state.siteBag || [] };
 }
 // layers: each board sits on one (far apart on the table); players only ever see the team's layer, the GM looks at one at a time
 const LAYER_GAP = 200;
@@ -370,6 +370,7 @@ function onClientData(msg) {
     case 'note': status(msg.text); setTimeout(() => status(''), 4000); break;
     case 'areas': state.areas = msg.areas; renderAreas(); break;
     case 'ping': playPing(msg); break;
+    case 'bg': state.bg = msg.bg; applyBackdrop(); break;
     case 'dungeon': state.dungeon = msg.dungeon; renderFloor(msg.fresh); tilesChanged(); break;
     case 'bag': state.bag = msg.bag; state.siteBag = msg.siteBag || []; renderBag(); break;
   }
@@ -409,7 +410,9 @@ function handle(msg, from) {
         note(from, `${f.name} can't walk onto a square nobody can see yet.`);
         pushFig(f); return;
       }
-      Object.assign(f, msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards));
+      const to = msg.snap ? snapPos(x, z, w, d, boards) : clampPos(x, z, w, d, boards);
+      if (Math.hypot(to.x - f.x, to.z - f.z) >= 0.5) faceToward(f, to);   // the mini turns to face the way it's moving (Adam)
+      Object.assign(f, to);
       if (msg.done && (limited || exploring)) {   // only as far as this turn's movement allows
         const o = limited ? state.combat.from : state.party.from[f.id];
         const budget = moveBudget(f) * (1 + (limited ? state.combat.dash || 0 : state.party.dash[f.id] ? 1 : 0)) - (o.used || 0);
@@ -1009,6 +1012,11 @@ function handle(msg, from) {
       goLive(+msg.layer);
       break;
     }
+    case 'bg': {                                // GM: the picture behind the table, for everyone
+      if (!gm) return;
+      setBackdrop(msg.bg);
+      break;
+    }
     case 'fogOff': {                            // GM: show players the whole floor at once
       if (!gm || !state.fog) return;
       for (const k of Object.keys(state.fog.hid)) { const [i, j] = k.split(',').map(Number); if (shown(boardAt(i + 0.5, j + 0.5))) delete state.fog.hid[k]; }
@@ -1111,7 +1119,7 @@ function handle(msg, from) {
       const D = { board: b.id, name: clean(o.name, 30) || 'Mystery Dungeon', floor: num(o.floor, 1, 99, 1), look: FLOOR_LOOKS[o.look] ? o.look : 'cave',
         size: FLOOR_SIZES[o.size] ? o.size : '', enemies: num(o.enemies, 0, 12, 3), foes: clean(o.foes, 200), items: num(o.items, 0, 8, 2),
         events: num(o.events, 0, 8, 2), traps: num(o.traps, 0, 10, 2) };
-      if (layerOf(b) === (state.live || 1)) state.dungeon = D; else (state.prep ||= {})[layerOf(b)] = D;
+      if (layerOf(b) === (state.live || 1)) { state.dungeon = D; setBackdrop(D.look); } else (state.prep ||= {})[layerOf(b)] = D;
       makeFloor(b, D);
       break;
     }
@@ -1986,8 +1994,14 @@ function useFrom(name, msg) {
 // the mini the bottom bar acts for: your picked mini, else your first one
 // the GM can turn the players' button bar on for themselves (Adam): it then works for the picked mini, or whoever's turn it is
 let gmBar = false; try { gmBar = localStorage.getItem('tabletop-gmBar') === '1'; } catch {}
+// GM: the GM's own mini (enemy/NPC, not a wandering undiscovered one) whose combat turn it is
+function gmTurnMini() {
+  const c = state.combat, o = gmView() && c && c.order[c.turn], x = o && !o.lurk && state.figures[o.id];
+  return x && !x.owner ? x : null;
+}
 function actMini() {
   const sel = selectedId && state.figures[selectedId], me = viewerId();
+  if (gmTurnMini()) return gmTurnMini();          // on the GM's mini's turn the bar acts for it (Adam)
   // nothing picked: whoever's turn it is in combat, else the first player mini, else any mini with stats (Adam: the switch only glowed)
   if (gmView() && gmBar) return (sel?.st && sel) || (state.combat && state.figures[state.combat.order[state.combat.turn]?.id])
     || Object.values(state.figures).find(f => f.owner && f.st) || Object.values(state.figures).find(f => f.st) || null;
@@ -2000,9 +2014,10 @@ function barLabel(id, ico, txt) { const b = $(id); b.innerHTML = `<i>${ico}</i> 
 function renderActBar() {
   const bar = $('actBar'); if (!bar) return;
   const f = actMini();
-  bar.style.display = f && (!gmView() || gmBar) ? 'flex' : 'none';
+  const autoBar = !!gmTurnMini();                 // the GM's bar comes up by itself while one of their minis has its turn
+  bar.style.display = f && (!gmView() || gmBar || autoBar) ? 'flex' : 'none';
   const wasBar = document.body.classList.contains('gmBar');
-  document.body.classList.toggle('gmBar', gmView() && gmBar);
+  document.body.classList.toggle('gmBar', gmView() && (gmBar || autoBar));
   if (wasBar !== document.body.classList.contains('gmBar') && typeof placeBar === 'function') placeBar();
   if (!f) return;
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { dash: {} };
@@ -2020,6 +2035,136 @@ function renderActBar() {
   barLabel('actEnd', over ? '↩' : '⏭', over ? 'Not done' : 'End turn');
   $('actEnd').title = c ? (myTurn ? `End ${f.name}'s turn` : `Wait for ${f.name}'s turn`) : over ? 'Take it back: you still want to move or act' : 'Done for this party turn: when every player is done, the next one starts';
   renderActions();
+}
+
+// ---------- backgrounds behind the table (Adam: more immersion; one per floor look, picked under Floors) ----------
+// painted once on a canvas (no images to download) and shown flat behind everything
+const BACKDROPS = {
+  cave: 'Cave', forest: 'Forest', ice: 'Ice', ruins: 'Ruins', volcano: 'Volcano', beach: 'Beach cave',
+  sky: 'Open sky', night: 'Starry night', dungeon: 'Dark dungeon', sea: 'Under the sea',
+};
+const bgCache = {};
+function paintBackdrop(key) {
+  const W = 1600, H = 900, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  let s = 0; for (const ch of key) s = (s * 31 + ch.charCodeAt(0)) >>> 0;
+  const R = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const grad = (stops, y0 = 0, y1 = H) => { const l = g.createLinearGradient(0, y0, 0, y1); stops.forEach((col, i) => l.addColorStop(i / (stops.length - 1), col)); return l; };
+  const fill = (st) => { g.fillStyle = st; g.fillRect(0, 0, W, H); };
+  const glow = (x, y, r, col) => { const q = g.createRadialGradient(x, y, 0, x, y, r); q.addColorStop(0, col); q.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = q; g.fillRect(x - r, y - r, r * 2, r * 2); };
+  const dots = (n, col, r0, r1, yLo = 0, yHi = H) => { g.fillStyle = col; for (let i = 0; i < n; i++) { g.beginPath(); g.arc(R() * W, yLo + R() * (yHi - yLo), r0 + R() * (r1 - r0), 0, 7); g.fill(); } };
+  // a jagged ridge line across the picture, filled down to the bottom (or up to the top)
+  const ridge = (base, amp, step, col, up) => {
+    g.fillStyle = col; g.beginPath(); g.moveTo(0, up ? 0 : H);
+    for (let x = 0; x <= W + step; x += step) g.lineTo(x, base + (R() - 0.5) * 2 * amp);
+    g.lineTo(W, up ? 0 : H); g.closePath(); g.fill();
+  };
+  const spikes = (n, col, hLo, hHi, wLo, wHi, fromTop) => {
+    g.fillStyle = col;
+    for (let i = 0; i < n; i++) {
+      const x = R() * W, w = wLo + R() * (wHi - wLo), h = hLo + R() * (hHi - hLo);
+      g.beginPath();
+      if (fromTop) { g.moveTo(x - w / 2, 0); g.lineTo(x + w / 2, 0); g.lineTo(x + (R() - 0.5) * w * 0.3, h); }
+      else { g.moveTo(x - w / 2, H); g.lineTo(x + w / 2, H); g.lineTo(x + (R() - 0.5) * w * 0.3, H - h); }
+      g.closePath(); g.fill();
+    }
+  };
+  const tree = (x, base, h, col) => {           // a layered pine silhouette
+    g.fillStyle = col; g.fillRect(x - h * 0.03, base - h * 0.2, h * 0.06, h * 0.2);
+    for (let k = 0; k < 4; k++) { const y = base - h * 0.15 - k * h * 0.22, w = h * (0.42 - k * 0.08); g.beginPath(); g.moveTo(x - w / 2, y); g.lineTo(x + w / 2, y); g.lineTo(x, y - h * 0.35); g.closePath(); g.fill(); }
+  };
+  const pillar = (x, base, w, h, col, broken) => {
+    g.fillStyle = col; g.fillRect(x, base - h, w, h); g.fillRect(x - w * 0.2, base - h * 0.06, w * 1.4, h * 0.06);
+    if (broken) { g.beginPath(); g.moveTo(x, base - h); g.lineTo(x + w * 0.4, base - h - w * 0.5); g.lineTo(x + w, base - h - w * 0.15); g.lineTo(x + w, base - h); g.fill(); }
+    else g.fillRect(x - w * 0.2, base - h - w * 0.25, w * 1.4, w * 0.25);
+  };
+  switch (key) {
+    case 'cave':
+      fill(grad(['#120e0b', '#2a2019', '#1a1410']));
+      glow(W * 0.5, H * 0.55, 520, 'rgba(255,170,90,0.10)');
+      ridge(H * 0.16, 40, 60, '#0c0907', true); spikes(26, '#0e0b08', 60, 200, 30, 70, true);
+      ridge(H * 0.8, 45, 70, '#100c09'); spikes(16, '#0b0806', 50, 160, 40, 90, false);
+      dots(60, 'rgba(255,200,140,0.25)', 1, 2.5, H * 0.2, H * 0.8);
+      break;
+    case 'forest':
+      fill(grad(['#0d1f1a', '#1d3a2b', '#2e5136', '#16261b']));
+      glow(W * 0.7, H * 0.25, 420, 'rgba(220,255,200,0.12)');
+      for (const [n, base, hh, col] of [[22, H * 0.78, 300, '#183021'], [18, H * 0.9, 380, '#10221a'], [14, H * 1.02, 470, '#0a1711']])
+        for (let i = 0; i < n; i++) tree(R() * W, base + R() * 30, hh * (0.7 + R() * 0.5), col);
+      for (let i = 0; i < 70; i++) { const x = R() * W, y = H * 0.3 + R() * H * 0.6; glow(x, y, 10, 'rgba(230,255,120,0.55)'); }
+      break;
+    case 'ice':
+      fill(grad(['#0b1c33', '#2b5a86', '#a9d6f0']));
+      glow(W * 0.3, H * 0.2, 500, 'rgba(160,255,230,0.15)');
+      ridge(H * 0.62, 60, 120, '#5f8fb8'); ridge(H * 0.74, 40, 90, '#7fb2d6'); ridge(H * 0.86, 30, 70, '#cfe9f7');
+      spikes(14, 'rgba(200,240,255,0.55)', 80, 220, 20, 50, false);
+      dots(220, 'rgba(255,255,255,0.8)', 1, 3);
+      break;
+    case 'ruins':
+      fill(grad(['#2a2236', '#5b4a5e', '#a2826a', '#3a3029']));
+      glow(W * 0.5, H * 0.62, 600, 'rgba(255,200,140,0.20)');
+      ridge(H * 0.7, 25, 80, '#4a3d3a');
+      for (let i = 0; i < 9; i++) { const w = 40 + R() * 30; pillar(i * W / 9 + R() * 60, H * 0.82 + R() * 20, w, 160 + R() * 260, i % 2 ? '#3a302d' : '#2e2624', R() < 0.5); }
+      ridge(H * 0.9, 15, 60, '#241d1b');
+      dots(40, 'rgba(255,230,180,0.25)', 1, 2, H * 0.3, H * 0.8);
+      break;
+    case 'volcano':
+      fill(grad(['#1a0606', '#4a1208', '#8a2a0a', '#2a0a05']));
+      g.fillStyle = '#220804'; g.beginPath(); g.moveTo(W * 0.15, H); g.lineTo(W * 0.42, H * 0.38); g.lineTo(W * 0.58, H * 0.38); g.lineTo(W * 0.85, H); g.fill();
+      glow(W * 0.5, H * 0.36, 300, 'rgba(255,120,30,0.55)');
+      g.strokeStyle = 'rgba(255,110,20,0.7)'; g.lineWidth = 6; for (let i = 0; i < 4; i++) { g.beginPath(); let x = W * (0.45 + i * 0.03), y = H * 0.4; g.moveTo(x, y); while (y < H) { x += (R() - 0.5) * 40; y += 40; g.lineTo(x, y); } g.stroke(); }
+      ridge(H * 0.85, 30, 60, '#140403');
+      for (let i = 0; i < 90; i++) glow(R() * W, R() * H * 0.9, 5 + R() * 6, 'rgba(255,150,40,0.8)');
+      break;
+    case 'beach':
+      fill(grad(['#0b2030', '#1f4f63', '#3d7c86', '#c9b98a']));
+      ridge(H * 0.2, 35, 60, '#0a1a24', true); spikes(18, '#0a1a24', 50, 150, 40, 80, true);
+      glow(W * 0.5, H * 0.1, 420, 'rgba(160,240,255,0.2)');
+      g.fillStyle = 'rgba(160,230,240,0.10)'; for (let i = 0; i < 9; i++) { g.beginPath(); g.ellipse(R() * W, H * 0.55 + R() * H * 0.2, 120 + R() * 200, 10, 0, 0, 7); g.fill(); }
+      ridge(H * 0.84, 20, 90, '#b5a274'); ridge(H * 0.93, 12, 70, '#9a875c');
+      dots(50, 'rgba(255,255,255,0.35)', 2, 6, H * 0.2, H * 0.7);
+      break;
+    case 'sky':
+      fill(grad(['#3d7fd6', '#7fb6ef', '#d8ecff']));
+      glow(W * 0.8, H * 0.18, 260, 'rgba(255,250,210,0.8)');
+      for (let i = 0; i < 12; i++) { const x = R() * W, y = H * 0.15 + R() * H * 0.45, w = 120 + R() * 180; g.fillStyle = 'rgba(255,255,255,0.85)'; for (let k = 0; k < 5; k++) { g.beginPath(); g.ellipse(x + (k - 2) * w * 0.25, y + (k % 2) * 10, w * 0.3, w * 0.16, 0, 0, 7); g.fill(); } }
+      ridge(H * 0.84, 30, 100, '#6f9d5a'); ridge(H * 0.92, 15, 80, '#58854a');
+      break;
+    case 'night':
+      fill(grad(['#04061a', '#0f1840', '#2a2a5e']));
+      dots(380, 'rgba(255,255,255,0.85)', 0.5, 1.8, 0, H * 0.8);
+      glow(W * 0.22, H * 0.2, 140, 'rgba(240,240,255,0.5)'); g.fillStyle = '#f2f2ff'; g.beginPath(); g.arc(W * 0.22, H * 0.2, 46, 0, 7); g.fill();
+      ridge(H * 0.82, 40, 90, '#0a0d24'); for (let i = 0; i < 16; i++) tree(R() * W, H * 0.95, 220 + R() * 160, '#05071a');
+      break;
+    case 'dungeon': {
+      fill(grad(['#141418', '#24242c', '#121216']));
+      g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 3;
+      for (let y = 0; y < H; y += 48) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); for (let x = (y / 48) % 2 ? 0 : 48; x < W; x += 96) { g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 48); g.stroke(); } }
+      for (const x of [W * 0.12, W * 0.88]) { glow(x, H * 0.4, 260, 'rgba(255,150,50,0.35)'); g.fillStyle = '#ffb347'; g.beginPath(); g.ellipse(x, H * 0.4, 9, 18, 0, 0, 7); g.fill(); }
+      break;
+    }
+    case 'sea':
+      fill(grad(['#0b3a5c', '#0a2a48', '#05142a']));
+      g.fillStyle = 'rgba(160,230,255,0.07)'; for (let i = 0; i < 8; i++) { const x = R() * W; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 60, 0); g.lineTo(x + 260, H); g.lineTo(x + 120, H); g.fill(); }
+      ridge(H * 0.86, 30, 70, '#071a2c');
+      g.strokeStyle = '#0d3b2a'; g.lineWidth = 8; for (let i = 0; i < 20; i++) { let x = R() * W, y = H; g.beginPath(); g.moveTo(x, y); const h = 120 + R() * 220; for (let k = 0; k < 8; k++) { y -= h / 8; g.lineTo(x + Math.sin(k + i) * 14, y); } g.stroke(); }
+      g.strokeStyle = 'rgba(200,240,255,0.5)'; g.lineWidth = 2; for (let i = 0; i < 60; i++) { g.beginPath(); g.arc(R() * W, R() * H * 0.85, 2 + R() * 7, 0, 7); g.stroke(); }
+      break;
+  }
+  const v = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.7);   // soft dark edges so the table stays the focus
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)'); g.fillStyle = v; g.fillRect(0, 0, W, H);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+// host: change it and tell everyone (a new floor look switches it to the matching one)
+function setBackdrop(key) {
+  state.bg = BACKDROPS[key] ? key : '';
+  applyBackdrop(); sendAll({ t: 'bg', bg: state.bg }); save();
+}
+function applyBackdrop() {
+  if (scene) scene.background = BACKDROPS[state.bg] ? (bgCache[state.bg] ||= paintBackdrop(state.bg)) : new THREE.Color('#15171c');
+  const sel = $('bgPick');
+  if (sel && document.activeElement !== sel) sel.value = BACKDROPS[state.bg] ? state.bg : '';
 }
 
 // ---------- random dungeon floors: rooms joined by corridors, walls round them, darkness beyond ----------
@@ -2266,6 +2411,8 @@ function checkLurkers() {
   const curId = c.order[c.turn]?.id;
   c.order.sort(initOrder);
   c.turn = Math.max(0, c.order.findIndex(e => e.id === curId));
+  // found after its place in the order already went by: it still gets its turn before this round ends (Adam)
+  c.order.forEach((o, i) => { if (!o.lurk && i < c.turn && !(c.went || []).includes(o.id) && !(c.owed ||= []).includes(o.id)) c.owed.push(o.id); });
   return true;
 }
 // host: an undiscovered enemy's turn: it walks to a random square it can reach
@@ -2299,9 +2446,21 @@ function wander(x, quiet) {
 // host: next turn; undiscovered enemies (always at the end) take theirs by themselves
 function nextTurn() {
   const c = state.combat;
-  // who comes next is worked out before a wanderer moves: if it gets found, its new place in the order counts from next round
-  let wrap = c.turn + 1 >= c.order.length, nextId = c.order[(c.turn + 1) % c.order.length].id;
-  for (let n = 0; n <= c.order.length; n++) {
+  (c.went ||= []).push(c.order[c.turn]?.id);
+  // who comes next is worked out before a wanderer moves; one found after its slot went by takes a turn before the round ends
+  let wrap = !!c.owedNow || c.turn + 1 >= c.order.length, nextId = c.order[(c.turn + 1) % c.order.length].id;
+  delete c.owedNow;
+  for (let n = 0; n <= c.order.length + 4; n++) {
+    if (wrap) {
+      c.owed = (c.owed || []).filter(id => { const i = c.order.findIndex(e => e.id === id); return i >= 0 && !c.order[i].lurk && state.figures[id] && !fainted(state.figures[id]); });
+      if (c.owed.length) {
+        const id = c.owed.shift();
+        c.turn = c.order.findIndex(e => e.id === id); c.owedNow = true;
+        addLog({ kind: 'sys', text: `${state.figures[id].name} was found this round and takes its turn before the round ends.` });
+        break;
+      }
+      c.went = [];
+    }
     c.turn = wrap ? 0 : Math.max(0, c.order.findIndex(e => e.id === nextId));
     if (wrap) { c.round++; addLog({ kind: 'sys', text: `End of round ${c.round - 1}: Burn, Poison and weather effects happen now. Round ${c.round} begins.` }); countDown(); }
     const o = c.order[c.turn], x = state.figures[o.id];
@@ -3303,10 +3462,10 @@ function syncFigures() {
   for (const f of Object.values(state.figures)) upsertFig(f);
 }
 
-function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderEnding(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); renderBag(); if (isHost) { siteFeed(); renderSiteChars(); } }
+function rebuildAll() { buildBoard(); buildTiles(); syncFigures(); renderPlayers(); renderLog(); updateBoardInputs(); renderCombat(); renderRules(); renderParty(); renderEvent(); renderPause(); renderWarp(); renderEnding(); renderAttack(); renderLibrary(); renderBoardLib(); renderAreas(); renderFloor(); renderBag(); applyBackdrop(); if (isHost) { siteFeed(); renderSiteChars(); } }
 
 let figsVersion = 0, tilesVersion = 0, overlayKey = '', engaged = new Set(), hoverId = null, share = new Map();
-let rangeMesh = null, turnMarker = null, losLine = null, losLabel = null;
+let rangeMesh = null, turnMarker = null, gmArrow = null, losLine = null, losLabel = null;
 const ruleWorld = f => worldFor(f);              // the same grid view the GM uses, from this browser's copy
 const box = f => ({ x: f.x, z: f.z, ...fp(f) });
 function updateOverlays() {
@@ -3984,7 +4143,27 @@ function tick(now) {
   // a bobbing marker over whoever's turn it is
   const shownCombat = isHost && !gmView() ? combatView() : state.combat;
   const cur = shownCombat && figMeshes.get(shownCombat.order[shownCombat.turn]?.id);
-  if (cur) {
+  // GM: a big arrow over the mini they control this turn (Adam), instead of the small marker
+  const gmCur = gmTurnMini() && figMeshes.get(gmTurnMini().id);
+  if (gmCur) {
+    if (!gmArrow) {
+      const m = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthTest: false }), edge = new THREE.MeshBasicMaterial({ color: '#000', depthTest: false, side: THREE.BackSide });
+      gmArrow = new THREE.Group();
+      const headG = new THREE.ConeGeometry(0.34, 0.5, 4).rotateX(Math.PI), shaftG = new THREE.BoxGeometry(0.2, 0.5, 0.2);
+      const head = new THREE.Mesh(headG, m), shaft = new THREE.Mesh(shaftG, m); shaft.position.y = 0.48;
+      const headE = new THREE.Mesh(headG, edge), shaftE = new THREE.Mesh(shaftG, edge); headE.scale.setScalar(1.18); shaftE.scale.setScalar(1.25); shaftE.position.y = 0.48;
+      for (const o of [headE, shaftE]) o.renderOrder = 998;
+      for (const o of [head, shaft]) o.renderOrder = 999;   // drawn over walls so it never hides
+      gmArrow.add(headE, shaftE, head, shaft); scene.add(gmArrow);
+    }
+    gmArrow.visible = true;
+    const lb = gmCur.userData.label, top = lb.position.y + lb.scale.y * (1 - lb.center.y) + (gmCur.userData.timer ? gmCur.userData.timer.scale.y + 0.04 : 0);
+    const k = Math.max(1, camera.position.distanceTo(gmCur.position) / 10);   // stays big enough to spot when zoomed out
+    gmArrow.scale.setScalar(k);
+    gmArrow.position.set(gmCur.position.x, gmCur.position.y + top + 0.3 + 0.3 * k + Math.abs(Math.sin(performance.now() / 220)) * 0.22 * k, gmCur.position.z);
+    gmArrow.rotation.y += 0.04;
+  } else if (gmArrow) gmArrow.visible = false;
+  if (cur && !gmCur) {
     if (!turnMarker) {
       turnMarker = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 16).rotateX(Math.PI), new THREE.MeshStandardMaterial({ color: '#ffd23f', emissive: '#7a5a00' }));
       scene.add(turnMarker);
@@ -4348,11 +4527,42 @@ let lastTurnKey = '';
 // what each status does, for the HUD chips: the rulebook's own text, filled in by loadItems()
 const STATUS_HELP = {};
 // the turn order at the top right of the board (combat only), in the same window style as the HUD
+// the strip across the top: whoever's turn it is (big, glowing) and the next few, with a picture of each mini
+let stripKey = '';
+function renderTurnStrip(c) {
+  const el = $('turnStrip');
+  if (!el) return;
+  el.style.display = c && c.order.length ? 'flex' : 'none';
+  if (!c || !c.order.length) { stripKey = ''; return; }
+  const n = c.order.length, start = Math.max(0, c.turn), show = Math.min(n, innerWidth <= 700 ? 4 : 6), out = [];
+  for (let k = 0; k < show; k++) {
+    const o = c.order[(start + k) % n], f = state.figures[o.id];
+    if (!f) continue;
+    if (k === 0) { const r = document.createElement('div'); r.className = 'tc rnd'; r.innerHTML = `<small>ROUND</small><span>${c.round}</span>`; out.push(r); }
+    if (k === 1) { const a = document.createElement('div'); a.className = 'arrow'; a.textContent = '>'; out.push(a); }
+    const d = document.createElement('div');
+    d.className = 'tc' + (k === 0 ? ' now' : '') + (fainted(f) ? ' out' : '') + (o.lurk ? ' lurk' : '');
+    d.style.setProperty('--sc', sideOf(f) === 'player' ? '#3d7be0' : SIDES[sideOf(f)].color);
+    const pic = miniShot(f);
+    const im = document.createElement(pic ? 'img' : 'b'); if (pic) { im.src = pic; im.alt = ''; } else im.style.background = f.color || '#888';
+    const tag = document.createElement('small'), nm = document.createElement('span');
+    const mine = f.owner && f.owner === viewerId(), gms = gmView() && !f.owner;
+    tag.textContent = k === 0 ? (mine ? 'YOUR TURN' : gms ? 'YOUR MINI' : 'NOW') : 'NEXT';
+    nm.textContent = o.lurk && !gmView() ? '???' : f.name;
+    d.append(...(k <= 1 ? [tag, im, nm] : [im, nm]));
+    out.push(d);
+  }
+  el.replaceChildren(...out);
+  const key = c.round + ':' + c.order[start]?.id;
+  if (key !== stripKey) { stripKey = key; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+}
 function renderTurnBox() {
   const box = $('turnBox');
   if (!box) return;
   const c = isHost && !gmView() ? combatView() : state.combat;
-  box.style.display = c && c.order.length ? 'block' : 'none';
+  renderTurnStrip(c);
+  box.style.display = 'none';                      // the big strip across the top replaced this list (Adam: 'much more visible')
+  return;
   if (!c || !c.order.length) return;
   const rows = [], max = innerWidth <= 700 ? 6 : 10;
   // the title folds the list away and back (Adam), remembered in this browser
@@ -4812,6 +5022,8 @@ function wirePanel() {
   $('areaPlace').onclick = startAreaDraft;
   const floorOpts = () => ({ name: $('floorName').value, floor: $('floorNum').value, look: $('floorLook').value, size: $('floorSize').value,
     enemies: $('floorFoes').value, foes: $('floorFoeNames').value, items: $('floorItems').value, events: $('floorEvents').value, traps: $('floorTraps').value });
+  $('bgPick').onchange = () => act({ t: 'bg', bg: $('bgPick').value });
+  $('floorLook').addEventListener('change', () => act({ t: 'bg', bg: $('floorLook').value }));   // a new floor look brings its background (Adam)
   $('floorMake').onclick = () => {
     const b = curBoard();
     if (!b || !confirm(`Make a random floor on board "${b.name || b.id}"? Its terrain and every mini on it except the players' are replaced.`)) return;

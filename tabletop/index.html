@@ -289,6 +289,27 @@
   @keyframes lowHp { 50% { box-shadow: 0 0 0 2px #d8412f, 0 0 10px #d8412f; } }
   #hud.myturn { box-shadow: 0 0 0 2px #ffd76a, 0 0 16px #ffd76a88; }
   #hud.out { filter: grayscale(.8); }
+  /* turn order strip across the top of the table (Adam: 'much more visible'): whoever's turn it is big, the next ones after it */
+  #turnStrip { position: absolute; left: calc(50% - 150px); top: 50px; transform: translateX(-50%); z-index: 4; display: none; align-items: flex-end; gap: 8px; pointer-events: none; font-family: var(--pix); max-width: calc(100% - 420px); }
+  body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; max-width: calc(100% - 420px); }
+  #turnStrip .tc { display: flex; flex-direction: column; align-items: center; background: #14204ee6; border: 2px solid #5b6fc0; border-radius: 10px; padding: 4px 8px 5px; min-width: 64px; max-width: 110px; color: #cfd8ff; box-shadow: 0 3px 0 #0008; }
+  #turnStrip .tc img, #turnStrip .tc b { width: 40px; height: 40px; border-radius: 50%; background: #0006; object-fit: cover; display: block; border: 2px solid var(--sc, #888); box-sizing: border-box; }
+  #turnStrip .tc span { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  #turnStrip .tc small { font-size: 11px; opacity: .75; }
+  #turnStrip .tc.now { min-width: 110px; max-width: 170px; border-color: #ffd76a; background: #2a2f6ef2; color: #ffd76a; animation: stripNow 1.6s ease-in-out infinite; }
+  #turnStrip .tc.now img, #turnStrip .tc.now b { width: 64px; height: 64px; }
+  #turnStrip .tc.now span { font-size: 18px; font-weight: 700; }
+  #turnStrip .tc.now small { color: #fff; opacity: 1; font-size: 12px; letter-spacing: 1px; }
+  #turnStrip .tc.out { opacity: .45; filter: grayscale(1); }
+  #turnStrip .tc.lurk { opacity: .5; }
+  #turnStrip .tc.rnd { min-width: 0; padding: 6px 8px; align-self: center; } #turnStrip .tc.rnd span { font-size: 22px; color: #ffd76a; margin: 0; }
+  #turnStrip .arrow { color: #ffd76a; font-size: 18px; align-self: center; text-shadow: 0 2px 0 #000; }
+  #turnStrip.pop .tc.now { animation: stripPop .5s ease, stripNow 1.6s ease-in-out .5s infinite; }
+  @keyframes stripNow { 50% { box-shadow: 0 3px 0 #0008, 0 0 18px #ffd76acc; } }
+  @keyframes stripPop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  @media (max-width: 700px) { #turnStrip, body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; top: 92px; max-width: calc(100% - 20px); gap: 4px; }
+    #turnStrip .tc { min-width: 46px; padding: 3px 4px; } #turnStrip .tc img, #turnStrip .tc b { width: 28px; height: 28px; } #turnStrip .tc span { font-size: 11px; }
+    #turnStrip .tc.now { min-width: 76px; } #turnStrip .tc.now img, #turnStrip .tc.now b { width: 42px; height: 42px; } #turnStrip .tc.now span { font-size: 14px; } }
   #yourTurn { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -50%); z-index: 7; pointer-events: none; display: none;
     font: 700 44px var(--pix); color: #ffd76a; text-shadow: 0 4px 0 #000, 0 0 24px #ffb000; white-space: nowrap; }
   #yourTurn.show { display: block; animation: yourTurn 1.8s ease forwards; }
@@ -489,6 +510,7 @@
 <div id="vsBox"></div>
 <div id="effPop"></div>
 <div id="turnBox"></div>
+<div id="turnStrip"></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
   <div id="endScreen"><div class="et"></div><div class="es"></div><button id="endClose" class="fit">Close</button></div>
@@ -726,6 +748,9 @@
         <div><label>? Events</label><input id="floorEvents" type="number" min="0" max="8" value="2"></div>
         <div><label>Traps</label><input id="floorTraps" type="number" min="0" max="10" value="2" title="Hidden traps: only you see them"></div>
       </div>
+      <div class="row">
+        <div><label>Background</label><select id="bgPick" title="The picture behind the table, for everyone. Picking a floor Look switches it to the matching one."><option value="">None (plain dark)</option><option value="cave">Cave</option><option value="forest">Forest</option><option value="ice">Ice</option><option value="ruins">Ruins</option><option value="volcano">Volcano</option><option value="beach">Beach cave</option><option value="sky">Open sky</option><option value="night">Starry night</option><option value="dungeon">Dark dungeon</option><option value="sea">Under the sea</option></select></div>
+      </div>
       <label>Wild Pokémon on this dungeon (picked at random)</label>
       <input id="floorFoeNames" maxlength="200" placeholder="Golett, Zubat, Geodude" style="width:100%">
       <div class="row" style="margin-top:8px">
@@ -846,6 +871,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=96"></script>
+<script type="module" src="tabletop.js?v=97"></script>
 </body>
 </html>
