@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=100';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=100';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=101';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=101';
 
-const VERSION = 100;                              // raised by bump.py on every publish
+const VERSION = 101;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -2591,9 +2591,10 @@ function revealRoom(n, set) {
 // one more area explored (a hidden board, or a room of a random floor). With the GM's switch on, every 2nd one
 // brings up the dungeon event throw (PMD supplement: a 1d6 dungeon event every 2 new areas) (Adam: toggleable)
 function exploredArea() {
+  if (!state.rules.exploreEvents) return;         // the whole option is off: no counting, no messages, no events (Adam)
   state.explored++;
   addLog({ kind: 'sys', text: `A new area is revealed (${state.explored} explored).` });
-  if (state.rules.exploreEvents && state.explored % 2 === 0) {
+  if (state.explored % 2 === 0) {
     (state.pending ||= []).push({ id: rid(6), kind: 'event', who: 'The team', explore: true });
     addLog({ kind: 'sys', text: `${state.explored} areas explored: a dungeon event happens!` });
     renderEvent();
@@ -4800,6 +4801,7 @@ function renderRules() {
   $('ruleLimit').checked = state.rules.limit;
   $('ruleReveal').checked = state.rules.autoReveal;
   $('ruleExploreEv').checked = !!state.rules.exploreEvents;
+  $('exploredRow').style.display = state.rules.exploreEvents ? '' : 'none';
   $('ruleEdgeWalls').checked = state.rules.edgeWalls !== false;
   $('explored').textContent = state.explored;
   const b = curBoard();
