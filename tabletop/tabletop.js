@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=105';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=105';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=106';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=106';
 
-const VERSION = 105;                              // raised by bump.py on every publish
+const VERSION = 106;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -350,9 +350,9 @@ function onClientData(msg) {
       state = Object.assign(freshState(), msg.state);
       if ($('game').style.display !== 'block') enterGame(); else rebuildAll();
       break;
-    case 'fig': upsertFig(msg.fig); renderTurnBox(); break;
-    case 'figs': state.figures = msg.figures; syncFigures(); renderTurnBox(); break;
-    case 'del': delete state.figures[msg.id]; removeFigMesh(msg.id); renderTurnBox(); break;
+    case 'fig': upsertFig(msg.fig); renderHud(); break;
+    case 'figs': state.figures = msg.figures; syncFigures(); renderHud(); break;
+    case 'del': delete state.figures[msg.id]; removeFigMesh(msg.id); renderHud(); break;
     case 'boards': state.boards = msg.boards; buildBoard(); updateBoardInputs(); break;
     case 'tiles':
       if (msg.clear) state.tiles = {};
@@ -828,7 +828,7 @@ function handle(msg, from) {
     }
     case 'edit': {
       if (!mayMove) return;
-      if (!gm) msg = { t: 'edit', id: msg.id, name: msg.name, color: msg.color, turn: msg.turn };   // players: looks only
+      if (!gm) msg = { t: 'edit', id: msg.id, name: msg.name, color: msg.color, turn: msg.turn, pic: msg.pic };   // players: looks only
       if (msg.name != null) f.name = clean(msg.name) || f.name;
       if (msg.color != null) f.color = okColor(msg.color);
       if (msg.size != null && SIZE_CELLS[msg.size]) { f.size = msg.size; f.w = f.d = SIZE_CELLS[msg.size]; }
@@ -858,6 +858,10 @@ function handle(msg, from) {
       if (gm && msg.job != null) f.job = clean(msg.job, 30);
       if (gm && msg.hidden != null) f.hidden = !!msg.hidden;
       if (gm && msg.model !== undefined) f.model = msg.model && state.models[msg.model] ? msg.model : '';
+      if (msg.pic != null) {                      // the mini's portrait for the tiles and the turn order ('' = back to its own picture)
+        if (msg.pic === '') delete f.pic;
+        else if (typeof msg.pic === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(msg.pic) && msg.pic.length <= 90000) f.pic = msg.pic;
+      }
       pushFig(f); save();
       break;
     }
@@ -2766,7 +2770,7 @@ function carry(id, dx, dz, deg, around) {
 
 function pushFig(f, skipFor, live) {
   upsertFig(f, live);
-  if (!live) renderTurnBox();                     // a mini found, fainted or added changes the turn window
+  if (!live) renderHud();                         // a mini found, fainted, added or given a portrait: turn window and tiles follow
   if (isHost && !live && checkLurkers()) pushCombat();
   if (isHost && !live) checkWhiteout();
   if (!figVisible(f)) sendAll({ t: 'del', id: f.id });
@@ -4851,7 +4855,7 @@ function renderTeamTiles() {
   const list = Object.values(state.figures).filter(f => sideOf(f) === 'player' && !f.parent && f.id !== me?.id
     && (!isHost || (gmView() ? gmSees(boardAt(f.x, f.z)) : figVisible(f))));
   const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || {}, cur = c && c.order[c.turn]?.id;
-  const rows = list.slice(0, 6).map(f => { const st = f.st || {}; return { f, max: st.hpMax || 0, hp: st.hp ?? st.hpMax, sts: (st.status || []).slice(0, 4), done: !c && !!P.done?.[f.id], turn: cur === f.id, out: fainted(f), pic: miniShot(f) }; });
+  const rows = list.slice(0, 6).map(f => { const st = f.st || {}; return { f, max: st.hpMax || 0, hp: st.hp ?? st.hpMax, sts: (st.status || []).slice(0, 4), done: !c && !!P.done?.[f.id], turn: cur === f.id, out: fainted(f), pic: picOf(f) }; });
   const hud = $('hud'), top = hud && hud.style.display !== 'none' ? hud.offsetTop + hud.offsetHeight + 8 : 10;
   const key = JSON.stringify([top, list.length, rows.map(r => [r.f.id, r.f.name, r.f.owner ? 1 : 0, r.max, r.hp, r.sts, r.done, r.turn, r.out, r.pic.length])]);
   if (key === teamKey) return;
@@ -4909,7 +4913,7 @@ function renderHudOwn() {
   $('hudAct').textContent = out ? '' : c && !mine ? '' : spent ? '✖ Action used this turn' : '✔ Action ready (attack or Dash)';
   $('hudAct').className = spent ? 'used' : '';
   $('hudSt').replaceChildren(...(st.status || []).map(n => { const b = badge(n); b.textContent = n; return b; }));
-  const pic = miniShot(f);                        // the mini's own picture, framed like the teammates' tiles
+  const pic = picOf(f);                           // its portrait (or a picture of the mini), framed like the teammates' tiles
   if (pic && $('hudPic').getAttribute('src') !== pic) $('hudPic').src = pic;
   $('hudPic').style.display = pic ? '' : 'none';
   hud.classList.toggle('low', !out && max > 0 && (hp ?? max) / max <= 0.25);
@@ -4926,11 +4930,22 @@ const STATUS_HELP = {};
 // the turn order at the top right of the board (combat only), in the same window style as the HUD
 // the strip across the top: whoever's turn it is (big, glowing) and the next few, with a picture of each mini
 let stripKey = '', stripHtml = '';
+// the picture a mini shows on tiles and in the turn order: its portrait if one was added, else a picture of the mini itself
+const picOf = f => f.pic || miniShot(f);
+// any image file -> a small square portrait (pixel art stays crisp)
+async function portraitData(file) {
+  const bmp = await createImageBitmap(file), S = 96, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), k = Math.max(S / bmp.width, S / bmp.height), w = bmp.width * k, h = bmp.height * k;
+  g.imageSmoothingEnabled = !(bmp.width <= 64 && bmp.height <= 64);
+  g.drawImage(bmp, (S - w) / 2, (S - h) / 2, w, h);
+  const png = c.toDataURL('image/png');
+  return png.length <= 90000 ? png : c.toDataURL('image/jpeg', 0.85);
+}
 function turnChip(f, o) {
   const d = document.createElement('div');
   d.className = 'tc' + (o.cls ? ' ' + o.cls : '') + (fainted(f) ? ' out' : '');
   d.style.setProperty('--sc', sideOf(f) === 'player' ? '#3d7be0' : SIDES[sideOf(f)].color);
-  const pic = miniShot(f);
+  const pic = picOf(f);
   const im = document.createElement(pic ? 'img' : 'b'); if (pic) { im.src = pic; im.alt = ''; } else im.style.background = f.color || '#888';
   const nm = document.createElement('span'); nm.textContent = o.name || f.name;
   if (o.tag) { const t = document.createElement('small'); t.textContent = o.tag; d.append(t); }
@@ -4976,7 +4991,7 @@ function renderTurnStrip(c) {
   const max = innerWidth <= 700 ? 5 : 8, shown = T.items.slice(0, max), minimized = document.body.classList.contains('turnMin');
   const cur = T.items.find(x => /now|go/.test(x.cls || '')) || T.items[0];
   // rebuilt only when something in it changed (this runs often)
-  const key = JSON.stringify([T.title, minimized, T.items.length, shown.map(x => [x.f.id, x.cls, x.tag, x.name, fainted(x.f), x.f.color, figMeshes.get(x.f.id)?.userData.modelKey ?? null, !!figMeshes.get(x.f.id)])]);
+  const key = JSON.stringify([T.title, minimized, T.items.length, shown.map(x => [x.f.id, x.cls, x.tag, x.name, fainted(x.f), x.f.color, figMeshes.get(x.f.id)?.userData.modelKey ?? null, !!figMeshes.get(x.f.id), x.f.pic ? x.f.pic.length : 0])]);
   if (key !== stripHtml) {
     stripHtml = key;
     const out = [];
@@ -5084,7 +5099,7 @@ function partyMini() {
   return Object.values(state.figures).find(f => f.owner && f.owner === viewerId());
 }
 function renderParty() {
-  renderTurnBox();                                // the turn window follows the party turn straight away
+  renderHud();                                    // the turn window and the team tiles follow the party turn straight away
   const P = state.party || { turn: 1, from: {}, dash: {} }, on = !state.combat;
   $('partySec').style.display = on ? 'block' : 'none';
   if (!on) return;
@@ -5444,6 +5459,14 @@ function wirePanel() {
   $('newSide').onchange = newSide; newSide();
   $('selHide').onclick = () => selectedId && act({ t: 'edit', id: selectedId, hidden: !state.figures[selectedId].hidden });
   $('selTurn').onclick = () => selectedId && act({ t: 'edit', id: selectedId, turn: true });
+  $('selPic').onclick = () => selectedId && $('selPicFile').click();
+  $('selPicClear').onclick = () => selectedId && act({ t: 'edit', id: selectedId, pic: '' });
+  $('selPicFile').onchange = async () => {
+    const file = $('selPicFile').files[0]; $('selPicFile').value = '';
+    if (!file || !selectedId) return;
+    try { act({ t: 'edit', id: selectedId, pic: await portraitData(file) }); }
+    catch { status('That picture could not be read.'); setTimeout(() => status(''), 4000); }
+  };
   $('selModel').onchange = () => {
     const v = $('selModel').value;
     if (!selectedId) return;

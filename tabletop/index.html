@@ -641,6 +641,11 @@
         </div>
         <button id="selTurn" class="fit" style="margin-top:20px" title="Turn 45°">Turn ↻</button>
       </div>
+      <div class="row" style="margin-top:6px">
+        <button id="selPic" title="A picture for this mini's tile, the team tiles and the turn order (any image file; it stays in this game)">🖼 Portrait…</button>
+        <button id="selPicClear" class="fit" title="Back to a picture of the mini itself">✕</button>
+        <input id="selPicFile" type="file" accept="image/*" style="display:none">
+      </div>
       <button id="selAttack" class="primary" style="width:100%;margin-top:8px" title="Pick who to attack, then a move: accuracy and damage dice are rolled for you">⚔ Attack…</button>
       <div class="stats">
         <div id="speciesRow">
@@ -902,6 +907,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=105"></script>
+<script type="module" src="tabletop.js?v=106"></script>
 </body>
 </html>
