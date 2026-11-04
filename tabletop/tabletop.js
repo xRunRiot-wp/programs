@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=102';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=102';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=103';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=103';
 
-const VERSION = 102;                              // raised by bump.py on every publish
+const VERSION = 103;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -410,9 +410,11 @@ function handle(msg, from) {
       if (!isFinite(x) || !isFinite(z)) return;
       const { w, d } = fp(f), ox = f.x, oz = f.z;
       const turn = state.combat && state.combat.order[state.combat.turn];
-      const limited = !gm && state.rules.limit && state.combat && state.combat.order.some(o => o.id === f.id);
+      // in combat every mini, the GM's too, moves only on its turn and only as far as its stats allow (Adam);
+      // the GM can still put a mini anywhere by holding Shift while dragging (to fix a mistake)
+      const limited = state.rules.limit && !!state.combat && state.combat.order.some(o => o.id === f.id) && !(gm && msg.free);
       const exploring = !gm && state.rules.limit && !state.combat && !!f.owner;    // party turn: from where it started
-      if (limited && turn?.id !== f.id) { pushFig(f); note(from, `It's not ${f.name}'s turn.`); return; }
+      if (limited && turn?.id !== f.id) { pushFig(f); if (msg.done || !gm) note(from, `It's not ${f.name}'s turn.` + (gm ? ' Hold Shift while dragging to put it there anyway.' : '')); return; }
       if (f._from == null) f._from = { x: ox, z: oz };
       if (!gm && !state.combat && f.owner && !state.party.from[f.id]) { state.party.from[f.id] = { x: ox, z: oz }; pushParty(); }
       // players never step onto a square they can't see (standing at an area's open edge reveals it, below)
@@ -443,7 +445,7 @@ function handle(msg, from) {
           note(from, `${f.name} can't stand on another mini's square.`);
         }
       }
-      if (gm && msg.done && f.owner) {            // the GM puts a player's mini somewhere: the rest of its move starts there
+      if (gm && msg.done && f.owner && !limited) { // the GM puts a player's mini somewhere: the rest of its move starts there
         const P = state.party.from[f.id], C = state.combat?.order[state.combat.turn]?.id === f.id && state.combat.from;
         if (P && !state.combat) { state.party.from[f.id] = { ...P, x: f.x, z: f.z }; pushParty(); }
         if (C) { state.combat.from = { ...C, x: f.x, z: f.z }; pushCombat(); }
@@ -2192,7 +2194,7 @@ const FLOOR_LOOKS = {
   volcano: { name: 'Volcano', floor: 'cobble', wall: 'wall', props: ['rock'], pools: 'lava' },
   beach: { name: 'Beach cave', floor: 'sand', wall: 'wall', props: ['rock'], pools: 'water' },
 };
-const FLOOR_SIZES = { small: [20, 14], medium: [28, 20], large: [36, 26] };
+const FLOOR_SIZES = { small: [20, 14], medium: [28, 20], large: [36, 26], huge: [48, 32] };
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 function floorPlan(W, H) {
@@ -2218,6 +2220,83 @@ function floorPlan(W, H) {
   if (rooms.length >= 4) dig(rooms[0], rooms[rint(2, rooms.length - 1)]);   // one loop, so it isn't a single line
   return { rooms, open, hall };
 }
+// Mystery Dungeon style floors (Adam: 'generate levels like mystery dungeon'): the map is cut into a grid of sectors.
+// Most sectors hold a room, the rest only a crossing point. Neighbouring sectors are joined by one-square corridors
+// that bend on the way: a random tree (so every room can be reached) plus a few extra links for loops, and a few
+// corridors that lead nowhere.
+function floorPlanMD(W, H) {
+  const cols = Math.max(2, Math.min(6, Math.round((W - 2) / 10))), rows = Math.max(2, Math.min(4, Math.round((H - 2) / 9)));
+  const xs = [], ys = [];
+  for (let c = 0; c <= cols; c++) xs.push(1 + Math.floor(c * (W - 2) / cols));
+  for (let r = 0; r <= rows; r++) ys.push(1 + Math.floor(r * (H - 2) / rows));
+  const secs = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x0 = xs[c] + 1, x1 = xs[c + 1] - 2, y0 = ys[r] + 1, y1 = ys[r + 1] - 2;   // a gap along the edges for walls
+    secs.push({ c, r, x0, x1, y0, y1, aw: x1 - x0 + 1, ah: y1 - y0 + 1 });
+  }
+  const at = (c, r) => secs[r * cols + c];
+  const roomsWanted = Math.max(3, Math.round(secs.length * (0.6 + Math.random() * 0.25)));
+  [...secs].sort(() => Math.random() - 0.5).forEach((S, k) => {
+    if (k < roomsWanted && S.aw >= 4 && S.ah >= 4) {
+      const w = rint(Math.max(4, Math.ceil(S.aw * 0.55)), S.aw), h = rint(Math.max(4, Math.ceil(S.ah * 0.55)), S.ah);
+      const x = rint(S.x0, S.x1 - w + 1), y = rint(S.y0, S.y1 - h + 1);
+      S.room = { x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) };
+    } else S.pt = [rint(S.x0 + 1, Math.max(S.x0 + 1, S.x1 - 1)), rint(S.y0 + 1, Math.max(S.y0 + 1, S.y1 - 1))];
+  });
+  const rooms = secs.filter(S => S.room).map(S => S.room);
+  const open = new Set(), hall = new Set();
+  for (const R of rooms) for (let i = R.x; i < R.x + R.w; i++) for (let j = R.y; j < R.y + R.h; j++) open.add(i + ',' + j);
+  const dig = (i, j) => { const k = i + ',' + j; if (!open.has(k)) { open.add(k); hall.add(k); } };
+  const line = (a, b) => {                      // a straight run from a to b (same row or column)
+    let [i, j] = a; dig(i, j);
+    while (i !== b[0] || j !== b[1]) { i += Math.sign(b[0] - i); j += Math.sign(b[1] - j); dig(i, j); }
+  };
+  const door = (S, side) => {                   // the square just outside a room's side (or the crossing point)
+    if (!S.room) return S.pt;
+    const R = S.room;
+    return side === 'e' ? [R.x + R.w, rint(R.y, R.y + R.h - 1)] : side === 'w' ? [R.x - 1, rint(R.y, R.y + R.h - 1)]
+      : side === 's' ? [rint(R.x, R.x + R.w - 1), R.y + R.h] : [rint(R.x, R.x + R.w - 1), R.y - 1];
+  };
+  const join = (A, B) => {                      // A is west or north of B: out of A, a bend half way, into B
+    if (A.r === B.r) {
+      const a = door(A, 'e'), b = door(B, 'w'), mx = rint(Math.min(a[0], b[0]), Math.max(a[0], b[0]));
+      line(a, [mx, a[1]]); line([mx, a[1]], [mx, b[1]]); line([mx, b[1]], b);
+    } else {
+      const a = door(A, 's'), b = door(B, 'n'), my = rint(Math.min(a[1], b[1]), Math.max(a[1], b[1]));
+      line(a, [a[0], my]); line([a[0], my], [b[0], my]); line([b[0], my], b);
+    }
+  };
+  const nbrs = S => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dc, dr]) => S.c + dc >= 0 && S.c + dc < cols && S.r + dr >= 0 && S.r + dr < rows).map(([dc, dr]) => at(S.c + dc, S.r + dr));
+  const linked = new Set();
+  const link = (A, B) => {
+    const k = [secs.indexOf(A), secs.indexOf(B)].sort((x, y) => x - y).join('-');
+    if (linked.has(k)) return;
+    linked.add(k);
+    if (A.r < B.r || A.c < B.c) join(A, B); else join(B, A);
+  };
+  const first = pick(secs), seen = new Set([first]), stack = [first];
+  while (stack.length) {
+    const S = stack[stack.length - 1], next = nbrs(S).filter(x => !seen.has(x));
+    if (!next.length) { stack.pop(); continue; }
+    const T = pick(next); seen.add(T); stack.push(T); link(S, T);
+  }
+  for (const S of secs) for (const T of nbrs(S)) if (Math.random() < 0.18) link(S, T);
+  // a few corridors out of rooms that lead nowhere
+  const roomSecs = secs.filter(S => S.room);
+  for (let n = rint(1, Math.min(3, roomSecs.length)); n > 0; n--) {
+    const S = pick(roomSecs), side = pick(['n', 's', 'e', 'w']), [di, dj] = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[side];
+    const nearOther = (i, j) => rooms.some(R => R !== S.room && i >= R.x - 1 && i <= R.x + R.w && j >= R.y - 1 && j <= R.y + R.h);
+    let [i, j] = door(S, side);
+    const path = [];
+    for (let q = rint(2, 5); q > 0; q--) {
+      if (i < 1 || j < 1 || i > W - 2 || j > H - 2 || nearOther(i, j)) break;
+      path.push([i, j]); i += di; j += dj;
+    }
+    if (path.length >= 2) path.forEach(([a, c]) => dig(a, c));
+  }
+  rooms.sort(() => Math.random() - 0.5);        // the team starts in any room; the stairs go in the one furthest away
+  return { rooms, open, hall };
+}
 function makeFloor(b, D) {
   const look = FLOOR_LOOKS[D.look], live = layerOf(b) === (state.live || 1);
   if (D.size) {                                 // the board takes the chosen size
@@ -2229,7 +2308,8 @@ function makeFloor(b, D) {
   const W = b.cols, H = b.rows;
   if (W < 10 || H < 8) { note(state.gm, 'That board is too small for a floor: make it at least 10 x 8.'); return; }
   let plan;
-  for (let t = 0; t < 20; t++) { plan = floorPlan(W, H); if (plan.rooms.length >= 3) break; }
+  for (let t = 0; t < 20; t++) { plan = floorPlanMD(W, H); if (plan.rooms.length >= 3) break; }
+  if (plan.rooms.length < 2) for (let t = 0; t < 20; t++) { plan = floorPlan(W, H); if (plan.rooms.length >= 3) break; }
   const { rooms, open, hall } = plan;
   if (rooms.length < 2) { note(state.gm, 'Could not fit rooms on that board: try a bigger size.'); return; }
   const set = {}, at = (i, j) => (b.x + i) + ',' + (b.z + j);
@@ -2282,6 +2362,8 @@ function makeFloor(b, D) {
   F.rooms.push(...rooms.map(r => ({ x: b.x + r.x, z: b.z + r.y, w: r.w, h: r.h })));
   revealRoom(base + rooms.indexOf(start), {});
   D.start = F.rooms[base + rooms.indexOf(start)];
+  b.look = D.look;                               // the decorations (torches, rocks, flowers...) follow the floor's look
+  sendAll({ t: 'boards', boards: state.boards.filter(shown) });
   tilesChanged(); sendTiles(set, false);
   // everything that isn't on the team leaves the board; the team stands together in the first room
   for (const f of Object.values(state.figures)) {
@@ -3073,13 +3155,24 @@ function buildTiles() {
     piecesFor(t, i + 0.5, j + 0.5, { n: near(0, -1), s: near(0, 1), e: near(1, 0), w: near(-1, 0) }, i * 7919 + j * 104729,
       (shape, look, m) => { const key = shape + '|' + look; if (!parts.has(key)) parts.set(key, []); parts.get(key).push(lift ? lift.clone().multiply(m) : m.clone()); });
   }
+  // random floors (Joseph's playtest ideas): walls of different heights, every block a slightly different shade, and decorations
+  const deco = decoLooks(), lookAt = (i, j) => { const b = boardAt(i + 0.5, j + 0.5); return (b && deco[b.id]) || null; };
+  const P3 = new THREE.Vector3(), Q0 = new THREE.Quaternion(), S3 = new THREE.Vector3(), tint = new THREE.Color(), wallTops = new Map();
   for (const [type, keys] of Object.entries(byType)) {
     const { geo, mat } = kit(type), h = TILES[type].h;
     const im = new THREE.InstancedMesh(geo, mat, keys.length);
-    keys.forEach((k, n) => { const [i, j] = k.split(',').map(Number); im.setMatrixAt(n, mtx.makeTranslation(i + 0.5, h / 2 + 0.001, j + 0.5)); });
+    const looks = keys.map(k => { const [i, j] = k.split(',').map(Number); return lookAt(i, j); }), shade = type !== 'pit' && looks.some(Boolean);
+    keys.forEach((k, n) => {
+      const [i, j] = k.split(',').map(Number), L = looks[n];
+      let hh = h;
+      if (L && type === 'wall') { hh = h * (0.75 + 0.85 * wallNoise(i, j)) + (hash2(i, j, 3) - 0.5) * 0.1; wallTops.set(k, hh); }
+      im.setMatrixAt(n, hh === h ? mtx.makeTranslation(i + 0.5, h / 2 + 0.001, j + 0.5) : mtx.compose(P3.set(i + 0.5, hh / 2 + 0.001, j + 0.5), Q0, S3.set(1, hh / h, 1)));
+      if (shade) im.setColorAt(n, tint.setScalar(L ? blockShade(i, j) : 1));
+    });
     im.castShadow = h > 0.2; im.receiveShadow = true;
     tileGroup.add(im);
   }
+  buildDecor(byType, lookAt, wallTops);
   for (const [key, list] of parts) {
     const [shape, look] = key.split('|');
     const im = new THREE.InstancedMesh(SHAPES[shape], kit(look).mat, list.length);
@@ -3098,6 +3191,105 @@ function buildTiles() {
   }
   for (const g of figMeshes.values()) { const f = state.figures[g.userData.id]; if (f) upsertFig(f, true); }
 }
+// ---------- decorations on random floors: torches on the walls, small things on the floor (made here, no files) ----------
+const DECOR = {
+  cave: { torch: 0.07, bits: 'rock', rate: 0.07 }, ruins: { torch: 0.09, bits: 'rubble', rate: 0.08 },
+  volcano: { torch: 0.05, bits: 'ember', rate: 0.08 }, beach: { torch: 0.05, bits: 'shell', rate: 0.07 },
+  forest: { torch: 0, bits: 'flower', rate: 0.12 }, ice: { torch: 0, bits: 'crystal', rate: 0.07 },
+};
+// the same square always gets the same number, on every screen
+function hash2(i, j, s = 0) {
+  let h = Math.imul(i | 0, 374761393) ^ Math.imul(j | 0, 668265263) ^ Math.imul(s | 0, 1274126177);
+  h = Math.imul(h ^ (h >>> 13), 1103515245); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+// smooth up-and-down across the map, so walls near each other have similar heights
+function wallNoise(i, j) {
+  const P = 5, gi = Math.floor(i / P), gj = Math.floor(j / P), u0 = i / P - gi, v0 = j / P - gj, sm = t => t * t * (3 - 2 * t), u = sm(u0), v = sm(v0);
+  const a = hash2(gi, gj, 7), b = hash2(gi + 1, gj, 7), c = hash2(gi, gj + 1, 7), d = hash2(gi + 1, gj + 1, 7);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+const blockShade = (i, j) => { const v = hash2(i, j, 5); return v < 0.06 ? 0.74 : 0.88 + v * 0.18; };
+// board id -> the look of the random floor on it (floors made before this: the dungeon's look)
+function decoLooks() {
+  const out = {};
+  for (const b of state.boards) { const L = b.look || (state.dungeon?.board === b.id ? state.dungeon.look : null); if (L && FLOOR_LOOKS[L]) out[b.id] = L; }
+  return out;
+}
+let glowTex = null;
+function glowTexture() {
+  if (glowTex) return glowTex;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), q = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  q.addColorStop(0, 'rgba(255,255,255,1)'); q.addColorStop(0.25, 'rgba(255,210,140,0.7)'); q.addColorStop(1, 'rgba(255,140,40,0)');
+  g.fillStyle = q; g.fillRect(0, 0, 64, 64);
+  return (glowTex = new THREE.CanvasTexture(c));
+}
+const DECO_GEO = {}, DECO_MAT = {};
+const decoGeo = n => DECO_GEO[n] ||= ({
+  stick: () => new THREE.CylinderGeometry(0.022, 0.03, 0.34, 6), flame: () => new THREE.ConeGeometry(0.055, 0.15, 8),
+  rock: () => new THREE.DodecahedronGeometry(0.07, 0), rubble: () => new THREE.BoxGeometry(0.11, 0.06, 0.08), shell: () => new THREE.SphereGeometry(0.05, 8, 5),
+  petal: () => new THREE.SphereGeometry(0.04, 6, 4), tuft: () => new THREE.ConeGeometry(0.035, 0.14, 5), crystal: () => new THREE.ConeGeometry(0.045, 0.24, 5),
+})[n]();
+const decoMat = n => DECO_MAT[n] ||= ({
+  stick: () => new THREE.MeshStandardMaterial({ color: '#5a3b22', roughness: 0.9 }),
+  flame: () => new THREE.MeshBasicMaterial({ color: '#ffb347' }),
+  glow: () => new THREE.SpriteMaterial({ map: glowTexture(), color: '#ff9a3c', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.85 }),
+  spark: () => new THREE.MeshBasicMaterial({ color: '#ffffff' }),
+  crystal: () => new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#1d5566', roughness: 0.2, metalness: 0.1 }),
+  plain: () => new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9 }),
+})[n]();
+const BITS = {   // per look: [geometry, material, colours, flatten, height]
+  rock: [['rock', 'plain', ['#8a8580', '#77716b', '#9a948c'], 0.65, 0.03]],
+  rubble: [['rubble', 'plain', ['#9c9286', '#857c71', '#b0a698'], 1, 0.03]],
+  ember: [['rock', 'plain', ['#3a2a24', '#2c201c'], 0.65, 0.03], ['petal', 'spark', ['#ff7a1a', '#ffb347'], 0.6, 0.06]],
+  shell: [['shell', 'plain', ['#f4e9dc', '#f2c6c0', '#f5d6a8'], 0.35, 0.02]],
+  flower: [['tuft', 'plain', ['#4f8f3a', '#3f7a2e'], 1, 0.07], ['petal', 'plain', ['#ff8fb1', '#ffd84d', '#ffffff', '#b98cff'], 0.8, 0.15]],
+  crystal: [['crystal', 'crystal', ['#9fe8ff', '#c8f4ff', '#7fd0ff'], 1, 0.1]],
+};
+function buildDecor(byType, lookAt, wallTops) {
+  const floorKey = {};
+  for (const [type, keys] of Object.entries(byType)) if (TILES[type].group === 'Floors' && type !== 'pit') for (const k of keys) floorKey[k] = type;
+  const M = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), E = new THREE.Euler(), C = new THREE.Color(), AX = new THREE.Vector3();
+  const lists = {};                             // geometry|material -> [matrix, colour]
+  const add = (g, m, mat, col) => (lists[g + '|' + m] ||= []).push([mat.clone(), col]);
+  for (const [k, hh] of wallTops) {             // torches on walls that face a floor
+    const [i, j] = k.split(',').map(Number), D = DECOR[lookAt(i, j)];
+    if (!D?.torch || hash2(i, j, 11) >= D.torch) continue;
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([di, dj]) => floorKey[(i + di) + ',' + (j + dj)]);
+    if (!dirs.length) continue;
+    const [di, dj] = dirs[Math.floor(hash2(i, j, 12) * dirs.length)], tilt = 0.45, y = Math.min(hh * 0.68, 0.85);
+    Q.setFromAxisAngle(AX.set(dj, 0, -di), tilt);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(Q), base = new THREE.Vector3(i + 0.5 + di * 0.52, y, j + 0.5 + dj * 0.52);
+    add('stick', 'stick', M.compose(P.copy(base).addScaledVector(up, 0.12), Q, S.set(1, 1, 1)), null);
+    const top = base.clone().addScaledVector(up, 0.33);
+    add('flame', 'flame', M.compose(P.copy(top), Q0, S.set(1, 1, 1)), null);
+    const glow = new THREE.Sprite(decoMat('glow'));
+    glow.position.copy(top); glow.scale.setScalar(0.7);
+    glow.userData.flicker = { base: 0.7, ph: hash2(i, j, 13) * 6.28 };
+    tileGroup.add(glow);
+  }
+  for (const [k, type] of Object.entries(floorKey)) {   // small things on plain floor squares
+    const [i, j] = k.split(',').map(Number), L = lookAt(i, j), D = DECOR[L];
+    if (!D || type !== FLOOR_LOOKS[L].floor || state.tiles[k] !== type || hash2(i, j, 21) >= D.rate) continue;
+    const y0 = TILES[type].h, n = 2 + Math.floor(hash2(i, j, 22) * 3);
+    for (let q = 0; q < n; q++) {
+      const x = i + 0.2 + hash2(i, j, 30 + q) * 0.6, z = j + 0.2 + hash2(i, j, 40 + q) * 0.6, r = hash2(i, j, 50 + q), sc = 0.6 + r * 0.8;
+      BITS[D.bits].forEach(([g, m, cols, flat, lift], part) => {
+        if (part && r < 0.4) return;            // second parts (sparks, petals) on most, not all
+        E.set(D.bits === 'crystal' ? (r - 0.5) * 0.6 : 0, r * 6.28, D.bits === 'crystal' ? (hash2(i, j, 60 + q) - 0.5) * 0.6 : 0);
+        add(g, m, M.compose(P.set(x, y0 + lift * sc, z), Q.setFromEuler(E), S.set(sc, sc * flat, sc)), cols[Math.floor(hash2(i, j, 70 + q + part) * cols.length)]);
+      });
+    }
+  }
+  for (const [key, list] of Object.entries(lists)) {
+    const [g, m] = key.split('|'), im = new THREE.InstancedMesh(decoGeo(g), decoMat(m), list.length);
+    list.forEach(([mat, col], n) => { im.setMatrixAt(n, mat); if (col) im.setColorAt(n, C.set(col)); });
+    im.castShadow = false; im.receiveShadow = g !== 'flame';
+    tileGroup.add(im);
+  }
+}
+const Q0 = new THREE.Quaternion();
 const signMats = new Map();
 // round sign: a character in a coloured ring (the ? is a yellow ? in a red ring)
 function signMat(ch, ring, fill) {
@@ -4191,7 +4383,13 @@ function tick(now) {
   animateDice(performance.now());
   animateFx(performance.now());
   updatePrompts();
-  if (tileGroup) { const b = Math.sin(performance.now() / 400) * 0.06; for (const o of tileGroup.children) if (o.userData.bob) o.position.y = o.userData.bob + b; }
+  if (tileGroup) {
+    const t = performance.now(), b = Math.sin(t / 400) * 0.06;
+    for (const o of tileGroup.children) {
+      if (o.userData.bob) o.position.y = o.userData.bob + b;
+      else if (o.userData.flicker) { const F = o.userData.flicker; o.scale.setScalar(F.base * (1 + 0.1 * Math.sin(t * 0.011 + F.ph) + 0.06 * Math.sin(t * 0.029 + F.ph * 2))); }
+    }
+  }
   updateOverlays();
   updateAimRings();
   // a bobbing marker over whoever's turn it is
@@ -4392,7 +4590,7 @@ function onMove(e) {
   dragging.moved = true;
   figMeshes.get(dragging.id).userData.target.set(pos.x, groundAt(pos.x, pos.z, c.w, c.d) + 0.35, pos.z);
   const now = performance.now();
-  if (now - lastSend > 60) { lastSend = now; act({ t: 'move', id: dragging.id, x: pos.x, z: pos.z }); }
+  if (now - lastSend > 60) { lastSend = now; act({ t: 'move', id: dragging.id, x: pos.x, z: pos.z, free: !!e.shiftKey }); }
 }
 
 function onUp(e) {
@@ -4405,7 +4603,7 @@ function onUp(e) {
   if (cm && e && Math.hypot(e.clientX - cm.x, e.clientY - cm.y) < 6 && cm.p && state.figures[cm.id]) {   // didn't pan the camera: move
     const c = fp(state.figures[cm.id]);
     const pos = isHost ? snapPos(cm.p.x, cm.p.z, c.w, c.d) : { x: gridSnap(cm.p.x, c.w), z: gridSnap(cm.p.z, c.d) };
-    act({ t: 'move', id: cm.id, x: pos.x, z: pos.z, snap: true, done: true });
+    act({ t: 'move', id: cm.id, x: pos.x, z: pos.z, snap: true, done: true, free: !!e?.shiftKey });
     return;
   }
   if (!dragging) return;
@@ -4419,7 +4617,7 @@ function onUp(e) {
   const pos = isHost ? (snapOn() ? snapPos(t.x, t.z, c.w, c.d) : clampPos(t.x, t.z, c.w, c.d))
     : (snapOn() ? { x: gridSnap(t.x, c.w), z: gridSnap(t.z, c.d) } : { x: t.x, z: t.z });
   t.set(pos.x, groundAt(pos.x, pos.z, c.w, c.d), pos.z);
-  if (d.moved) act({ t: 'move', id: d.id, x: pos.x, z: pos.z, snap: snapOn(), done: true });
+  if (d.moved) act({ t: 'move', id: d.id, x: pos.x, z: pos.z, snap: snapOn(), done: true, free: !!e?.shiftKey });
 }
 
 // =====================================================================
