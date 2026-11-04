@@ -730,6 +730,7 @@
       <label style="color:var(--text);margin-top:8px"><input id="ruleLimit" type="checkbox" checked> Limit moves to each turn's range (combat and party turns)</label>
       <label style="color:var(--text)"><input id="ruleEdgeWalls" type="checkbox" checked> Low walls round every board's edge (a one-square gap in the middle where two boards join)</label>
       <label style="color:var(--text)"><input id="ruleReveal" type="checkbox" checked> Reveal a hidden area when a player stands at its open edge</label>
+      <label style="color:var(--text)" title="A hidden board or a random floor's room counts as one area. The throw button pops up for you like a ? Event."><input id="ruleExploreEv" type="checkbox"> Dungeon event every 2 areas explored</label>
       <div class="row" style="margin-top:8px">
         <span>Areas explored: <b id="explored">0</b></span>
         <button id="eventRoll" class="fit" title="Throw a hidden d6: 1 trap/hazard, 2 enemy team, 3 treasure, 4 guild challenge, 5 safe passage, 6 mission clue">Roll dungeon event</button>
@@ -876,6 +877,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=98"></script>
+<script type="module" src="tabletop.js?v=99"></script>
 </body>
 </html>

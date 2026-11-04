@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=98';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=98';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=99';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=99';
 
-const VERSION = 98;                              // raised by bump.py on every publish
+const VERSION = 99;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -744,6 +744,7 @@ function handle(msg, from) {
       if (msg.limit != null) state.rules.limit = !!msg.limit;
       if (msg.autoReveal != null) state.rules.autoReveal = !!msg.autoReveal;
       if (msg.edgeWalls != null) { state.rules.edgeWalls = !!msg.edgeWalls; buildBoard(); }
+      if (msg.exploreEvents != null) state.rules.exploreEvents = !!msg.exploreEvents;
       pushRules();
       break;
     }
@@ -771,7 +772,7 @@ function handle(msg, from) {
       if (pend) state.pending = state.pending.filter(x => x !== pend);
       rollingEvent = true;                      // still paused while the die rolls
       renderEvent();
-      rollEvent(from, pend?.who, pend ? { x: pend.x, z: pend.z } : msg.at);
+      rollEvent(from, pend?.explore ? '' : pend?.who, pend && pend.x != null ? { x: pend.x, z: pend.z } : msg.at);
       break;
     }
     case 'eventTool': {                          // GM helper rolls on the event card (only the GM sees them)
@@ -2543,10 +2544,7 @@ function pushRules() { renderRules(); sendAll({ t: 'rules', rules: state.rules, 
 function revealBoard(b) {
   if (!b.hidden) return;
   b.hidden = false;
-  if (!b.explored) {
-    b.explored = true; state.explored++;
-    addLog({ kind: 'sys', text: `A new area is revealed (${state.explored} explored).` });
-  }
+  if (!b.explored) { b.explored = true; exploredArea(); }
   buildBoard(); updateBoardInputs(); resyncPlayers(); pushRules(); save();
 }
 
@@ -2567,10 +2565,25 @@ function revealNextTo(f) {
 // an ally lights up the corridor squares within 2 of it; stepping into (or next to) a room shows the whole room and its walls
 function revealRoom(n, set) {
   const F = state.fog, R = F.rooms[n];
+  let fresh = false;
   for (let i = R.x - 1; i <= R.x + R.w; i++) for (let j = R.z - 1; j <= R.z + R.h; j++) {
     const k = i + ',' + j;
+    if (F.hid[k] === n) fresh = true;
     if (F.hid[k] != null) { delete F.hid[k]; set[k] = state.tiles[k] || null; }
   }
+  if (fresh) exploredArea();                     // a random floor's room counts as an explored area
+}
+// one more area explored (a hidden board, or a room of a random floor). With the GM's switch on, every 2nd one
+// brings up the dungeon event throw (PMD supplement: a 1d6 dungeon event every 2 new areas) (Adam: toggleable)
+function exploredArea() {
+  state.explored++;
+  addLog({ kind: 'sys', text: `A new area is revealed (${state.explored} explored).` });
+  if (state.rules.exploreEvents && state.explored % 2 === 0) {
+    (state.pending ||= []).push({ id: rid(6), kind: 'event', who: 'The team', explore: true });
+    addLog({ kind: 'sys', text: `${state.explored} areas explored: a dungeon event happens!` });
+    renderEvent();
+  }
+  pushRules();
 }
 function revealFog(f) {
   const F = state.fog;
@@ -4296,7 +4309,9 @@ function onDown(e) {
   }
   const id = figAt(e);
   if (!id) {                                    // a click (not a drag) on a square sends the selected mini there (Adam)
-    const sel = selectedId && state.figures[selectedId];
+    let sel = selectedId && state.figures[selectedId];
+    // players: with nothing (or someone else) picked, the click moves their own mini, no need to pick it every time (Adam)
+    if (!(sel && canMove(sel)) && !isHost) { const own = myMini(); if (own) { sel = own; select(own.id); } }
     if (sel && canMove(sel) && !preview) clickMove = { id: sel.id, x: e.clientX, y: e.clientY, p: floorAt(e) };
     else select(null);
     return;
@@ -4380,6 +4395,8 @@ function onUp(e) {
 // =====================================================================
 // Side panel
 // =====================================================================
+// a player's own mini (the first one, if they have several)
+const myMini = () => Object.values(state.figures).find(f => f.owner && f.owner === viewerId() && canMove(f)) || null;
 function select(id) {
   const prev = selectedId; selectedId = id;
   if (typeof renderParty === 'function' && $('partySec')) renderParty();
@@ -4711,7 +4728,7 @@ function renderEvent() {
   box.innerHTML = '';
   for (const p of P) {
     const kind = p.kind || 'event', d = document.createElement('div'); d.className = 'evwait';
-    const label = { event: `${p.who} checked a ?`, chest: `${p.who} opened a chest`, clue: `${p.who} found a clue`, goal: `${p.who} reached the Dungeon Goal`,
+    const label = { event: p.explore ? 'Every 2 areas explored: dungeon event' : `${p.who} checked a ?`, chest: `${p.who} opened a chest`, clue: `${p.who} found a clue`, goal: `${p.who} reached the Dungeon Goal`,
       loot: `Loot: ${p.tier} (rolled ${p.sum})${p.tier === 'Motherlode' ? ` - two Rare items + a TM (${p.given}/3 given)` : ''}` }[kind];
     d.innerHTML = '<span></span><span class="evbtns"></span>';
     d.firstChild.textContent = label;
@@ -4767,6 +4784,7 @@ function renderRules() {
   if (!isHost) return;
   $('ruleLimit').checked = state.rules.limit;
   $('ruleReveal').checked = state.rules.autoReveal;
+  $('ruleExploreEv').checked = !!state.rules.exploreEvents;
   $('ruleEdgeWalls').checked = state.rules.edgeWalls !== false;
   $('explored').textContent = state.explored;
   const b = curBoard();
@@ -4817,6 +4835,7 @@ function enterGame() {
   $('whoAmI').textContent = isHost ? `You are the GM (${myName}). You can move everything.` : `You are ${myName}. You can move your own mini (white ring).`;
   if (!renderer) { initView(); wirePanel(); }
   rebuildAll();
+  if (!isHost && !selectedId) { const own = myMini(); if (own) select(own.id); }   // players start with their own mini picked
 }
 
 // a newer version was published: offer a reload (the GM's game and the players' minis come back as they were)
@@ -5195,6 +5214,7 @@ function wirePanel() {
   $('ruleLimit').onchange = () => act({ t: 'rules', limit: $('ruleLimit').checked });
   $('ruleEdgeWalls').onchange = () => act({ t: 'rules', edgeWalls: $('ruleEdgeWalls').checked });
   $('ruleReveal').onchange = () => act({ t: 'rules', autoReveal: $('ruleReveal').checked });
+  $('ruleExploreEv').onchange = () => act({ t: 'rules', exploreEvents: $('ruleExploreEv').checked });
   $('eventRoll').onclick = () => { const t = controls.target; act({ t: 'dungeonEvent', at: { x: t.x, z: t.z } }); };
   $('wallBoard').onclick = () => { const b = curBoard(); if (b) act({ t: 'boardWalls', id: b.id }); };
   $('hideBoard').onclick = () => { const b = curBoard(); act({ t: 'boardHide', id: b.id, hidden: !b.hidden }); };
@@ -5277,7 +5297,7 @@ $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('j
 if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('joinBtn').click(); }   // straight in
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, select: id => select(id), get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
+window.tabletop = { get state() { return state; }, get selectedId() { return selectedId; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, select: id => select(id), get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
   hover(id) { hoverId = id; },
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
