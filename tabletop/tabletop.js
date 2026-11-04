@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=99';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=99';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=100';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=100';
 
-const VERSION = 99;                              // raised by bump.py on every publish
+const VERSION = 100;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -711,8 +711,9 @@ function handle(msg, from) {
       break;
     }
     case 'partyDone': {                         // exploring: a player ends their turn; when every ally is done, the next party turn starts
-      if (!mayMove || state.combat || !f.owner) return;
+      if (!mayMove || state.combat || !(f.owner || (gm && state.party.foes && partyFoes().includes(f)))) return;
       const P = state.party, done = P.done ||= {};
+      if (done[f.id] && P.foes && f.owner) { note(from, "The enemies are taking their turn now."); return; }
       if (done[f.id]) { delete done[f.id]; addLog({ kind: 'sys', text: `${f.name} isn't done after all.` }); pushParty(); return; }
       done[f.id] = true;
       addLog({ kind: 'sys', text: `${f.name} ends their turn.` });
@@ -1294,13 +1295,14 @@ async function attackRoll(f, tg, mv, msg, from) {
       const n = Math.max(1, mv.acc.reduce((s, k) => s + (a[k] || 0), 0)), pain = painOf(f), cut = accuracyCut(f, mv);
       // Never Fail moves (and the Sure Shot status) always hit; High Critical crits on 1 fewer success
       const sure = /never fail/i.test(mv.effect || '') || (f.st.status || []).includes('Sure Shot'), critAt = /high critical/i.test(mv.effect || '') ? 3 : 4;
-      let hits = 0;
+      let hits = 0, raw = 0;
       await rollPhysics({ sides: 6, n, pool: true, at, dir }, from, (t, parts) => {
-        hits = Math.max(0, parts.filter(v => v >= 4).length - pain - cut.move - cut.status);
+        raw = parts.filter(v => v >= 4).length;
+        hits = Math.max(0, raw - pain - cut.move - cut.status);
         if (sure) hits = Math.max(1, hits);
         const minus = [pain && `pain -${pain}`, cut.move && `reduced accuracy -${cut.move}`, cut.status && `status -${cut.status}`, sure && 'never fails'].filter(Boolean).join(', ');
         return `${f.name} uses ${mv.name} on ${tg.name}: accuracy ${n} dice (${mv.acc.join(' + ') || 'none set'}) - ${hits} success${hits === 1 ? '' : 'es'}` +
-          `${minus ? ` (${minus})` : ''}, ${hits ? (hits >= critAt && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : 'miss.'}`;
+          `${minus ? ` (${minus})` : ''}, ${hits ? (hits >= critAt && mv.cat !== 'Status' ? 'critical hit!' : 'hit!') : raw ? `miss: ${raw} success${raw === 1 ? '' : 'es'} rolled, but ${minus} took ${raw === 1 ? 'it' : 'them'} away.` : 'miss.'}`;
       });
       if (!hits || mv.cat === 'Status') { const fx = { t: 'fx', kind: mv.cat, miss: !hits, type: mv.type, from: f.id, to: tg.id }; sendAll(fx); playFx(fx); }
       state.attack = hits && mv.cat !== 'Status' ? { id: f.id, target: tg.id, move: mv, by: from, crit: hits >= critAt } : null;
@@ -1996,6 +1998,7 @@ function useFrom(name, msg) {
 let gmBar = false; try { gmBar = localStorage.getItem('tabletop-gmBar') === '1'; } catch {}
 // GM: the GM's own mini (enemy/NPC, not a wandering undiscovered one) whose combat turn it is
 function gmTurnMini() {
+  if (gmView() && !state.combat && state.party?.foes) return partyFoes().find(x => !state.party.done?.[x.id]) || null;   // exploring: the enemies' turn
   const c = state.combat, o = gmView() && c && c.order[c.turn], x = o && !o.lurk && state.figures[o.id];
   return x && !x.owner ? x : null;
 }
@@ -2522,9 +2525,21 @@ function partyTeam() {
   return Object.values(state.figures).filter(x => x.owner && !x.parent && figVisible(x) && !fainted(x)
     && x.owner !== state.gm && state.players[x.owner] && state.players[x.owner].online !== false);
 }
+// discovered enemies (in view, able to fight) take their turn after the players, before the next party turn (Adam)
+const partyFoes = () => Object.values(state.figures).filter(x => sideOf(x) === 'enemy' && !x.owner && !x.parent && figVisible(x) && !fainted(x) && fights(x));
 function checkPartyDone() {
-  const done = state.party?.done || {}, team = partyTeam();
+  const P = state.party, done = P?.done || {}, team = partyTeam();
   if (state.combat || state.paused || !team.length || !team.every(x => done[x.id])) return false;
+  const foes = partyFoes().filter(x => !done[x.id]);
+  if (foes.length) {
+    if (!P.foes) {
+      P.foes = true;
+      addLog({ kind: 'sys', text: `The enemies' turn: ${foes.map(x => x.name).join(', ')}.` });
+      addLog({ kind: 'sys', text: 'Move and act with each enemy (the bar comes up for it), then End turn. The next party turn starts after the last one.', to: state.gm });
+      pushParty();
+    }
+    return true;
+  }
   nextPartyTurn();
   return true;
 }
@@ -4033,7 +4048,7 @@ function renderAttack() {
     if (!m) { $('atkSum').textContent = 'Pick a move.'; return; }
     const val = (k, own) => +([...rows.querySelectorAll('input')].find(i => i.dataset.key === k && !!i.dataset.own === own)?.value) || 0;
     const acc = Math.max(1, m.acc.reduce((s, k) => s + val(k, true), 0));
-    const stab = (f.st?.types || []).includes(m.type) ? 1 : 0, mu = matchup(m.type, tg.st?.types || []), pain = painOf(f);
+    const stab = (f.st?.types || []).includes(m.type) ? 1 : 0, mu = m.cat === 'Status' ? { immune: false, mod: 0 } : matchup(m.type, tg.st?.types || []), pain = painOf(f);   // status moves ignore type immunity (Pokemon rules)
     const dmg = Math.max(1, val(m.dmg, true) + m.power - val(defenceFor(m.cat), false) + stab);
     const notes = [stab && 'same type +1 die', mu.immune ? `${tg.name} is immune` : mu.mod > 0 ? `super effective +${mu.mod}` : mu.mod < 0 ? `not very effective ${mu.mod}` : '',
       pain && `pain -${pain} success${pain > 1 ? 'es' : ''}`].filter(Boolean);
@@ -4684,7 +4699,7 @@ function renderParty() {
   const P = state.party || { turn: 1, from: {}, dash: {} }, on = !state.combat;
   $('partySec').style.display = on ? 'block' : 'none';
   if (!on) return;
-  $('partyTurn').textContent = `Party turn ${P.turn}`;
+  $('partyTurn').textContent = `Party turn ${P.turn}${P.foes ? " · the enemies' turn" : ''}`;
   const f = partyMini(), look = !!preview;
   $('partyDash').style.display = f ? '' : 'none';
   if (f) {
