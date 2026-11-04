@@ -290,7 +290,12 @@
   #hud.myturn { box-shadow: 0 0 0 2px #ffd76a, 0 0 16px #ffd76a88; }
   #hud.out { filter: grayscale(.8); }
   /* turn order strip across the top of the table (Adam: 'much more visible'): whoever's turn it is big, the next ones after it */
-  #turnStrip { position: absolute; left: calc(50% - 150px); top: 50px; transform: translateX(-50%); z-index: 4; display: none; align-items: flex-end; gap: 8px; pointer-events: none; font-family: var(--pix); max-width: calc(100% - 420px); }
+  #turnStrip { position: absolute; left: calc(50% - 150px); top: 50px; transform: translateX(-50%); z-index: 4; display: none; padding: 4px 8px 8px; font-family: var(--pix); max-width: calc(100% - 420px); }
+  #tsHead { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none; touch-action: none; margin-bottom: 4px; }
+  #tsTitle { flex: 1; font-size: 15px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tsMin { width: 22px; height: 20px; padding: 0; line-height: 1; font-size: 13px; flex: none; }
+  #tsBody { display: flex; align-items: flex-end; gap: 8px; }
+  body.turnMin #tsBody { display: none; } body.turnMin #tsHead { margin-bottom: 0; }
   body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; max-width: calc(100% - 420px); }
   #turnStrip .tc { display: flex; flex-direction: column; align-items: center; background: #14204ee6; border: 2px solid #5b6fc0; border-radius: 10px; padding: 4px 8px 5px; min-width: 64px; max-width: 110px; color: #cfd8ff; box-shadow: 0 3px 0 #0008; }
   #turnStrip .tc img, #turnStrip .tc b { width: 40px; height: 40px; border-radius: 50%; background: #0006; object-fit: cover; display: block; border: 2px solid var(--sc, #888); box-sizing: border-box; }
@@ -307,7 +312,7 @@
   #turnStrip.pop .tc.now { animation: stripPop .5s ease, stripNow 1.6s ease-in-out .5s infinite; }
   @keyframes stripNow { 50% { box-shadow: 0 3px 0 #0008, 0 0 18px #ffd76acc; } }
   @keyframes stripPop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
-  @media (max-width: 700px) { #turnStrip, body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; top: 92px; max-width: calc(100% - 20px); gap: 4px; }
+  @media (max-width: 700px) { #turnStrip, body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; top: 92px; max-width: calc(100% - 20px); } #tsBody { gap: 4px; }
     #turnStrip .tc { min-width: 46px; padding: 3px 4px; } #turnStrip .tc img, #turnStrip .tc b { width: 28px; height: 28px; } #turnStrip .tc span { font-size: 11px; }
     #turnStrip .tc.now { min-width: 76px; } #turnStrip .tc.now img, #turnStrip .tc.now b { width: 42px; height: 42px; } #turnStrip .tc.now span { font-size: 14px; } }
   #yourTurn { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -50%); z-index: 7; pointer-events: none; display: none;
@@ -510,7 +515,7 @@
 <div id="vsBox"></div>
 <div id="effPop"></div>
 <div id="turnBox"></div>
-<div id="turnStrip"></div>
+<div id="turnStrip" class="pmd"><div id="tsHead" title="Drag to move (double-click: back to the top)"><span id="tsTitle">Turn order</span><button id="tsMin" title="Minimize">–</button></div><div id="tsBody"></div></div>
   <div id="floorTag" style="display:none"></div>
   <div id="floorBanner"></div>
   <div id="endScreen"><div class="et"></div><div class="es"></div><button id="endClose" class="fit">Close</button></div>
@@ -871,6 +876,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=97"></script>
+<script type="module" src="tabletop.js?v=98"></script>
 </body>
 </html>

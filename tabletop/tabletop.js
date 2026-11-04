@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=97';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=97';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=98';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=98';
 
-const VERSION = 97;                              // raised by bump.py on every publish
+const VERSION = 98;                              // raised by bump.py on every publish
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -291,6 +291,7 @@ function dropConn(conn) {
     state.players[c.clientId].online = false;
     addLog({ kind: 'sys', text: `${state.players[c.clientId].name} left.` });
     pushPlayers();
+    if (!state.combat) checkPartyDone();         // the ones still here may all be done already
   }
 }
 
@@ -715,9 +716,7 @@ function handle(msg, from) {
       if (done[f.id]) { delete done[f.id]; addLog({ kind: 'sys', text: `${f.name} isn't done after all.` }); pushParty(); return; }
       done[f.id] = true;
       addLog({ kind: 'sys', text: `${f.name} ends their turn.` });
-      const team = Object.values(state.figures).filter(x => x.owner && !x.parent && figVisible(x));
-      if (!state.paused && team.every(x => done[x.id])) nextPartyTurn();
-      else pushParty();
+      if (!checkPartyDone()) pushParty();
       break;
     }
     case 'partyDash': {                         // exploring: Dash for one ally this party turn (press again to undo)
@@ -2516,6 +2515,18 @@ function worldFor(f) {
   const seen = f.owner ? state.boards.filter(shown) : state.boards;   // allies' paths stay on what they can see
   return { onBoard: (i, j) => !!boardAt(i + 0.5, j + 0.5, seen), tile: (i, j) => state.tiles[i + ',' + j], occupied, wall: edgeWall };
 }
+// exploring: the next party turn starts once every ally that can still act has ended its turn.
+// Minis of players who have left (or a leftover test player) and fainted ones don't hold it up (Adam: it never started)
+function partyTeam() {
+  return Object.values(state.figures).filter(x => x.owner && !x.parent && figVisible(x) && !fainted(x)
+    && x.owner !== state.gm && state.players[x.owner] && state.players[x.owner].online !== false);
+}
+function checkPartyDone() {
+  const done = state.party?.done || {}, team = partyTeam();
+  if (state.combat || state.paused || !team.length || !team.every(x => done[x.id])) return false;
+  nextPartyTurn();
+  return true;
+}
 function nextPartyTurn() {
   state.party = { turn: state.party.turn + 1, from: {}, dash: {}, done: {} };
   addLog({ kind: 'sys', text: `Party turn ${state.party.turn}: everyone can move and act again.` });
@@ -4158,7 +4169,7 @@ function tick(now) {
     }
     gmArrow.visible = true;
     const lb = gmCur.userData.label, top = lb.position.y + lb.scale.y * (1 - lb.center.y) + (gmCur.userData.timer ? gmCur.userData.timer.scale.y + 0.04 : 0);
-    const k = Math.max(1, camera.position.distanceTo(gmCur.position) / 10);   // stays big enough to spot when zoomed out
+    const k = Math.max(1, camera.position.distanceTo(gmCur.position) / 16);   // stays big enough to spot when zoomed out
     gmArrow.scale.setScalar(k);
     gmArrow.position.set(gmCur.position.x, gmCur.position.y + top + 0.3 + 0.3 * k + Math.abs(Math.sin(performance.now() / 220)) * 0.22 * k, gmCur.position.z);
     gmArrow.rotation.y += 0.04;
@@ -4532,13 +4543,14 @@ let stripKey = '';
 function renderTurnStrip(c) {
   const el = $('turnStrip');
   if (!el) return;
-  el.style.display = c && c.order.length ? 'flex' : 'none';
+  const was = el.style.display;
+  el.style.display = c && c.order.length ? 'block' : 'none';
   if (!c || !c.order.length) { stripKey = ''; return; }
+  if (was !== 'block' && placeTurn) placeTurn();     // its saved spot, now that it has a size
   const n = c.order.length, start = Math.max(0, c.turn), show = Math.min(n, innerWidth <= 700 ? 4 : 6), out = [];
   for (let k = 0; k < show; k++) {
     const o = c.order[(start + k) % n], f = state.figures[o.id];
     if (!f) continue;
-    if (k === 0) { const r = document.createElement('div'); r.className = 'tc rnd'; r.innerHTML = `<small>ROUND</small><span>${c.round}</span>`; out.push(r); }
     if (k === 1) { const a = document.createElement('div'); a.className = 'arrow'; a.textContent = '>'; out.push(a); }
     const d = document.createElement('div');
     d.className = 'tc' + (k === 0 ? ' now' : '') + (fainted(f) ? ' out' : '') + (o.lurk ? ' lurk' : '');
@@ -4552,7 +4564,9 @@ function renderTurnStrip(c) {
     d.append(...(k <= 1 ? [tag, im, nm] : [im, nm]));
     out.push(d);
   }
-  el.replaceChildren(...out);
+  $('tsBody').replaceChildren(...out);
+  const cur = state.figures[c.order[start]?.id], hid = c.order[start]?.lurk && !gmView();
+  $('tsTitle').textContent = `Turn order · Round ${c.round}` + (document.body.classList.contains('turnMin') && cur ? ` · ${hid ? '???' : cur.name}` : '');
   const key = c.round + ':' + c.order[start]?.id;
   if (key !== stripKey) { stripKey = key; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
 }
@@ -4689,6 +4703,7 @@ function renderEvent() {
     state.paused = paused;
     sendAll({ t: 'paused', on: paused });
     addLog({ kind: 'sys', text: paused ? '⏸ Paused while the GM resolves an event.' : '▶ The event is resolved: play on.' });
+    if (!paused) setTimeout(checkPartyDone);      // everyone ended their turn during the event: the next party turn starts now
   }
   renderPause();
   $('eventBox').style.display = gmView() && ((state.pending || []).length || state.event) ? '' : 'none';
@@ -4883,6 +4898,16 @@ function makeDraggable(el, handle, key, on = () => true) {
   addEventListener('resize', restore);
   return restore;
 }
+// the turn order window: drag it by its title, minimize it (both remembered in this browser)
+var placeTurn = makeDraggable($('turnStrip'), $('tsHead'), 'tabletop-turnPos');
+try { document.body.classList.toggle('turnMin', localStorage.getItem('tabletop-turnMin') === '1'); } catch {}
+const turnMinBtn = () => { const m = document.body.classList.contains('turnMin'); $('tsMin').textContent = m ? '▢' : '–'; $('tsMin').title = m ? 'Open the turn order' : 'Minimize the turn order'; };
+$('tsMin').onclick = () => {
+  const m = document.body.classList.toggle('turnMin');
+  try { localStorage.setItem('tabletop-turnMin', m ? '1' : '0'); } catch {}
+  turnMinBtn(); renderTurnBox();
+};
+turnMinBtn();
 // the log's minimize button (remembered)
 try { document.body.classList.toggle('logMin', localStorage.getItem('tabletop-logMin') === '1'); } catch {}
 $('logMin').onclick = () => {
