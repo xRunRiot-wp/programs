@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=103';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=103';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=104';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=104';
 
-const VERSION = 103;                              // raised by bump.py on every publish
+const VERSION = 104;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -2029,6 +2029,16 @@ function actMini() {
 // bar buttons: the icon and the word apart, so phones can stack them evenly
 function barLabel(id, ico, txt) { const b = $(id); b.innerHTML = `<i>${ico}</i> <span>${txt}</span>`; }
 
+// squares a mini can still move this turn (combat: its turn; exploring: this party turn)
+function movesLeft(f) {
+  const c = isHost && !gmView() ? combatView() : state.combat, P = state.party || { from: {}, dash: {} };
+  if (c && c.order[c.turn]?.id !== f.id) return 0;
+  const o = c ? c.from : P.from?.[f.id] || { x: f.x, z: f.z };
+  if (!o) return 0;
+  const budget = moveBudget(f) * (1 + (c ? c.dash || 0 : P.dash?.[f.id] ? 1 : 0)) - (o.used || 0), { w, d } = fp(f);
+  const spent = o.x === f.x && o.z === f.z ? 0 : reachable(ruleWorld(f), o.x, o.z, w, d, Infinity, state.rules.diag).get(`${f.x},${f.z}`) ?? budget;
+  return Math.max(0, budget - spent);
+}
 function renderActBar() {
   const bar = $('actBar'); if (!bar) return;
   const f = actMini();
@@ -2042,6 +2052,10 @@ function renderActBar() {
   const myTurn = c && c.order[c.turn]?.id === f.id, dashed = c ? myTurn && c.dash : P.dash?.[f.id];
   const spent = c ? myTurn && !!(c.dash || c.acted) : !!(P.dash?.[f.id] || P.acted?.[f.id]), attacked = c ? myTurn && c.acted : P.acted?.[f.id];
   $('actAttack').disabled = !!preview || (c && !myTurn) || spent;
+  const left = movesLeft(f), canStep = !c || myTurn;
+  $('actMove').disabled = !!preview || !canStep || left <= 0;
+  barLabel('actMove', '👣', canStep ? `Move (${left})` : 'Move');
+  $('actMove').title = !canStep ? `Wait for ${f.name}'s turn` : `${left} square${left === 1 ? '' : 's'} of movement left this turn: click a square to go there (M)`;
   $('actDash').disabled = !!preview || (c && !myTurn) || !!attacked;
   barLabel('actDash', dashed ? '↩' : '💨', dashed ? 'Undo dash' : 'Dash');
   $('actAttack').title = c && !myTurn ? `Wait for ${f.name}'s turn` : spent ? `${f.name} has used its action this turn` : `Pick who ${f.name} attacks`;
@@ -2884,13 +2898,14 @@ function initView() {
   controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
   controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
   controls.screenSpacePanning = false;          // pan across the table, not up into the air
+  controls.addEventListener('change', () => { camBusy = performance.now(); });
 
-  scene.add(new THREE.HemisphereLight('#dfe6ff', '#3a3226', 0.9));
+  scene.add(new THREE.HemisphereLight('#dfe6ff', '#3a3226', 0.8));
   const sun = new THREE.DirectionalLight('#fff4e0', 1.6);
   sun.position.set(-8, 20, 10);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.bias = -0.0005;
+  sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
   scene.add(sun);
   scene.userData.sun = sun;
 
@@ -2983,8 +2998,9 @@ function buildBoard() {
     }
   }
   for (const id of [...mapTextures.keys()]) if (!state.maps[id]) { mapTextures.get(id).dispose(); mapTextures.delete(id); }
-  const box = boardsBox(), sun = scene.userData.sun, r = Math.max(box.x1 - box.x0, box.z1 - box.z0) * 0.75 + 4;
-  sun.position.set((box.x0 + box.x1) / 2 - 8, 20, (box.z0 + box.z1) / 2 + 10);
+  // the shadow map covers only the boards of the layer in view (all layers at once made each shadow pixel too big to see minis' shadows)
+  const box = boardsBox(), sun = scene.userData.sun, r = Math.max(box.x1 - box.x0, box.z1 - box.z0) * 0.62 + 3;
+  sun.position.set((box.x0 + box.x1) / 2 - 9, 17, (box.z0 + box.z1) / 2 + 11);
   sun.target.position.set((box.x0 + box.x1) / 2, 0, (box.z0 + box.z1) / 2); sun.target.updateMatrixWorld();
   Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 1, far: 80 });
   sun.shadow.camera.updateProjectionMatrix();
@@ -3590,7 +3606,9 @@ function upsertFig(f, live) {
   const baseKey = `${w}x${d}${small ? 's' : ''}`;
   if (u.baseKey !== baseKey) { buildBase(u, w, d, small); u.baseKey = baseKey; }
   const rot = (f.rot || 0) * Math.PI / 180;
-  u.holder.rotation.y = u.pawn.rotation.y = -rot;
+  u.rotWant = -rot;                               // the frame loop turns it there smoothly
+  if (u.rotNow == null || w !== d) u.rotNow = -rot;   // long pieces swap their sides instead, so they snap
+  u.holder.rotation.y = u.pawn.rotation.y = u.rotNow;
   // the model's own frame: a long piece turned 90 degrees has its sides swapped on the board
   const sideways = w !== d && (f.rot || 0) % 180 === 90;
   const lw = sideways ? d : w, ld = sideways ? w : d;
@@ -3623,9 +3641,10 @@ function upsertFig(f, live) {
 
 // ---------- 3D models (.glb) ----------
 const modelScenes = new Map();                  // model id -> Promise of the loaded scene
+const modelClips = new Map();                   // model id -> its animations (idle, walk, attack...), if it has any
 function modelScene(id) {
   if (!modelScenes.has(id)) modelScenes.set(id, new Promise((ok, bad) =>
-    new GLTFLoader().parse(modelData.get(id).slice(0), '', gltf => ok(gltf.scene), bad)));
+    new GLTFLoader().parse(modelData.get(id).slice(0), '', gltf => { modelClips.set(id, gltf.animations || []); ok(gltf.scene); }, bad)));
   return modelScenes.get(id);
 }
 
@@ -3633,6 +3652,7 @@ function setModel(g, id, lw, ld, key) {
   const u = g.userData;
   u.modelKey = key;
   u.holder.clear();
+  if (u.mixer) { u.mixer.stopAllAction(); u.mixer = null; u.anim = null; }
   u.pawn.visible = !id;
   u.modelTop = 0;
   if (!id) return;
@@ -3647,11 +3667,29 @@ function setModel(g, id, lw, ld, key) {
     m.position.set(-c.x * k, 0.11 - box.min.y * k, -c.z * k);
     m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     u.holder.add(m);
+    // a model with its own animations plays them: idle standing still, walk while moving, attack when it attacks
+    const clips = modelClips.get(id) || [];
+    if (clips.length) {
+      const find = re => clips.find(c => re.test(c.name));
+      u.mixer = new THREE.AnimationMixer(m);
+      u.anim = { idle: find(/idle|stand|wait|breath|rest|ground/i) || clips[0], walk: find(/walk|run|move|locomot|trot|hop|fly|swim/i),
+        attack: find(/attack|hit|strike|special|physical|bite|tackle|slash|punch|shoot|cast/i), now: null, cur: null, until: 0 };
+      playAnim(u, 'idle');
+    }
     u.modelTop = 0.11 + size.y * k;
     if (state.figures[u.id]) upsertFig(state.figures[u.id], true);
   }).catch(() => { if (u.modelKey === key) { u.pawn.visible = true; status('A 3D model could not be loaded.'); setTimeout(() => status(''), 4000); } });
 }
 
+function playAnim(u, name, once) {
+  const A = u.anim, clip = A && A[name];
+  if (!clip || (A.now === name && !once)) return;
+  const next = u.mixer.clipAction(clip);
+  next.reset(); next.setEffectiveWeight(1); next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); next.clampWhenFinished = false;
+  next.play();
+  if (A.cur && A.cur !== next) A.cur.crossFadeTo(next, 0.2, false);
+  A.cur = next; A.now = name; A.until = once ? performance.now() + clip.duration * 1000 : 0;
+}
 async function useBuiltin(key, figId) {
   const b = BUILTIN[key];
   if (!b) return;
@@ -3912,6 +3950,8 @@ function showVs(msg) {
   clearTimeout(vsTimer); vsTimer = setTimeout(() => box.classList.remove('show'), 2700);
 }
 function playFx(fx) {
+  const ua = figMeshes.get(fx.from)?.userData;
+  if (ua?.anim?.attack) playAnim(ua, 'attack', true);   // the attacker's own attack animation, if its model has one
   const tg = state.figures[fx.to], src = state.figures[fx.from], color = TYPES[fx.type] || '#ffffff';
   if (!tg || !scene) return;
   const T = new THREE.Vector3(tg.x, 0.6, tg.z), t0 = performance.now();
@@ -4376,9 +4416,12 @@ const _shareT = new THREE.Vector3();
 // keep the graphics card free for everything else (Adam: a video on his other monitor stalled with the GM and test windows open):
 // at most 60 frames a second, 30 in a window without focus while dice or moves play, 12 while it just sits there
 let lastFrame = 0;
+let camBusy = 0, frameDt = 0.016;
 function tick(now) {
-  const fps = document.hasFocus() ? 60 : rolls.length || fxList.length || dragging ? 30 : 12;
+  const busy = now - camBusy < 500 || !!dragging;   // the camera turning or a mini being dragged: every refresh, so it glides
+  const fps = busy ? 1000 : document.hasFocus() ? 60 : rolls.length || fxList.length ? 30 : 12;
   if (now - lastFrame < 1000 / fps - 2) return;
+  frameDt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   animateDice(performance.now());
   animateFx(performance.now());
@@ -4430,6 +4473,17 @@ function tick(now) {
     const t = g.userData.target, off = dragging?.id === g.userData.id ? 0 : share.get(g.userData.id) || 0;
     _shareT.set(t.x + off, t.y, t.z + off);       // side by side across the square's diagonal
     g.position.lerp(_shareT, dragging?.id === g.userData.id ? 1 : 0.25);
+    const U = g.userData;
+    if (U.rotWant != null && U.rotNow !== U.rotWant) {   // turning smoothly to the new facing
+      const dl = ((U.rotWant - U.rotNow) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+      U.rotNow = Math.abs(dl) < 0.01 ? U.rotWant : U.rotNow + dl * 0.2;
+      U.holder.rotation.y = U.pawn.rotation.y = U.rotNow;
+    }
+    if (U.mixer) {
+      const moving = dragging?.id === U.id || g.position.distanceTo(_shareT) > 0.03;
+      if (!(U.anim.until && performance.now() < U.anim.until)) playAnim(U, moving && U.anim.walk ? 'walk' : 'idle');
+      U.mixer.update(frameDt);
+    }
     g.scale.setScalar(g.scale.x + ((off ? 0.8 : 1) - g.scale.x) * 0.25);   // squeezed in next to another Small
     if (g.userData.labelY != null) g.userData.label.position.y = g.userData.labelY + (off < 0 ? 0.5 : 0);   // name tags one above the other (the back one higher)
     const lb = g.userData.label, tm = g.userData.timer;
@@ -5132,6 +5186,7 @@ function renderControls() {
       ['Drag empty space', 'Pan the camera'], ['Scroll', 'Zoom'], ['Alt + click', 'Ping a spot for everyone'],
     ]) +
     sec('Button bar', [
+      ['<kbd>M</kbd> Move', 'Shows where your mini can go and how many squares are left this turn; click a square to go there'],
       ['<kbd>A</kbd> Attack', 'Pick a foe: red ring = any move, orange = ranged only'], ['<kbd>D</kbd> Dash', 'Spend your action on extra movement'],
       ['<kbd>Q</kbd> Actions', 'Evade, Clash, Search, Sneak and the rest'], ['<kbd>B</kbd> Bag', 'Your item cards: click one to play it'],
       ['<kbd>E</kbd> End turn', 'Done for this turn'],
@@ -5367,10 +5422,17 @@ function wirePanel() {
   };
   $('actDash').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatDash' } : { t: 'partyDash', id: f.id }); };
   $('actEnd').onclick = () => { const f = actMini(); if (!f) return; act(state.combat ? { t: 'combatNext' } : { t: 'partyDone', id: f.id }); };
+  $('actMove').onclick = () => {                  // picks the mini and shows where it can go; a click on a square moves it
+    const f = actMini(); if (!f) return;
+    select(f.id);
+    const n = movesLeft(f);
+    status(n ? `Click a square to move ${f.name}: ${n} square${n === 1 ? '' : 's'} left this turn.` : `${f.name} has no movement left this turn.`);
+    setTimeout(() => status(''), 4000);
+  };
   addEventListener('keydown', e => {            // the bar's buttons from the keyboard: A attack, D dash, Q actions, B bag, E end turn
     if (e.ctrlKey || e.metaKey || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
     if ($('actBar').style.display === 'none') return;
-    const b = $({ a: 'actAttack', d: 'actDash', q: 'actMore', b: 'actBag', e: 'actEnd' }[e.key.toLowerCase()]);
+    const b = $({ m: 'actMove', a: 'actAttack', d: 'actDash', q: 'actMore', b: 'actBag', e: 'actEnd' }[e.key.toLowerCase()]);
     if (b && !b.disabled) { e.preventDefault(); b.click(); }
   });
   $('actBag').onclick = () => { const b = $('bagPanel'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; $('actPanel').style.display = 'none'; renderBag(); };
@@ -5566,7 +5628,7 @@ $('nameIn').onkeydown = e => { if (e.key === 'Enter') (params.get('room') ? $('j
 if (testWindow && params.get('room')) { $('nameIn').value = 'Test player'; $('joinBtn').click(); }   // straight in
 
 // for testing in a browser console
-window.tabletop = { get state() { return state; }, get selectedId() { return selectedId; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, select: id => select(id), get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
+window.tabletop = { get state() { return state; }, get selectedId() { return selectedId; }, fx: x => playFx(x), figAnim: id => { const u = figMeshes.get(id)?.userData; return u ? { now: u.anim?.now || null, rotNow: u.rotNow, rotWant: u.rotWant, mixer: !!u.mixer } : null; }, act, get isHost() { return isHost; }, clientId, get view() { return { camera, controls, scene, renderer }; }, select: id => select(id), get overlays() { return { range: rangeMesh?.count ?? 0, los: losLabel ? 1 : 0, engaged: [...engaged] }; },
   hover(id) { hoverId = id; },
   get areaView() { return { rings: areaRings.length, cells: areaGroup?.children[0]?.count || 0, fx: fxList.length, draft: !!draftGroup }; },
   timerOn(id) { return !!figMeshes.get(id)?.userData.timer; },
