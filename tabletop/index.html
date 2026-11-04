@@ -290,11 +290,11 @@
   #hud.myturn { box-shadow: 0 0 0 2px #ffd76a, 0 0 16px #ffd76a88; }
   #hud.out { filter: grayscale(.8); }
   /* turn order strip across the top of the table (Adam: 'much more visible'): whoever's turn it is big, the next ones after it */
-  #turnStrip { position: absolute; left: calc(50% - 150px); top: 50px; transform: translateX(-50%); z-index: 4; display: none; padding: 4px 8px 8px; font-family: var(--pix); max-width: calc(100% - 420px); }
+  #turnStrip { position: absolute; left: calc(50% - 150px); top: 50px; transform: translateX(-50%); z-index: 5; display: none; padding: 4px 8px 8px; font-family: var(--pix); max-width: calc(100% - 420px); }
   #tsHead { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none; touch-action: none; margin-bottom: 4px; }
   #tsTitle { flex: 1; font-size: 15px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #tsMin { width: 22px; height: 20px; padding: 0; line-height: 1; font-size: 13px; flex: none; }
-  #tsBody { display: flex; align-items: flex-end; gap: 8px; }
+  #tsBody { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 8px; }
   body.turnMin #tsBody { display: none; } body.turnMin #tsHead { margin-bottom: 0; }
   body.sideHidden:is(:not(.gm), .previewing) #turnStrip { left: 50%; max-width: calc(100% - 420px); }
   #turnStrip .tc { display: flex; flex-direction: column; align-items: center; background: #14204ee6; border: 2px solid #5b6fc0; border-radius: 10px; padding: 4px 8px 5px; min-width: 64px; max-width: 110px; color: #cfd8ff; box-shadow: 0 3px 0 #0008; }
@@ -307,6 +307,8 @@
   #turnStrip .tc.now small { color: #fff; opacity: 1; font-size: 12px; letter-spacing: 1px; }
   #turnStrip .tc.out { opacity: .45; filter: grayscale(1); }
   #turnStrip .tc.lurk { opacity: .5; }
+  #turnStrip .tc.go { border-color: #ffd76a; color: #ffe9a8; }
+  #turnStrip .tc.done { opacity: .55; } #turnStrip .tc.done small { color: #8fe08f; }
   #turnStrip .tc.rnd { min-width: 0; padding: 6px 8px; align-self: center; } #turnStrip .tc.rnd span { font-size: 22px; color: #ffd76a; margin: 0; }
   #turnStrip .arrow { color: #ffd76a; font-size: 18px; align-self: center; text-shadow: 0 2px 0 #000; }
   #turnStrip.pop .tc.now { animation: stripPop .5s ease, stripNow 1.6s ease-in-out .5s infinite; }
@@ -877,6 +879,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=101"></script>
+<script type="module" src="tabletop.js?v=102"></script>
 </body>
 </html>

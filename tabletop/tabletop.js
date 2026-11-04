@@ -5,10 +5,23 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=101';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=101';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=102';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=102';
 
-const VERSION = 101;                              // raised by bump.py on every publish
+const VERSION = 102;                              // raised by bump.py on every publish
+// The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
+// with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
+// When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
+{
+  const tag = document.querySelector('script[src*="tabletop.js"]'), pageV = +(((/[?&]v=(\d+)/.exec(tag?.src || '')) || [])[1] || 0);
+  const u = new URL(location.href);
+  if (pageV && pageV !== VERSION && u.searchParams.get('fresh') !== String(VERSION)) {
+    u.searchParams.set('fresh', VERSION);
+    location.replace(u.href);
+    throw new Error(`Old copy of the page (v${pageV}) with v${VERSION} code: loading a fresh copy`);
+  }
+  if (u.searchParams.has('fresh') && pageV === VERSION) { u.searchParams.delete('fresh'); history.replaceState(history.state, '', u.href); }
+}
 const $ = id => document.getElementById(id);
 const PREFIX = 'tabletop-v1-';
 // several public STUN servers: more ways for two homes to find each other (PeerJS only lists one by default)
@@ -337,9 +350,9 @@ function onClientData(msg) {
       state = Object.assign(freshState(), msg.state);
       if ($('game').style.display !== 'block') enterGame(); else rebuildAll();
       break;
-    case 'fig': upsertFig(msg.fig); break;
-    case 'figs': state.figures = msg.figures; syncFigures(); break;
-    case 'del': delete state.figures[msg.id]; removeFigMesh(msg.id); break;
+    case 'fig': upsertFig(msg.fig); renderTurnBox(); break;
+    case 'figs': state.figures = msg.figures; syncFigures(); renderTurnBox(); break;
+    case 'del': delete state.figures[msg.id]; removeFigMesh(msg.id); renderTurnBox(); break;
     case 'boards': state.boards = msg.boards; buildBoard(); updateBoardInputs(); break;
     case 'tiles':
       if (msg.clear) state.tiles = {};
@@ -2651,6 +2664,7 @@ function carry(id, dx, dz, deg, around) {
 
 function pushFig(f, skipFor, live) {
   upsertFig(f, live);
+  if (!live) renderTurnBox();                     // a mini found, fainted or added changes the turn window
   if (isHost && !live && checkLurkers()) pushCombat();
   if (isHost && !live) checkWhiteout();
   if (!figVisible(f)) sendAll({ t: 'del', id: f.id });
@@ -4492,6 +4506,7 @@ function showSelected() {
 }
 
 function renderPlayers() {
+  setTimeout(renderTurnBox);                      // who's online changes the party turn list
   const el = $('players'); el.innerHTML = '';
   for (const [cid, p] of Object.entries(state.players)) {
     const d = document.createElement('div');
@@ -4572,36 +4587,70 @@ let lastTurnKey = '';
 const STATUS_HELP = {};
 // the turn order at the top right of the board (combat only), in the same window style as the HUD
 // the strip across the top: whoever's turn it is (big, glowing) and the next few, with a picture of each mini
-let stripKey = '';
+let stripKey = '', stripHtml = '';
+function turnChip(f, o) {
+  const d = document.createElement('div');
+  d.className = 'tc' + (o.cls ? ' ' + o.cls : '') + (fainted(f) ? ' out' : '');
+  d.style.setProperty('--sc', sideOf(f) === 'player' ? '#3d7be0' : SIDES[sideOf(f)].color);
+  const pic = miniShot(f);
+  const im = document.createElement(pic ? 'img' : 'b'); if (pic) { im.src = pic; im.alt = ''; } else im.style.background = f.color || '#888';
+  const nm = document.createElement('span'); nm.textContent = o.name || f.name;
+  if (o.tag) { const t = document.createElement('small'); t.textContent = o.tag; d.append(t); }
+  d.append(im, nm);
+  return d;
+}
+// what the turn window lists (Adam: 'make it all the time'): in combat the initiative order from whoever's turn it is;
+// exploring, the party turn: the players (they move together), then the discovered enemies
+function turnItems(c) {
+  const items = [], mine = f => !!f.owner && f.owner === viewerId();
+  if (c && c.order.length) {
+    const n = c.order.length, start = Math.max(0, c.turn);
+    for (let k = 0; k < n; k++) {
+      const o = c.order[(start + k) % n], f = state.figures[o.id];
+      if (!f) continue;
+      const first = !items.length, gms = gmView() && !f.owner;
+      items.push({ f, cls: (first ? 'now' : '') + (o.lurk ? ' lurk' : ''), tag: first ? (mine(f) ? 'YOUR TURN' : gms ? 'YOUR MINI' : 'NOW') : items.length === 1 ? 'NEXT' : '',
+        name: o.lurk && !gmView() ? '???' : f.name, arrow: items.length === 1 });
+    }
+    return items.length ? { title: `Turn order · Round ${c.round}`, items, pop: 'c' + c.round + ':' + items[0].f.id } : null;
+  }
+  const P = state.party || {}, done = P.done || {}, team = partyTeam(), foes = partyFoes();
+  if (!team.length && !foes.length) return null;
+  const player = f => done[f.id] ? { f, cls: 'done', tag: 'DONE' } : { f, cls: mine(f) ? 'now' : 'go', tag: mine(f) ? 'YOUR TURN' : 'MOVING' };
+  if (!P.foes) {
+    items.push(...team.filter(f => !done[f.id]).map(player), ...team.filter(f => done[f.id]).map(player));
+    foes.forEach((f, i) => items.push({ f, tag: i ? '' : 'NEXT', arrow: !i }));
+  } else {
+    const left = foes.filter(f => !done[f.id]);
+    left.forEach((f, i) => items.push({ f, cls: i ? 'go' : 'now', tag: i ? '' : gmView() ? 'YOUR MINI' : 'ENEMY TURN' }));
+    foes.filter(f => done[f.id]).forEach(f => items.push({ f, cls: 'done', tag: 'DONE' }));
+    team.forEach((f, i) => items.push({ f, tag: i ? '' : 'NEXT', arrow: !i }));
+  }
+  return { title: `Party turn ${P.turn || 1} · ${P.foes ? "enemies' turn" : 'players move'}`, items, pop: 'p' + (P.turn || 1) + (P.foes ? 'f' : '') };
+}
 function renderTurnStrip(c) {
   const el = $('turnStrip');
   if (!el) return;
-  const was = el.style.display;
-  el.style.display = c && c.order.length ? 'block' : 'none';
-  if (!c || !c.order.length) { stripKey = ''; return; }
+  const T = turnItems(c), was = el.style.display;
+  el.style.display = T ? 'block' : 'none';
+  if (!T) { stripKey = stripHtml = ''; return; }
   if (was !== 'block' && placeTurn) placeTurn();     // its saved spot, now that it has a size
-  const n = c.order.length, start = Math.max(0, c.turn), show = Math.min(n, innerWidth <= 700 ? 4 : 6), out = [];
-  for (let k = 0; k < show; k++) {
-    const o = c.order[(start + k) % n], f = state.figures[o.id];
-    if (!f) continue;
-    if (k === 1) { const a = document.createElement('div'); a.className = 'arrow'; a.textContent = '>'; out.push(a); }
-    const d = document.createElement('div');
-    d.className = 'tc' + (k === 0 ? ' now' : '') + (fainted(f) ? ' out' : '') + (o.lurk ? ' lurk' : '');
-    d.style.setProperty('--sc', sideOf(f) === 'player' ? '#3d7be0' : SIDES[sideOf(f)].color);
-    const pic = miniShot(f);
-    const im = document.createElement(pic ? 'img' : 'b'); if (pic) { im.src = pic; im.alt = ''; } else im.style.background = f.color || '#888';
-    const tag = document.createElement('small'), nm = document.createElement('span');
-    const mine = f.owner && f.owner === viewerId(), gms = gmView() && !f.owner;
-    tag.textContent = k === 0 ? (mine ? 'YOUR TURN' : gms ? 'YOUR MINI' : 'NOW') : 'NEXT';
-    nm.textContent = o.lurk && !gmView() ? '???' : f.name;
-    d.append(...(k <= 1 ? [tag, im, nm] : [im, nm]));
-    out.push(d);
+  const max = innerWidth <= 700 ? 5 : 8, shown = T.items.slice(0, max), minimized = document.body.classList.contains('turnMin');
+  const cur = T.items.find(x => /now|go/.test(x.cls || '')) || T.items[0];
+  // rebuilt only when something in it changed (this runs often)
+  const key = JSON.stringify([T.title, minimized, T.items.length, shown.map(x => [x.f.id, x.cls, x.tag, x.name, fainted(x.f), x.f.color, figMeshes.get(x.f.id)?.userData.modelKey ?? null, !!figMeshes.get(x.f.id)])]);
+  if (key !== stripHtml) {
+    stripHtml = key;
+    const out = [];
+    for (const x of shown) {
+      if (x.arrow && out.length) { const a = document.createElement('div'); a.className = 'arrow'; a.textContent = '>'; out.push(a); }
+      out.push(turnChip(x.f, x));
+    }
+    if (T.items.length > max) { const m = document.createElement('div'); m.className = 'arrow'; m.textContent = `+${T.items.length - max}`; out.push(m); }
+    $('tsBody').replaceChildren(...out);
+    $('tsTitle').textContent = T.title + (minimized && cur ? ` · ${cur.name || cur.f.name}` : '');
   }
-  $('tsBody').replaceChildren(...out);
-  const cur = state.figures[c.order[start]?.id], hid = c.order[start]?.lurk && !gmView();
-  $('tsTitle').textContent = `Turn order · Round ${c.round}` + (document.body.classList.contains('turnMin') && cur ? ` · ${hid ? '???' : cur.name}` : '');
-  const key = c.round + ':' + c.order[start]?.id;
-  if (key !== stripKey) { stripKey = key; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+  if (T.pop !== stripKey) { stripKey = T.pop; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
 }
 function renderTurnBox() {
   const box = $('turnBox');
@@ -4697,6 +4746,7 @@ function partyMini() {
   return Object.values(state.figures).find(f => f.owner && f.owner === viewerId());
 }
 function renderParty() {
+  renderTurnBox();                                // the turn window follows the party turn straight away
   const P = state.party || { turn: 1, from: {}, dash: {} }, on = !state.combat;
   $('partySec').style.display = on ? 'block' : 'none';
   if (!on) return;
@@ -4856,10 +4906,12 @@ function enterGame() {
 }
 
 // a newer version was published: offer a reload (the GM's game and the players' minis come back as they were)
+let latestV = 0;
 async function checkVersion() {
   try {
-    const r = await fetch('version.json', { cache: 'no-store' });
-    if (r.ok && (await r.json()).v > VERSION) $('updateBar').style.display = 'flex';
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    const v = r.ok ? (await r.json()).v : 0;
+    if (v > VERSION) { latestV = v; $('updateBar').style.display = 'flex'; }
   } catch { /* offline or opened from a file: nothing to check */ }
 }
 
@@ -4991,7 +5043,9 @@ function updateFoldNotes() {
 function wirePanel() {
   wireFolds();
   $('verLabel').textContent = 'v' + VERSION;
-  $('updateReload').onclick = () => location.reload();
+  $('updateReload').onclick = () => {             // a plain reload could get the old page from a cache again
+    const u = new URL(location.href); u.searchParams.set('fresh', latestV || Date.now()); location.replace(u.href);
+  };
   checkVersion(); setInterval(checkVersion, 120000);
   for (const s of [4, 6, 8, 10, 12, 20, 100]) {
     const b = document.createElement('button'); b.textContent = 'd' + s;
