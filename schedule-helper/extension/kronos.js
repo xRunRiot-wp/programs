@@ -505,7 +505,7 @@
     if (!box0) return null;
     // move the grid and the names together (Kronos keeps them in step, but don't count on it)
     const pair = [kGrid, kNames].filter((b) => b && b !== box0 && b.scrollHeight > b.clientHeight + 5);
-    const box = box0;
+    let box = box0;
     const scrollBy = (dy) => { box.scrollTop += dy; for (const o of pair) o.scrollTop = box.scrollTop; };
     const wheel = (dy) => { const v = viewOf(box); const at = document.elementFromPoint((any ? any[0].getBoundingClientRect().left : 200) + 20, (v.top + v.bottom) / 2) || box; at.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, bubbles: true, cancelable: true })); };
     let el = findRow(name);
@@ -517,6 +517,14 @@
       const before = box.scrollTop;
       scrollBy(box.clientHeight * 0.7); await sleep(600);
       if (box.scrollTop === before) {
+        // v3.40 (Zack 11-06, G., G. again): his grid box stops at 1870 px while the names column goes on to
+        // 2503 -> the people in that last stretch were never reached. Keep scrolling the names column alone.
+        const more = [kNames, kGrid].find((o) => o && o !== box && o.scrollTop < o.scrollHeight - o.clientHeight - 2);
+        if (more) {
+          const b2 = more.scrollTop; more.scrollTop += more.clientHeight * 0.7; await sleep(600);
+          // from now on the names column leads (else the next scroll would pull it back to the grid's bottom)
+          if (more.scrollTop !== b2) { const old = box; box = more; pair.length = 0; if (old) pair.push(old); continue; }
+        }
         wheel(box.clientHeight * 0.7); await sleep(1200);   // at the bottom, or Kronos is loading more rows
         if (box.scrollTop === before && !findRow(name)) break;
       }
@@ -1682,7 +1690,8 @@
       if (a === "stop") return "stop";
       if (a === "skip") return "skipped";
       if (a === "skipperson") { skipAsked = "person"; return "skipped"; }
-      if (a === "manual") return "ok";
+      // v3.40 (Zack 11-06): on a job step the card says "change the job yourself" -> the whole job change is done
+      if (a === "manual") return isJob ? "manual" : "ok";
     }
   }
 
@@ -1719,6 +1728,27 @@
     saveDebug({ action: st.action, how: st.how, grid: st.grid, desc: st.desc, debug: { stuck_because: why, looking_in_frame: st.frameKey, frames } });
   }
 
+  // v3.40: the two ways into Kronos's job window (see changeJob)
+  const ABS = { tag: "button", id: "add_value_businessStructure" };
+  const isTransferOpener = (x) => !!(x && x.desc && /^(shift_editor-component-transfer_\d+_togglebtn|moreLink)$/.test(x.desc.id || ""));
+  async function absThere(frameKey, wait) {
+    const t0 = Date.now();
+    do {
+      const t = await request({ type: "there", frameKey, desc: ABS, wantText: null }, 3000);
+      if (t.ok && t.there) return true;
+      await sleep(400);
+    } while (Date.now() - t0 < wait);
+    return false;
+  }
+  function transferOpeners(frameKey) {
+    // use a recorded copy from any location if there is one, else the plain ids
+    const all = Object.values((recipe && recipe.jobStepsBy) || {}).flat().filter(Boolean);
+    const toggle = all.find((x) => isTransferOpener(x) && /togglebtn/.test(x.desc.id))
+      || { action: "click", desc: { tag: "button", id: "shift_editor-component-transfer_0_togglebtn" }, text: "", frameKey };
+    const more = all.find((x) => isTransferOpener(x) && x.desc.id === "moreLink")
+      || { action: "click", desc: { tag: "a", id: "moreLink", text: "More..." }, text: "More...", frameKey };
+    return [toggle, more];
+  }
   // A job-change shift: Kronos filled in the person's usual job; change it for this shift only.
   // Returns "ok" | "saved" (Zack pressed Save himself while showing me) | "skipped" | "stop"
   async function changeJob(s, pace, head, teach) {
@@ -1729,7 +1759,22 @@
         if (stopAsked) return "stop";
         if (skipAsked) return "skipped";
         showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Changing the job to ${esc(job)} (step ${k + 1} of ${recipe.jobSteps.length})...</span>`);
-        const r = await doStep(recipe.jobSteps[k], s, pace, head, true);
+        const st = recipe.jobSteps[k];
+        // v3.40 (Zack 11-06): Kronos sometimes opens the job window straight from "Transfer employee" and
+        // sometimes only through the Transfer list > "More...". Skip those list clicks when the window is
+        // already open; add them when a recording doesn't have them and the window didn't open.
+        if (isTransferOpener(st) && await absThere(st.frameKey, 1500)) continue;
+        if (st.desc && st.desc.id === ABS.id && !recipe.jobSteps.slice(0, k).some(isTransferOpener) && !(await absThere(st.frameKey, 3000))) {
+          live("info", "job window didn't open from Transfer employee; trying the Transfer list > More...");
+          for (const op of transferOpeners(st.frameKey)) {
+            const r0 = await doStep(op, s, pace, head, true);
+            if (r0 === "manual") return "ok";
+            if (r0 !== "ok") return r0;
+            await sleep(rand(pace.stepMin, pace.stepMax));
+          }
+        }
+        const r = await doStep(st, s, pace, head, true);
+        if (r === "manual") return "ok";
         if (r !== "ok") return r;
         await sleep(rand(pace.stepMin, pace.stepMax));
       }
@@ -1744,6 +1789,7 @@
         await sleep(rand(pace.stepMin, pace.stepMax));
         showProgress(`${head}${shiftLine(s)}<br><span class="sh-muted">Pressing Apply on the Transfer window...</span>`);
         const r = await doStep(tApply, s, pace, head, true);
+        if (r === "manual") return "ok";
         if (r !== "ok") return r;
         for (let k = 0; k < 16; k++) {
           const t = await request({ type: "there", frameKey: tApply.frameKey, desc: tApply.desc, wantText: null }, 3000);
