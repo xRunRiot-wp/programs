@@ -74,6 +74,7 @@ public static class ModEntry
 			EditorUi.Tick();
 			DevCommands.Tick();
 			EffectRecolor.Tick();
+			Recorder.Tick();
 		}
 		catch (Exception ex)
 		{

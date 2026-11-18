@@ -389,9 +389,18 @@ public static partial class DamageChartsMod
         {
             var method = ResolveDamageMethod();
             if (method == null) { GD.Print("[STS2 Damage] damage hook not resolved; dealt attribution will use active player"); return; }
-            var prefix = new HarmonyMethod(typeof(DamageChartsMod).GetMethod(nameof(DamagePrefix), BindingFlags.NonPublic | BindingFlags.Static));
+            // Map the parameter positions by name so the prefix survives the game reshuffling or
+            // wrapping arguments (v0.113 moved to IEnumerable<DamageTargetData> targetData).
+            var ps = method.GetParameters();
+            _dTargets = Array.FindIndex(ps, p => p.Name == "targets" || p.Name == "targetData");
+            _dAmount = Array.FindIndex(ps, p => p.Name == "amount" && p.ParameterType == typeof(decimal));
+            _dProps = Array.FindIndex(ps, p => p.Name == "props");
+            _dDealer = Array.FindIndex(ps, p => p.Name == "dealer");
+            _dCard = Array.FindIndex(ps, p => p.Name == "cardSource");
+            if (_dTargets < 0) { GD.Print("[STS2 Damage] damage hook: no targets parameter; dealt attribution will use active player"); return; }
+            var prefix = new HarmonyMethod(typeof(DamageChartsMod).GetMethod(nameof(DamageArgsPrefix), BindingFlags.NonPublic | BindingFlags.Static));
             new Harmony("com.sts2damagecharts").Patch(method, prefix: prefix);
-            GD.Print("[STS2 Damage] damage dealer hook applied");
+            GD.Print($"[STS2 Damage] damage dealer hook applied ({ps.Length} params, {ps[_dTargets].ParameterType.Name})");
         }
         catch (Exception ex) { GD.PrintErr($"[STS2 Damage] damage hook skipped: {ex.GetType().Name}: {ex.Message}"); }
     }
@@ -487,22 +496,57 @@ public static partial class DamageChartsMod
         return true;
     }
 
-    // The central overload every other Damage funnels into: IEnumerable<Creature> targets + a decimal
-    // amount + dealer + cardSource (7 params since the CardPlay argument was added; 6 on older builds).
+    // The central overload every other Damage funnels into. v0.113+: IEnumerable<DamageTargetData>
+    // targetData + decimal amount + props + dealer + cardSource (+ cardPlay, modifyDamageHookType).
+    // Older builds: IEnumerable<Creature> targets + decimal amount + dealer + cardSource (7 or 6 params).
+    // Overloads that take a DamageVar instead of a decimal amount are wrappers — never the funnel.
     private static MethodBase? ResolveDamageMethod()
     {
-        MethodBase? legacy = null;
+        MethodBase? best = null; int bestScore = -1;
         foreach (var m in typeof(MegaCrit.Sts2.Core.Commands.CreatureCmd).GetMethods(BindingFlags.Public | BindingFlags.Static))
         {
             if (m.Name != "Damage") continue;
             var ps = m.GetParameters();
-            if (ps.Length < 2 || ps[1].ParameterType != typeof(IEnumerable<Creature>)) continue;
-            bool hasAmount = ps.Length > 2 && ps[2].ParameterType == typeof(decimal);
+            if (ps.Length < 2) continue;
+            var t1 = ps[1].ParameterType;
+            bool targetData = t1.IsGenericType && t1.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+                              && t1.GetGenericArguments()[0].Name == "DamageTargetData";
+            bool creatures = t1 == typeof(IEnumerable<Creature>);
+            if (!targetData && !creatures) continue;
+            bool hasAmount = Array.Exists(ps, p => p.Name == "amount" && p.ParameterType == typeof(decimal));
             bool hasSource = Array.Exists(ps, p => p.Name == "cardSource") && Array.Exists(ps, p => p.Name == "dealer");
-            if (ps.Length == 7 && hasAmount && hasSource) return m;
-            if (ps.Length == 6 && hasSource) legacy = m;
+            if (!hasAmount || !hasSource) continue;
+            int score = (targetData ? 100 : 0) + ps.Length;
+            if (score > bestScore) { best = m; bestScore = score; }
         }
-        return legacy;
+        return best;
+    }
+
+    private static int _dTargets = -1, _dAmount = -1, _dProps = -1, _dDealer = -1, _dCard = -1;
+    private static FieldInfo? _targetDataField;
+
+    // Generic prefix: pull the arguments by the positions mapped in TryApplyDamageHook and hand them
+    // to DamagePrefix. Targets may be Creatures or DamageTargetData structs (read their .target field).
+    private static void DamageArgsPrefix(object[] __args)
+    {
+        try
+        {
+            if (__args[_dTargets] is not System.Collections.IEnumerable raw) return;
+            var targets = new List<Creature>();
+            foreach (var o in raw)
+            {
+                if (o is Creature c) { targets.Add(c); continue; }
+                if (o == null) continue;
+                _targetDataField ??= o.GetType().GetField("target", BindingFlags.Public | BindingFlags.Instance);
+                if (_targetDataField?.GetValue(o) is Creature tc) targets.Add(tc);
+            }
+            decimal amount = _dAmount >= 0 && __args[_dAmount] is decimal a ? a : 0m;
+            var props = _dProps >= 0 && __args[_dProps] is MegaCrit.Sts2.Core.ValueProps.ValueProp vp ? vp : default;
+            var dealer = _dDealer >= 0 ? __args[_dDealer] as Creature : null;
+            var card = _dCard >= 0 ? __args[_dCard] as CardModel : null;
+            DamagePrefix(targets, amount, props, dealer!, card!);
+        }
+        catch { /* never disrupt damage resolution */ }
     }
 
     // Doom executes via CreatureCmd.Kill (no Damage call), so tag the doomed creatures in the one static
@@ -1028,7 +1072,7 @@ public static partial class DamageChartsMod
 
     private static void HandleHotkey()
     {
-        // Typing in a text box (an in-game chat box, the dev console) must not toggle the breakdown.
+        // Typing in a text box (the in-game Claude chat, the dev console) must not toggle the breakdown.
         try
         {
             var focus = ((SceneTree)Engine.GetMainLoop()).Root.GuiGetFocusOwner();

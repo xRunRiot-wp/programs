@@ -907,7 +907,7 @@ internal sealed class DamageDetailView
 
     private Texture2D? LoadTex(string path)
     {
-        if (_texCache.TryGetValue(path, out var cached)) return cached;
+        if (_texCache.TryGetValue(path, out var cached) && (cached == null || GodotObject.IsInstanceValid(cached))) return cached;
         Texture2D? tex = null;
         try { if (ResourceLoader.Exists(path)) tex = ResourceLoader.Load<Texture2D>(path, null, ResourceLoader.CacheMode.Reuse); }
         catch { tex = null; }

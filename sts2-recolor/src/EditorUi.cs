@@ -40,7 +40,20 @@ internal static class EditorUi
 	private static CheckBox _showOriginal = null!;
 	private static HSlider _hue = null!, _sat = null!, _bright = null!, _contrast = null!, _tintAmt = null!;
 	private static HSlider _picAmt = null!, _picScale = null!;
-	private static OptionButton _picMode = null!;
+	private static HSlider _picStretch = null!, _picMoveX = null!, _picMoveY = null!, _picRot = null!;
+	private static HSlider _picHue = null!, _picSat = null!, _picBright = null!;
+	private static CheckBox _picRepeat = null!, _picFlipX = null!, _picFlipY = null!, _picPixel = null!;
+	private static OptionButton _picMode = null!, _picPlace = null!, _picRes = null!;
+	private static OptionButton _previewAnim = null!;
+	private static CheckBox _follow = null!;
+	/// <summary>Creatures that can wear their owner's look, and whose.</summary>
+	private static readonly Dictionary<string, (string key, string label)> FollowOwners = new() { ["osty"] = ("necrobinder", "Necrobinder") };
+	private static OptionButton _profiles = null!;
+	private static LineEdit _profileName = null!;
+	private static Button _profileUndo = null!, _profileDelete = null!;
+	private static (string key, TargetRecolor? look)? _beforeLoad;   // for Undo after loading a profile
+	private static double _deleteArmedUntil;
+	private static readonly List<ulong> _hiddenForSelect = new();
 	private static Label _picName = null!;
 	private static ColorPickerButton _tint = null!;
 	private static VBoxContainer _swapList = null!;
@@ -158,6 +171,154 @@ internal static class EditorUi
 		Palette.Save();
 	}
 
+	// ---------------------------------------------------------------- share codes
+
+	// Only the selected character changes (Joseph, 2026-09-27: "the share code overwrote all my characters, not
+	// just one"). Before replacing it, the old look is saved as a profile and palette.json is backed up; the
+	// pasted look is saved as a profile too, and Undo works like after loading a profile.
+	public static void PasteShareCode(string code)
+	{
+		if (_current == null) return;
+		PaletteFile incoming;
+		try { incoming = Palette.ReadShareCode(code); }
+		catch (Exception ex) { SetStatus("Clipboard doesn't contain a valid share code. (" + ex.Message + ")"); return; }
+		string who = _current.Label.Split("  ")[0];
+		TargetRecolor? look = incoming.Targets.TryGetValue(_current.Key, out var mine) ? mine
+			: incoming.Targets.Count(kv => !IsPetKey(kv.Key) || IsPetKey(_current.Key)) == 1 && IsShareCharacter(SoleKey(incoming)) == IsShareCharacter(_current.Key)
+				? incoming.Targets[SoleKey(incoming)]
+			: null;
+		if (look == null)
+		{
+			string has = incoming.Targets.Count == 0 ? "nothing" : string.Join(", ", incoming.Targets.Keys);
+			SetStatus($"That code has no look for {who}. It has: {has}. Select one of those, then paste again.");
+			return;
+		}
+		FlushSave();
+		Palette.Backup("before paste");
+		string stamp = DateTime.Now.ToString("MMM d HH-mm");
+		var before = Palette.Get(_current.Key);
+		if (before != null && !before.IsIdentity)
+			Profiles.Save(_current.Key, $"My look before paste {stamp}", before);
+		string savedAs = Profiles.Save(_current.Key, $"Pasted {stamp}", look);
+		_beforeLoad = (_current.Key, before == null ? null : Profiles.Copy(before));
+		Palette.Current.Targets[_current.Key] = Profiles.Copy(look);
+		// A character's pet comes with it (the Necrobinder's code carries Osty); its old look is saved as a profile too.
+		var pets = PetsOf(_current.Key).Where(p => incoming.Targets.ContainsKey(p) && mine != null).ToList();
+		foreach (var p in pets)
+		{
+			if (Palette.Get(p) is { IsIdentity: false } petBefore)
+				Profiles.Save(p, $"My look before paste {stamp}", petBefore);
+			Profiles.Save(p, $"Pasted {stamp}", incoming.Targets[p]);
+			Palette.Current.Targets[p] = Profiles.Copy(incoming.Targets[p]);
+		}
+		AfterLookReplaced();
+		RefreshProfiles(savedAs);
+		_profileUndo.Disabled = false;
+		int rest = incoming.Targets.Count - 1 - pets.Count;
+		string others = rest > 0 ? $" The code also has {rest} other character(s): select one and paste again to take it." : "";
+		string withPets = pets.Count > 0 ? " and " + string.Join(", ", pets.Select(PetLabel)) : "";
+		SetStatus($"Pasted onto {who}{withPets} only. Your previous look is in Saved looks; Undo also works.{others}");
+	}
+
+	// ---------------------------------------------------------------- profiles
+
+	private static string? SelectedProfile() =>
+		_profiles.ItemCount == 0 || _profiles.Selected < 0 || _profiles.IsItemDisabled(_profiles.Selected) ? null : _profiles.GetItemText(_profiles.Selected);
+
+	private static void RefreshProfiles(string? select = null)
+	{
+		_profiles.Clear();
+		if (_current == null) return;
+		var names = Profiles.List(_current.Key);
+		foreach (var n in names) _profiles.AddItem(n);
+		if (names.Count == 0)
+		{
+			_profiles.AddItem("(none saved yet)");
+			_profiles.SetItemDisabled(0, true);
+		}
+		_profiles.Select(select != null && names.Contains(select) ? names.IndexOf(select) : 0);
+		_profileDelete.Disabled = names.Count == 0;
+		_profileDelete.Text = "Delete";
+		_deleteArmedUntil = 0;
+	}
+
+	public static void SaveProfile(string name)
+	{
+		if (_current == null) return;
+		FlushSave();
+		if (string.IsNullOrWhiteSpace(name)) name = _current.Label.Split("  ")[0] + " look";
+		var look = Palette.Get(_current.Key) ?? new TargetRecolor();
+		string saved = Profiles.Save(_current.Key, name, look);
+		_profileName.Text = "";
+		RefreshProfiles(saved);
+		SetStatus($"Saved this look as \"{saved}\".");
+	}
+
+	public static void LoadProfile(string? name)
+	{
+		if (_current == null || name == null) { SetStatus("Pick a saved look first."); return; }
+		var look = Profiles.Load(_current.Key, name);
+		if (look == null) { SetStatus($"Couldn't read \"{name}\"."); return; }
+		var before = Palette.Get(_current.Key);
+		_beforeLoad = (_current.Key, before == null ? null : Profiles.Copy(before));
+		Palette.Current.Targets[_current.Key] = look;
+		AfterLookReplaced();
+		_profileUndo.Disabled = false;
+		SetStatus($"Loaded \"{name}\". Undo goes back to what you had.");
+	}
+
+	private static void UndoProfileLoad()
+	{
+		if (_current == null || _beforeLoad is not { } b || b.key != _current.Key) return;
+		if (b.look == null) Palette.Current.Targets.Remove(b.key);
+		else Palette.Current.Targets[b.key] = b.look;
+		_beforeLoad = null;
+		_profileUndo.Disabled = true;
+		AfterLookReplaced();
+		SetStatus("Back to the look you had before loading.");
+	}
+
+	private static void DeleteProfile()
+	{
+		if (_current == null || SelectedProfile() is not { } name) return;
+		if (Now > _deleteArmedUntil)
+		{
+			_deleteArmedUntil = Now + 3;
+			_profileDelete.Text = "Sure?";
+			SetStatus($"Click Delete again to delete \"{name}\".");
+			return;
+		}
+		Profiles.Delete(_current.Key, name);
+		RefreshProfiles();
+		SetStatus($"Deleted \"{name}\".");
+	}
+
+	// The creature's whole look was swapped: save it and show it everywhere (whole body selected).
+	private static void AfterLookReplaced()
+	{
+		Palette.Touch();
+		Palette.Save();
+		_currentPart = null;
+		PopulateParts();
+		SelectPart(null);
+		RefreshTargetLabels();
+		RefreshPartLabels();
+		RefreshModelSection();
+	}
+
+	/// <summary>Test hook: "profile save|load|delete|list|undo [name]".</summary>
+	public static void DevProfile(string op, string name)
+	{
+		switch (op)
+		{
+			case "save": SaveProfile(name); break;
+			case "load": LoadProfile(name); break;
+			case "undo": UndoProfileLoad(); break;
+			case "delete": _deleteArmedUntil = Now + 3; for (int i = 0; i < _profiles.ItemCount; i++) if (_profiles.GetItemText(i) == name) _profiles.Select(i); DeleteProfile(); break;
+		}
+		ModEntry.Log("profiles: " + (_current == null ? "-" : string.Join(" | ", Profiles.List(_current.Key))));
+	}
+
 	private static void Changed()
 	{
 		Palette.Touch();
@@ -205,6 +366,13 @@ internal static class EditorUi
 		_vpContainer = new SubViewportContainer { Stretch = true, SizeFlagsVertical = Control.SizeFlags.ExpandFill, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Stop };
 		_vpContainer.GuiInput += OnPreviewInput;
 		pv.AddChild(_vpContainer);
+		var animRow = new HBoxContainer();
+		animRow.AddChild(new Label { Text = "  Preview animation" });
+		_previewAnim = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, FitToLongestItem = false,
+			TooltipText = "Play another animation in the preview (e.g. attack, to see the Regent's weapons). Preview only." };
+		_previewAnim.ItemSelected += i => PlayPreviewAnimation(_previewAnim.GetItemText((int)i));
+		animRow.AddChild(_previewAnim);
+		pv.AddChild(animRow);
 		_vp = new SubViewport { TransparentBg = true, HandleInputLocally = false, RenderTargetUpdateMode = SubViewport.UpdateMode.Always };
 		_vpContainer.AddChild(_vp);
 		_holder = new Node2D();
@@ -235,6 +403,30 @@ internal static class EditorUi
 		};
 		col.AddChild(_target);
 
+		// Saved looks (profiles) for this creature
+		col.AddChild(new Label { Text = "Saved looks (profiles)" });
+		var profRow = new HBoxContainer();
+		_profiles = new OptionButton { FitToLongestItem = false, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Looks you saved for this character, newest first." };
+		profRow.AddChild(_profiles);
+		var loadProf = new Button { Text = "Load", TooltipText = "Switch to this saved look (the whole body and every part)." };
+		loadProf.Pressed += () => LoadProfile(SelectedProfile());
+		profRow.AddChild(loadProf);
+		_profileUndo = new Button { Text = "Undo", Disabled = true, TooltipText = "Go back to the look you had before loading." };
+		_profileUndo.Pressed += UndoProfileLoad;
+		profRow.AddChild(_profileUndo);
+		_profileDelete = new Button { Text = "Delete", TooltipText = "Delete this saved look (click twice)." };
+		_profileDelete.Pressed += DeleteProfile;
+		profRow.AddChild(_profileDelete);
+		col.AddChild(profRow);
+		var saveRow = new HBoxContainer();
+		_profileName = new LineEdit { PlaceholderText = "Name for the current look", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MaxLength = 50 };
+		_profileName.TextSubmitted += _ => SaveProfile(_profileName.Text);
+		saveRow.AddChild(_profileName);
+		var saveProf = new Button { Text = "Save as profile", TooltipText = "Save the current look under this name. Never replaces an existing profile." };
+		saveProf.Pressed += () => SaveProfile(_profileName.Text);
+		saveRow.AddChild(saveProf);
+		col.AddChild(saveRow);
+
 		col.AddChild(new Label { Text = "Part  (* = has its own colors)" });
 		var partRow = new HBoxContainer();
 		_part = new OptionButton { FitToLongestItem = false, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Pick one piece of the model to give it its own colors." };
@@ -257,6 +449,16 @@ internal static class EditorUi
 		_showOriginal.Toggled += _ => ApplyPreviewBypass();
 		toggles.AddChild(_showOriginal);
 		col.AddChild(toggles);
+		_follow = new CheckBox { Text = "Match the owner's look", Visible = false,
+			TooltipText = "Wear the owner's current colors and flames. Stays linked: change the owner and this follows. Your own settings here are kept for when you turn it off." };
+		_follow.Toggled += on =>
+		{
+			if (_suppress || _current == null || !FollowOwners.TryGetValue(_current.Key, out var owner)) return;
+			Palette.GetOrCreate(_current.Key).Follow = on ? owner.key : null;
+			Changed();
+			SetStatus(on ? $"Now matching the {owner.label}'s look. Edit the {owner.label} to change both." : "Back to its own look.");
+		};
+		col.AddChild(_follow);
 
 		_settingsHeader = Header("Whole body");
 		col.AddChild(_settingsHeader);
@@ -288,16 +490,48 @@ internal static class EditorUi
 		removePic.Pressed += () => Edit(t => t.Picture = null);
 		picRow.AddChild(removePic);
 		col.AddChild(picRow);
-		var modeRow = new HBoxContainer();
-		modeRow.AddChild(new Label { Text = "Picture mode", CustomMinimumSize = new Vector2(120, 0) });
-		_picMode = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		_picRes = OptionRow(col, "Resolution", "Pixel size of the picture. New pictures come in at this size; changing it makes a resized copy of the current picture (the original is kept). Small + Pixelated = chunky pixel-art look.");
+		foreach (int px in PictureStore.Sizes)
+			_picRes.AddItem(px == PictureStore.MaxSize ? $"{px} px (default)" : $"{px} px");
+		_picRes.Select(Array.IndexOf(PictureStore.Sizes, PictureStore.ImportSize));
+		_picRes.ItemSelected += i => SetPictureResolution(PictureStore.Sizes[i]);
+		_picMode = OptionRow(col, "Picture mode", "How the picture mixes with the colors underneath.");
 		_picMode.AddItem("Picture colors (keeps the shading)");
 		_picMode.AddItem("Texture only (light & dark detail)");
-		_picMode.ItemSelected += i => Edit(t => t.PictureMode = i == 1 ? "texture" : "colors");
-		modeRow.AddChild(_picMode);
-		col.AddChild(modeRow);
+		_picMode.AddItem("Picture exactly (no shading)");
+		_picMode.AddItem("Darken (multiply)");
+		_picMode.AddItem("Lighten (screen)");
+		_picMode.AddItem("Glow (add)");
+		_picMode.ItemSelected += i => Edit(t => t.PictureMode = Recolorer.PictureModes[i]);
+		_picPlace = OptionRow(col, "Placement", "Follow the art: the picture is pinned to each piece and bends with the animations.\nFlat: one picture laid straight over the whole body, centered on it.");
+		_picPlace.AddItem("Follow the art (bends with animations)");
+		_picPlace.AddItem("Flat over the body (stays straight)");
+		_picPlace.ItemSelected += i => Edit(t => t.PicturePlacement = i == 1 ? "flat" : "art");
 		_picAmt = SliderRow(col, "Picture opacity", 0, 1, 0.01, v => Edit(t => t.PictureOpacity = (float)v), v => $"{v * 100:0}%");
-		_picScale = SliderRow(col, "Picture size", 0.5, 32, 0.1, v => Edit(t => t.PictureScale = (float)v), v => $"{v:0.0}x repeat");
+		_picScale = SliderRow(col, "Picture repeats", 0.1, 32, 0.1, v => Edit(t => t.PictureScale = (float)v), v => $"{v:0.0}x");
+		_picScale.TooltipText = "How many copies fit across. Higher = smaller picture, lower = bigger picture.";
+		_picStretch = SliderRow(col, "Wider / taller", -3, 3, 0.05, v => Edit(t => t.PictureStretch = (float)v),
+			v => Math.Abs(v) < 0.01 ? "normal" : v > 0 ? $"{Math.Pow(2, v):0.0}x wide" : $"{Math.Pow(2, -v):0.0}x tall");
+		_picMoveX = SliderRow(col, "Move sideways", -1, 1, 0.01, v => Edit(t => t.PictureOffsetX = (float)v), v => $"{v * 100:0}%");
+		_picMoveY = SliderRow(col, "Move up/down", -1, 1, 0.01, v => Edit(t => t.PictureOffsetY = (float)v), v => $"{v * 100:0}%");
+		_picRot = SliderRow(col, "Rotate picture", 0, 360, 1, v => Edit(t => t.PictureRotation = (float)v), v => $"{v:0}°");
+		var picChecks = new HFlowContainer();
+		_picRepeat = new CheckBox { Text = "Repeat", TooltipText = "Off = just one copy of the picture, nothing around it." };
+		_picRepeat.Toggled += on => Edit(t => t.PictureRepeat = on);
+		_picFlipX = new CheckBox { Text = "Flip ↔", TooltipText = "Mirror the picture left-right." };
+		_picFlipX.Toggled += on => Edit(t => t.PictureFlipX = on);
+		_picFlipY = new CheckBox { Text = "Flip ↕", TooltipText = "Mirror the picture upside down." };
+		_picFlipY.Toggled += on => Edit(t => t.PictureFlipY = on);
+		_picPixel = new CheckBox { Text = "Pixelated", TooltipText = "Sharp square pixels instead of smooth blending (great for pixel art or a low Resolution)." };
+		_picPixel.Toggled += on => Edit(t => t.PicturePixelated = on);
+		foreach (var c in new[] { _picRepeat, _picFlipX, _picFlipY, _picPixel }) picChecks.AddChild(c);
+		col.AddChild(picChecks);
+		_picHue = SliderRow(col, "Picture hue", -180, 180, 1, v => Edit(t => t.PictureHue = (float)v), v => $"{v:0}°");
+		_picSat = SliderRow(col, "Picture saturation", 0, 2, 0.01, v => Edit(t => t.PictureSaturation = (float)v), v => $"{v * 100:0}%");
+		_picBright = SliderRow(col, "Picture brightness", 0, 2, 0.01, v => Edit(t => t.PictureBrightness = (float)v), v => $"{v * 100:0}%");
+		var resetPic = new Button { Text = "Reset picture settings", TooltipText = "Size, placement, mode, flips and picture colors back to default. Keeps the picture and its opacity." };
+		resetPic.Pressed += () => { Edit(t => t.ResetPictureLayout()); LoadControls(); };
+		col.AddChild(resetPic);
 
 		col.AddChild(Header("Color swaps  (turn one color into another)"));
 		col.AddChild(new Label
@@ -328,32 +562,34 @@ internal static class EditorUi
 
 		col.AddChild(Header("Share with a friend"));
 		var shareRow = new HBoxContainer();
-		var copy = new Button { Text = "Copy share code", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		var copy = new Button { Text = "Copy code: this character", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			TooltipText = "A share code with only the character you're editing." };
 		copy.Pressed += () =>
+		{
+			if (_current == null) return;
+			FlushSave();
+			var pets = PetsOf(_current.Key).Where(p => Palette.Get(p) != null).ToList();
+			DisplayServer.ClipboardSet(Palette.ExportShareCode(_current.Key, pets));
+			string withPets = pets.Count > 0 ? " (with " + string.Join(", ", pets.Select(PetLabel)) + ")" : "";
+			SetStatus($"Share code for {_current.Label.Split("  ")[0]}{withPets} copied. Your friend picks that character, then Paste.");
+		};
+		shareRow.AddChild(copy);
+		var copyAll = new Button { Text = "Copy code: everyone", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			TooltipText = "A share code with every character you've recolored." };
+		copyAll.Pressed += () =>
 		{
 			FlushSave();
 			DisplayServer.ClipboardSet(Palette.ExportShareCode());
-			SetStatus("Share code copied. Send it to your friend; they press F8 → Paste share code.");
+			SetStatus("Share code for everyone copied. Pasting it only changes the character your friend has selected.");
 		};
-		shareRow.AddChild(copy);
-		var paste = new Button { Text = "Paste share code", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-		paste.Pressed += () =>
-		{
-			try
-			{
-				int n = Palette.ImportShareCode(DisplayServer.ClipboardGet());
-				LoadControls();
-				RebuildSwaps();
-				RefreshTargetLabels();
-				SetStatus($"Imported {n} recolor(s) from the share code.");
-			}
-			catch (Exception ex)
-			{
-				SetStatus("Clipboard doesn't contain a valid share code. (" + ex.Message + ")");
-			}
-		};
-		shareRow.AddChild(paste);
+		shareRow.AddChild(copyAll);
 		col.AddChild(shareRow);
+		var pasteRow = new HBoxContainer();
+		var paste = new Button { Text = "Paste code onto this character", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			TooltipText = "Only the character you're editing changes. Your old look is saved as a profile first." };
+		paste.Pressed += () => PasteShareCode(DisplayServer.ClipboardGet());
+		pasteRow.AddChild(paste);
+		col.AddChild(pasteRow);
 		col.AddChild(new Label
 		{
 			Text = "Share codes carry colors only. Repainted models travel in a share pack file:",
@@ -454,6 +690,9 @@ internal static class EditorUi
 				if (c.Id.Entry.Equals("NECROBINDER", StringComparison.OrdinalIgnoreCase)
 				    && ModelDb.All.OfType<MonsterModel>().FirstOrDefault(m => m.Id.Entry.Equals("OSTY", StringComparison.OrdinalIgnoreCase)) is { } osty)
 					_entries.Add(new Entry { Key = osty.Id.Entry.ToLowerInvariant(), Label = SafeTitle(() => osty.Title.GetFormattedText(), "Osty") + "  (Necrobinder's pet)", Group = "Characters", Create = osty.CreateVisuals, Monster = osty });
+				// The Regent's Sovereign Blade is its own object in combat (Joseph, 2026-09-27: "regent you cant see his weapon").
+				if (c.Id.Entry.Equals("REGENT", StringComparison.OrdinalIgnoreCase))
+					_entries.Add(new Entry { Key = Recolorer.BladeKey, Label = "Sovereign Blade  (Regent's sword)", Group = "Characters", Create = CreateBladePreview });
 			}
 		}
 		catch (Exception ex) { ModEntry.Log($"Character list failed: {ex.Message}"); }
@@ -506,6 +745,28 @@ internal static class EditorUi
 			}
 		}
 		catch (Exception ex) { ModEntry.Log($"Monster list failed: {ex.Message}"); }
+	}
+
+	// The blade's own script needs a card and a combat, so the preview takes just its drawn part (the sword model,
+	// hilt pictures and flames) out of the scene before the script ever runs.
+	private static Node CreateBladePreview()
+	{
+		var packed = ResourceLoader.Load<PackedScene>(MegaCrit.Sts2.Core.Helpers.SceneHelper.GetScenePath("vfx/sovereign_blade"));
+		var scene = packed.Instantiate(PackedScene.GenEditState.Disabled);
+		var sword = scene.GetNode<Node2D>("SpineSword");
+		scene.RemoveChild(sword);
+		scene.Free();
+		foreach (string p in new[] { "SwordBone/ScaleContainer/ForgeSparks", "SwordBone/ScaleContainer/SpawnFlames",
+			         "SwordBone/ScaleContainer/SpawnFlamesBack", "SlashParticles", "SwordBone/ScaleContainer/ChargeParticles",
+			         "SwordBone/ScaleContainer/Spikes2", "SwordBone/ScaleContainer/SpikeCircle2" })
+			if (sword.GetNodeOrNull<GpuParticles2D>(p) is { } fx) fx.Emitting = false;
+		if (sword.GetNodeOrNull<CanvasItem>("SwordBone/ScaleContainer/BladeGlow") is { } glow) glow.Visible = false;
+		if (sword.GetNodeOrNull<Control>("Hitbox") is { } hb) hb.Visible = false;
+		sword.Position = Vector2.Zero;
+		var holder = new Node2D { Name = "SovereignBladePreview" };
+		holder.AddChild(sword);
+		holder.SetMeta(Recolorer.KeyMeta, Recolorer.BladeKey);
+		return holder;
 	}
 
 	private static string SafeTitle(Func<string> f, string fallback)
@@ -566,6 +827,14 @@ internal static class EditorUi
 		}
 		return _characterKeys.Contains(key);
 	}
+
+	// Pets (Osty) share codes like characters (Joseph, 2026-10-02: "osty needs character code compatibility"):
+	// a character's code pastes onto Osty and back, and the owner's code carries the pet along.
+	public static bool IsPetKey(string key) => FollowOwners.ContainsKey(key);
+	private static bool IsShareCharacter(string key) => IsCharacterKey(key) || IsPetKey(key);
+	private static IEnumerable<string> PetsOf(string owner) => FollowOwners.Where(kv => kv.Value.key == owner).Select(kv => kv.Key);
+	private static string PetLabel(string pet) => pet.Length == 0 ? pet : char.ToUpperInvariant(pet[0]) + pet[1..];
+	private static string SoleKey(PaletteFile f) => f.Targets.Keys.FirstOrDefault(k => !IsPetKey(k)) ?? f.Targets.Keys.First();
 
 	private static void BuildModelSection(VBoxContainer col)
 	{
@@ -671,6 +940,8 @@ internal static class EditorUi
 		LoadControls();
 		RebuildSwaps();
 		RefreshModelSection();
+		RefreshProfiles();
+		_profileUndo.Disabled = _beforeLoad is not { } bl || bl.key != e.Key;
 		ShowPreview(e);
 		SetStatus("");
 	}
@@ -710,22 +981,100 @@ internal static class EditorUi
 				cv.SetUpSkin(_current.Monster);
 		}
 		catch (Exception ex) { ModEntry.Log($"Preview skin setup skipped: {ex.Message}"); }
+		_previewAnim.Clear();
 		try
 		{
-			var body = (_preview as NCreatureVisuals)?.SpineBody;
-			if (body == null)
-				return; // Ancient scenes animate themselves
-			foreach (string anim in new[] { "idle_loop", "idle", "Idle", "idle_1" })
+			var names = PreviewAnimations();
+			string? idle = new[] { "idle_loop", "idle", "Idle", "idle_1" }.FirstOrDefault(names.Contains);
+			foreach (string n in names) _previewAnim.AddItem(n);
+			if (idle != null)
 			{
-				if (body.HasAnimation(anim))
-				{
-					body.GetAnimationState().SetAnimation(anim);
-					break;
-				}
+				_previewAnim.Select(names.IndexOf(idle));
+				PlayPreviewAnimation(idle);
 			}
+			else if (_preview is not NCreatureVisuals && _preview is not Control && names.Count > 0)
+				PlayPreviewAnimation(names[0]); // the blade: its own idle
 		}
 		catch (Exception ex) { ModEntry.Log($"Preview animation skipped: {ex.Message}"); }
+		_previewAnim.Disabled = _previewAnim.ItemCount < 2;
 		Recolorer.Apply(_preview);
+	}
+
+	/// <summary>The preview model's animation names (idle first), or none for Ancient scenes.</summary>
+	private static List<string> PreviewAnimations()
+	{
+		var list = new List<string>();
+		if (_preview is Control || PreviewBody is not Node body || body.GetClass() != "SpineSprite") return list;
+		var data = body.Call("get_skeleton").AsGodotObject()?.Call("get_data").AsGodotObject();
+		if (data == null) return list;
+		foreach (Variant a in data.Call("get_animations").AsGodotArray())
+		{
+			string n = a.AsGodotObject()?.Call("get_name").AsString() ?? "";
+			if (n.Length > 0 && !list.Contains(n)) list.Add(n);
+		}
+		list.Sort((x, y) => (x.Contains("idle") ? 0 : 1).CompareTo(y.Contains("idle") ? 0 : 1) is var c && c != 0 ? c : string.Compare(x, y, StringComparison.OrdinalIgnoreCase));
+		return list;
+	}
+
+	/// <summary>Loop one animation on the preview model. The game's own effects follow it (the Regent's weapons
+	/// appear on "attack").</summary>
+	private static void PlayPreviewAnimation(string anim)
+	{
+		if (_preview == null || !GodotObject.IsInstanceValid(_preview)) return;
+		try
+		{
+			if ((_preview as NCreatureVisuals)?.SpineBody is { } mega)
+				mega.GetAnimationState().SetAnimation(anim);
+			else if (PreviewBody is Node body && body.GetClass() == "SpineSprite")
+				body.Call("get_animation_state").AsGodotObject()?.Call("set_animation", anim, true, 0);
+		}
+		catch (Exception ex) { ModEntry.Log($"Preview animation {anim} failed: {ex.Message}"); }
+	}
+
+	/// <summary>Test hook: tick/untick "Match the owner's look".</summary>
+	public static void DevFollow(bool on) => _follow.ButtonPressed = on;
+
+	/// <summary>Test hook: play a preview animation by name.</summary>
+	public static void DevPreviewAnimation(string anim)
+	{
+		for (int i = 0; i < _previewAnim.ItemCount; i++)
+			if (_previewAnim.GetItemText(i) == anim) _previewAnim.Select(i);
+		PlayPreviewAnimation(anim);
+	}
+
+	/// <summary>Everything drawn by the preview's Spine models (the body plus weapon models inside it), in preview space.</summary>
+	private static Rect2? SpineBoundsInPreview()
+	{
+		Rect2? all = null;
+		var root = (CanvasItem)_preview!;
+		void Look(Node n)
+		{
+			if (n is Node2D sp && n.GetClass() == "SpineSprite" && sp.IsVisibleInTree())
+			{
+				var skel = sp.Call("get_skeleton").AsGodotObject();
+				Rect2 sb = skel != null ? skel.Call("get_bounds").AsRect2() : default;
+				if (sb.Size.X > 1 && sb.Size.Y > 1)
+				{
+					Transform2D x = root.GetGlobalTransform().AffineInverse() * sp.GetGlobalTransform();
+					Rect2 local = new Rect2(x * sb.Position, Vector2.Zero)
+						.Expand(x * new Vector2(sb.End.X, sb.Position.Y))
+						.Expand(x * new Vector2(sb.Position.X, sb.End.Y))
+						.Expand(x * sb.End);
+					all = all is { } a ? a.Merge(local) : local;
+				}
+			}
+			// the Sovereign Blade is mostly pictures on a bone, not Spine art
+			if (n is TextureRect tr && tr.IsVisibleInTree() && _preview is not NCreatureVisuals)
+			{
+				Transform2D x = root.GetGlobalTransform().AffineInverse() * tr.GetGlobalTransform();
+				Rect2 local = new Rect2(x * Vector2.Zero, Vector2.Zero).Expand(x * tr.Size)
+					.Expand(x * new Vector2(tr.Size.X, 0)).Expand(x * new Vector2(0, tr.Size.Y));
+				all = all is { } a ? a.Merge(local) : local;
+			}
+			foreach (Node c in n.GetChildren()) Look(c);
+		}
+		Look(_preview!);
+		return all;
 	}
 
 	private static void FitPreview()
@@ -749,24 +1098,9 @@ internal static class EditorUi
 		if (_fitFor != _preview.GetInstanceId()) { _fitFor = _preview.GetInstanceId(); _fitRect = null; }
 		try
 		{
-			if (_preview is NCreatureVisuals && PreviewBody is Node2D body && body.GetClass() == "SpineSprite")
-			{
-				var skel = body.Call("get_skeleton").AsGodotObject();
-				if (skel != null)
-				{
-					Rect2 sb = skel.Call("get_bounds").AsRect2();
-					if (sb.Size.X > 1 && sb.Size.Y > 1)
-					{
-						Transform2D x = ((CanvasItem)_preview).GetGlobalTransform().AffineInverse() * body.GetGlobalTransform();
-						Rect2 local = new Rect2(x * sb.Position, Vector2.Zero)
-							.Expand(x * new Vector2(sb.End.X, sb.Position.Y))
-							.Expand(x * new Vector2(sb.Position.X, sb.End.Y))
-							.Expand(x * sb.End);
-						// creatures: never smaller than their hitbox; Ancient scenes: just the Ancient's skeleton
-						_fitRect = _fitRect is { } r ? r.Merge(local) : (_preview is NCreatureVisuals ? local.Merge(b) : local);
-					}
-				}
-			}
+			// creatures: never smaller than their hitbox; the Regent's weapons and the Sovereign Blade included
+			if (_preview is not Control && SpineBoundsInPreview() is { } local)
+				_fitRect = _fitRect is { } r ? r.Merge(local) : (_preview is NCreatureVisuals ? local.Merge(b) : local);
 		}
 		catch { }
 		if (_fitRect is { } fit) b = fit;
@@ -819,6 +1153,14 @@ internal static class EditorUi
 	{
 		if (_current == null || _preview == null || !GodotObject.IsInstanceValid(_preview)) return;
 		_selectPos = pos;
+		// particles / fire drawn over the body would hide the ID colors underneath: hide them for these frames
+		_hiddenForSelect.Clear();
+		void Hide(Node n)
+		{
+			if (n is CanvasItem ci && ci.Visible && EffectRecolor.IsEffect(n)) { ci.Visible = false; _hiddenForSelect.Add(n.GetInstanceId()); }
+			foreach (Node c in n.GetChildren()) Hide(c);
+		}
+		Hide(_preview);
 		Recolorer.IdPickKey = _current.Key;
 		Recolorer.Apply(_preview);
 		_selectFrames = 3;
@@ -845,6 +1187,9 @@ internal static class EditorUi
 		finally
 		{
 			Recolorer.IdPickKey = null;
+			foreach (ulong id in _hiddenForSelect)
+				if (GodotObject.InstanceFromId(id) is CanvasItem ci && GodotObject.IsInstanceValid(ci)) ci.Visible = true;
+			_hiddenForSelect.Clear();
 			if (_preview != null && GodotObject.IsInstanceValid(_preview)) Recolorer.Apply(_preview);
 		}
 		if (slot == null)
@@ -976,7 +1321,8 @@ internal static class EditorUi
 		HSlider s = name switch
 		{
 			"hue" => _hue, "saturation" => _sat, "brightness" => _bright, "contrast" => _contrast, "tint" => _tintAmt,
-			"picopacity" => _picAmt, "picsize" => _picScale,
+			"picopacity" => _picAmt, "picsize" => _picScale, "picstretch" => _picStretch, "picx" => _picMoveX,
+			"picy" => _picMoveY, "picrot" => _picRot, "pichue" => _picHue, "picsat" => _picSat, "picbright" => _picBright,
 			_ => throw new ArgumentException("unknown slider " + name)
 		};
 		s.Value = value;
@@ -1082,6 +1428,10 @@ internal static class EditorUi
 		var effects = _preview != null && GodotObject.IsInstanceValid(_preview) ? EffectRecolor.PartNames(_preview) : new List<string>();
 		// 1) groups, biggest first: "Clothes (12 parts)", "Left arm (9 parts)", ..., "All flames"
 		var groups = PartGroups.For(slots);
+		// weapons drawn as their own models (the Regent's) always get a "Weapon" group
+		if (_preview != null && GodotObject.IsInstanceValid(_preview) && Recolorer.HasNestedSpines(_preview)
+		    && !groups.Any(g => g.Key == PartGroups.WeaponGroup))
+			groups.Add((PartGroups.WeaponGroup, PartGroups.MembersOf(PartGroups.WeaponGroup, slots)));
 		if (effects.Contains(EffectRecolor.AllFlames))
 			groups.Add((EffectRecolor.AllFlames, PartGroups.MembersOf(EffectRecolor.AllFlames, slots)));
 		foreach (var (key, members) in groups.OrderByDescending(g => g.Members.Count))
@@ -1119,7 +1469,7 @@ internal static class EditorUi
 	private static string PartLabel(string key)
 	{
 		if (key.StartsWith(PartGroups.Prefix))
-			return $"{key[PartGroups.Prefix.Length..]}  ({(_groupSizes.TryGetValue(key, out var n) ? n : 0)} parts)";
+			return _groupSizes.TryGetValue(key, out var n) && n > 0 ? $"{key[PartGroups.Prefix.Length..]}  ({n} parts)" : key[PartGroups.Prefix.Length..];
 		if (key == EffectRecolor.AllFlames)
 			return EffectRecolor.Display(key);
 		return EffectRecolor.Display(key);
@@ -1198,13 +1548,54 @@ internal static class EditorUi
 		SetStatus($"Using picture {name}. Adjust Picture opacity, size and mode.");
 	}
 
-	public static void DevPictureMode(string mode) => Edit(t => t.PictureMode = mode == "texture" ? "texture" : "colors");
+	public static void DevPictureMode(string mode) => Edit(t => t.PictureMode = Array.IndexOf(Recolorer.PictureModes, mode) >= 0 ? mode : "colors");
+
+	/// <summary>Resolution picked: remembered for new pictures, and the current picture swaps to a resized copy.</summary>
+	public static void SetPictureResolution(int px)
+	{
+		PictureStore.ImportSize = px;
+		var t = ViewTarget();
+		if (_current == null || string.IsNullOrEmpty(t.Picture)) { SetStatus($"New pictures will come in at {px} px."); return; }
+		try
+		{
+			string name = PictureStore.Resized(t.Picture, px);
+			Edit(x => x.Picture = name);
+			LoadControls();
+			SetStatus($"Picture now {PictureStore.PixelSize(name)} px ({name}).");
+		}
+		catch (Exception ex) { SetStatus("Couldn't resize the picture: " + ex.Message); }
+	}
+
+	/// <summary>Test hook: picture options that aren't sliders ("picopt place flat", "picopt repeat 0", "picopt res 256"...).</summary>
+	public static void DevPictureOption(string name, string value)
+	{
+		bool on = value is "1" or "on" or "true";
+		switch (name)
+		{
+			case "place": Edit(t => t.PicturePlacement = value == "flat" ? "flat" : "art"); break;
+			case "repeat": Edit(t => t.PictureRepeat = on); break;
+			case "flipx": Edit(t => t.PictureFlipX = on); break;
+			case "flipy": Edit(t => t.PictureFlipY = on); break;
+			case "pixel": Edit(t => t.PicturePixelated = on); break;
+			case "res": SetPictureResolution(int.Parse(value)); break;
+			case "reset": Edit(t => t.ResetPictureLayout()); break;
+			default: throw new ArgumentException("unknown picture option " + name);
+		}
+		LoadControls();
+	}
 
 	private static void LoadControls()
 	{
 		var t = ViewTarget();
 		_suppress = true;
 		_enabled.ButtonPressed = t.Enabled;
+		bool canFollow = _current != null && FollowOwners.ContainsKey(_current.Key);
+		_follow.Visible = canFollow;
+		if (canFollow)
+		{
+			_follow.Text = $"Match the {FollowOwners[_current!.Key].label}'s look (stays linked)";
+			_follow.ButtonPressed = !string.IsNullOrEmpty(Palette.Get(_current.Key)?.Follow);
+		}
 		_hue.Value = t.Hue;
 		_sat.Value = t.Saturation;
 		_bright.Value = t.Brightness;
@@ -1212,9 +1603,30 @@ internal static class EditorUi
 		_tint.Color = Recolorer.ParseColor(t.Tint, Colors.White);
 		_tintAmt.Value = t.TintStrength;
 		_picName.Text = string.IsNullOrEmpty(t.Picture) ? "none" : t.Picture + (PictureStore.Get(t.Picture) == null ? "  (missing file)" : "");
-		_picMode.Select(t.PictureMode == "texture" ? 1 : 0);
+		_picMode.Select(Math.Max(0, Array.IndexOf(Recolorer.PictureModes, t.PictureMode)));
+		_picPlace.Select(t.PicturePlacement == "flat" ? 1 : 0);
+		int have = PictureStore.PixelSize(t.Picture);
+		if (have > 0)
+		{
+			int near = 0;
+			for (int i = 1; i < PictureStore.Sizes.Length; i++)
+				if (Math.Abs(PictureStore.Sizes[i] - have) < Math.Abs(PictureStore.Sizes[near] - have)) near = i;
+			_picRes.Select(near);
+		}
+		else _picRes.Select(Array.IndexOf(PictureStore.Sizes, PictureStore.ImportSize));
 		_picAmt.Value = t.PictureOpacity;
 		_picScale.Value = t.PictureScale;
+		_picStretch.Value = t.PictureStretch;
+		_picMoveX.Value = t.PictureOffsetX;
+		_picMoveY.Value = t.PictureOffsetY;
+		_picRot.Value = t.PictureRotation;
+		_picRepeat.ButtonPressed = t.PictureRepeat;
+		_picFlipX.ButtonPressed = t.PictureFlipX;
+		_picFlipY.ButtonPressed = t.PictureFlipY;
+		_picPixel.ButtonPressed = t.PicturePixelated;
+		_picHue.Value = t.PictureHue;
+		_picSat.Value = t.PictureSaturation;
+		_picBright.Value = t.PictureBrightness;
 		_suppress = false;
 	}
 
@@ -1283,12 +1695,26 @@ internal static class EditorUi
 		row.AddChild(slider);
 		row.AddChild(value);
 		var reset = new Button { Text = "↺", TooltipText = "Reset" };
-		double def = name switch { "Hue shift" => 0, "Tint strength" => 0, "Picture opacity" => 0.6, "Picture size" => 4, _ => 1 };
+		double def = name switch
+		{
+			"Hue shift" or "Tint strength" or "Wider / taller" or "Move sideways" or "Move up/down" or "Rotate picture" or "Picture hue" => 0,
+			"Picture opacity" => 0.6, "Picture repeats" => 4, _ => 1
+		};
 		reset.Pressed += () => slider.Value = def;
 		row.AddChild(reset);
 		parent.AddChild(row);
 		value.Text = fmt(slider.Value);
 		return slider;
+	}
+
+	private static OptionButton OptionRow(VBoxContainer parent, string name, string tip)
+	{
+		var row = new HBoxContainer();
+		row.AddChild(new Label { Text = name, CustomMinimumSize = new Vector2(120, 0) });
+		var opt = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = tip, FitToLongestItem = false };
+		row.AddChild(opt);
+		parent.AddChild(row);
+		return opt;
 	}
 
 	private static Label Header(string text)

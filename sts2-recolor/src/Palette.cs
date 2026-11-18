@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -35,12 +36,47 @@ public class TargetRecolor
 	public string? Picture { get; set; }
 	/// <summary>0..1 — how strongly the picture shows.</summary>
 	[JsonPropertyName("pictureOpacity")] public float PictureOpacity { get; set; } = 0.6f;
-	/// <summary>"colors" = the picture's colors (keeps the part's shading); "texture" = only its light/dark detail.</summary>
+	/// <summary>How the picture mixes in: "colors" (keeps the part's shading), "texture" (only its light/dark detail),
+	/// "replace" (the picture exactly), "multiply" (darken), "screen" (lighten), "add" (glow).</summary>
 	[JsonPropertyName("pictureMode")] public string PictureMode { get; set; } = "colors";
 	/// <summary>How many times the picture repeats across the art (bigger = smaller pattern).</summary>
 	[JsonPropertyName("pictureScale")] public float PictureScale { get; set; } = 4f;
+	/// <summary>"art" = pinned to the art, bends with every animation; "flat" = laid flat over the body, stays straight.</summary>
+	[JsonPropertyName("picturePlacement")] public string PicturePlacement { get; set; } = "art";
+	/// <summary>-2..2: positive = wider, negative = taller (each step doubles).</summary>
+	[JsonPropertyName("pictureStretch")] public float PictureStretch { get; set; }
+	/// <summary>Moves the picture, in picture-widths / picture-heights.</summary>
+	[JsonPropertyName("pictureOffsetX")] public float PictureOffsetX { get; set; }
+	[JsonPropertyName("pictureOffsetY")] public float PictureOffsetY { get; set; }
+	/// <summary>Degrees.</summary>
+	[JsonPropertyName("pictureRotation")] public float PictureRotation { get; set; }
+	[JsonPropertyName("pictureFlipX")] public bool PictureFlipX { get; set; }
+	[JsonPropertyName("pictureFlipY")] public bool PictureFlipY { get; set; }
+	/// <summary>False = one copy of the picture only (nothing around it).</summary>
+	[JsonPropertyName("pictureRepeat")] public bool PictureRepeat { get; set; } = true;
+	/// <summary>Sharp square pixels instead of smooth blending (for pixel art).</summary>
+	[JsonPropertyName("picturePixelated")] public bool PicturePixelated { get; set; }
+	/// <summary>The picture's own colors: hue shift in degrees, saturation and brightness multipliers.</summary>
+	[JsonPropertyName("pictureHue")] public float PictureHue { get; set; }
+	[JsonPropertyName("pictureSaturation")] public float PictureSaturation { get; set; } = 1f;
+	[JsonPropertyName("pictureBrightness")] public float PictureBrightness { get; set; } = 1f;
+
+	/// <summary>Everything about how the picture sits and looks, back to the defaults (keeps the picture and opacity).</summary>
+	public void ResetPictureLayout()
+	{
+		var d = new TargetRecolor();
+		PictureMode = d.PictureMode; PictureScale = d.PictureScale; PicturePlacement = d.PicturePlacement;
+		PictureStretch = 0; PictureOffsetX = 0; PictureOffsetY = 0; PictureRotation = 0;
+		PictureFlipX = false; PictureFlipY = false; PictureRepeat = true; PicturePixelated = false;
+		PictureHue = 0; PictureSaturation = 1; PictureBrightness = 1;
+	}
 
 	[JsonIgnore] public bool HasPicture => !string.IsNullOrWhiteSpace(Picture) && PictureOpacity > 0.001f;
+
+	/// <summary>Wear another creature's current look instead of its own (Osty → "necrobinder"). Null = own look.</summary>
+	[JsonPropertyName("follow")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Follow { get; set; }
 
 	/// <summary>Characters only: use the repainted part PNGs from models/&lt;character&gt;/.</summary>
 	[JsonPropertyName("customModel")] public bool CustomModel { get; set; } = true;
@@ -56,7 +92,7 @@ public class TargetRecolor
 	public bool HasParts => Parts is { Count: > 0 };
 
 	/// <summary>True when this changes nothing. On the top-level target, Enabled=false switches off body and parts alike.</summary>
-	public bool IsIdentity => !Enabled || (LookIsIdentity && !HasParts);
+	public bool IsIdentity => !Enabled || (LookIsIdentity && !HasParts && string.IsNullOrEmpty(Follow));
 
 	public bool LookIsIdentity =>
 		Math.Abs(Hue) < 0.01f && Math.Abs(Saturation - 1f) < 0.001f && Math.Abs(Brightness - 1f) < 0.001f
@@ -68,6 +104,10 @@ public class TargetRecolor
 		Enabled = Enabled, Hue = Hue, Saturation = Saturation, Brightness = Brightness, Contrast = Contrast,
 		Tint = Tint, TintStrength = TintStrength,
 		Picture = Picture, PictureOpacity = PictureOpacity, PictureMode = PictureMode, PictureScale = PictureScale,
+		PicturePlacement = PicturePlacement, PictureStretch = PictureStretch, PictureOffsetX = PictureOffsetX,
+		PictureOffsetY = PictureOffsetY, PictureRotation = PictureRotation, PictureFlipX = PictureFlipX,
+		PictureFlipY = PictureFlipY, PictureRepeat = PictureRepeat, PicturePixelated = PicturePixelated,
+		PictureHue = PictureHue, PictureSaturation = PictureSaturation, PictureBrightness = PictureBrightness,
 		Swaps = Swaps.ConvertAll(s => new ColorSwap { From = s.From, To = s.To, Range = s.Range })
 	};
 }
@@ -95,6 +135,34 @@ public static class Palette
 	{
 		FilePath = Path.Combine(modDir, "palette.json");
 		Load();
+		Backup("game start");
+	}
+
+	/// <summary>
+	/// A dated copy of palette.json in backups/ (Joseph, 2026-09-27: "the share code overwrote all my characters").
+	/// Made at every game start and before every share-code import. Always a new file; keeps the newest 40.
+	/// </summary>
+	public static string? Backup(string reason)
+	{
+		try
+		{
+			if (!File.Exists(FilePath)) return null;
+			string dir = Path.Combine(Path.GetDirectoryName(FilePath)!, "backups");
+			Directory.CreateDirectory(dir);
+			string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+			string name = $"palette_{stamp}_{reason.Replace(' ', '-')}.rcbackup";
+			string path = Path.Combine(dir, name);
+			for (int i = 2; File.Exists(path); i++) path = Path.Combine(dir, $"palette_{stamp}_{reason.Replace(' ', '-')}_{i}.rcbackup");
+			File.Copy(FilePath, path);
+			var old = new DirectoryInfo(dir).GetFiles("palette_*.rcbackup").OrderByDescending(f => f.CreationTimeUtc).Skip(40);
+			foreach (var f in old) f.Delete();
+			return path;
+		}
+		catch (Exception ex)
+		{
+			ModEntry.Log($"Palette backup failed: {ex.Message}");
+			return null;
+		}
 	}
 
 	public static void Load()
@@ -153,18 +221,46 @@ public static class Palette
 
 	public static void Touch() => Revision++;
 
-	public static string ExportShareCode()
+	/// <summary>A share code for one creature (onlyKey, plus any `with` keys such as its pet), or for every recolored creature (null).</summary>
+	public static string ExportShareCode(string? onlyKey = null, IEnumerable<string>? with = null)
 	{
-		byte[] json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Current));
+		var file = Current;
+		if (onlyKey != null)
+		{
+			file = new PaletteFile();
+			foreach (var k in new[] { onlyKey }.Concat(with ?? Enumerable.Empty<string>()))
+				if (Current.Targets.TryGetValue(k, out var t)) file.Targets[k] = t;
+		}
+		byte[] json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(file));
 		using var ms = new MemoryStream();
 		using (var gz = new GZipStream(ms, CompressionLevel.SmallestSize))
 			gz.Write(json, 0, json.Length);
 		return ShareCodePrefix + Convert.ToBase64String(ms.ToArray());
 	}
 
-	/// <summary>Merges a share code into the current palette (targets in the code overwrite ours). Returns how many targets it carried.</summary>
+	/// <summary>Reads a share code without changing anything.</summary>
+	public static PaletteFile ReadShareCode(string code)
+	{
+		code = code.Trim();
+		string body = code.StartsWith(ShareCodePrefix, StringComparison.Ordinal) ? code[ShareCodePrefix.Length..] : code;
+		PaletteFile? incoming;
+		if (body.TrimStart().StartsWith("{"))
+			incoming = JsonSerializer.Deserialize<PaletteFile>(body, JsonOpts);
+		else
+		{
+			using var input = new MemoryStream(Convert.FromBase64String(body));
+			using var gz = new GZipStream(input, CompressionMode.Decompress);
+			using var reader = new StreamReader(gz, Encoding.UTF8);
+			incoming = JsonSerializer.Deserialize<PaletteFile>(reader.ReadToEnd(), JsonOpts);
+		}
+		return incoming ?? throw new InvalidDataException("empty share code");
+	}
+
+	/// <summary>Merges a share code into the current palette (targets in the code overwrite ours). Returns how many targets it carried.
+	/// (Test hook "import" only; the editor imports one creature at a time.)</summary>
 	public static int ImportShareCode(string code)
 	{
+		Backup("before import");
 		code = code.Trim();
 		string body = code.StartsWith(ShareCodePrefix, StringComparison.Ordinal) ? code[ShareCodePrefix.Length..] : code;
 		PaletteFile? incoming;

@@ -831,7 +831,7 @@ internal sealed class MeterView
 
     private Texture2D? LoadTex(string path)
     {
-        if (_texCache.TryGetValue(path, out var c)) return c;
+        if (_texCache.TryGetValue(path, out var c) && (c == null || GodotObject.IsInstanceValid(c))) return c;
         Texture2D? tex = null;
         try { if (ResourceLoader.Exists(path)) tex = ResourceLoader.Load<Texture2D>(path, null, ResourceLoader.CacheMode.Reuse); } catch { }
         _texCache[path] = tex;
@@ -938,7 +938,7 @@ internal sealed class MeterTooltip
 
     private Texture2D? LoadTex(string path)
     {
-        if (_texCache.TryGetValue(path, out var c)) return c;
+        if (_texCache.TryGetValue(path, out var c) && (c == null || GodotObject.IsInstanceValid(c))) return c;
         Texture2D? tex = null;
         try { if (ResourceLoader.Exists(path)) tex = ResourceLoader.Load<Texture2D>(path, null, ResourceLoader.CacheMode.Reuse); } catch { }
         _texCache[path] = tex;

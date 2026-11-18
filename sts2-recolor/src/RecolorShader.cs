@@ -26,14 +26,25 @@ uniform sampler2D rc_pic : repeat_enable, filter_linear_mipmap;
 uniform float rc_pic_amt = 0.0;
 uniform int rc_pic_mode = 0;
 uniform float rc_pic_scale = 4.0;
+uniform int rc_pic_map = 0;                 // 0 = pinned to the art (UV), 1 = flat over the body
+uniform vec2 rc_pic_center = vec2(0.0);     // flat: the body's middle, in local pixels
+uniform vec2 rc_pic_stretch = vec2(1.0);
+uniform vec2 rc_pic_offset = vec2(0.0);
+uniform float rc_pic_rot = 0.0;             // radians
+uniform vec2 rc_pic_flip = vec2(1.0);
+uniform float rc_pic_repeat = 1.0;
+uniform float rc_pic_pixel = 0.0;
+uniform vec3 rc_pic_adj = vec3(0.0, 1.0, 1.0); // the picture's own hue shift (turns), saturation, brightness
 // Click-to-select: for one frame every part is drawn as a flat, unique ID color (never shown to the player).
 uniform float rc_id_on = 0.0;
 uniform vec3 rc_id = vec3(0.0);
 
 varying vec4 modulate_color;
+varying vec2 local_pos;
 
 void vertex() {
 	modulate_color = COLOR;
+	local_pos = VERTEX;
 }
 
 vec3 rgb2hsv(vec3 c) {
@@ -110,22 +121,64 @@ void fragment() {
 
 	// Picture texture, pinned to the art (UV) so it moves and bends with every animation.
 	if (rc_pic_amt > 0.001) {
-		vec4 pic = texture(rc_pic, UV * rc_pic_scale);
-		float a = rc_pic_amt * pic.a;
+		// Where on the picture this pixel lands, in picture copies (0..1 = one copy).
+		vec2 psize = vec2(textureSize(rc_pic, 0));
+		vec2 p;
+		if (rc_pic_map == 1) {
+			// flat: 1000 px of body = one copy at size 1; keeps the picture's own shape; centered on the body
+			p = (local_pos - rc_pic_center) / 1000.0 * rc_pic_scale;
+			p.y *= psize.x / max(psize.y, 1.0);
+		} else {
+			p = UV * rc_pic_scale;
+		}
+		p *= rc_pic_stretch;
+		float cr = cos(rc_pic_rot);
+		float sr = sin(rc_pic_rot);
+		p = vec2(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
+		p = p * rc_pic_flip - rc_pic_offset;
+		if (rc_pic_map == 1) { p += vec2(0.5); }
+		float inside = 1.0;
+		if (rc_pic_repeat < 0.5) {
+			inside = step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0);
+		}
+		vec4 pic;
+		if (rc_pic_pixel > 0.5) {
+			ivec2 isz = textureSize(rc_pic, 0);
+			ivec2 ip = clamp(ivec2(floor(fract(p) * vec2(isz))), ivec2(0), isz - ivec2(1));
+			pic = texelFetch(rc_pic, ip, 0);
+		} else {
+			pic = texture(rc_pic, p);
+		}
+		if (any(notEqual(rc_pic_adj, vec3(0.0, 1.0, 1.0)))) {
+			vec3 ah = rgb2hsv(pic.rgb);
+			ah.x = fract(ah.x + rc_pic_adj.x + 1.0);
+			ah.y = clamp(ah.y * rc_pic_adj.y, 0.0, 1.0);
+			ah.z = clamp(ah.z * rc_pic_adj.z, 0.0, 1.0);
+			pic.rgb = hsv2rgb(ah);
+		}
+		float a = rc_pic_amt * pic.a * inside;
+		vec3 blended;
 		if (rc_pic_mode == 0) {
 			// Picture colors, keeping this art's own light and shadow.
 			vec3 ph = rgb2hsv(pic.rgb);
 			float light = clamp(rgb2hsv(outc).z * 1.25, 0.0, 1.0);
-			vec3 shaded = hsv2rgb(vec3(ph.x, ph.y, clamp(ph.z * light, 0.0, 1.0)));
-			outc = mix(outc, shaded, a);
-		} else {
+			blended = hsv2rgb(vec3(ph.x, ph.y, clamp(ph.z * light, 0.0, 1.0)));
+		} else if (rc_pic_mode == 1) {
 			// Texture only: the picture's light/dark detail pressed into the existing colors (overlay blend).
 			float l = dot(pic.rgb, vec3(0.299, 0.587, 0.114));
 			vec3 lo = 2.0 * outc * l;
 			vec3 hi = vec3(1.0) - 2.0 * (vec3(1.0) - outc) * (1.0 - l);
-			vec3 ov = mix(lo, hi, step(vec3(0.5), outc));
-			outc = mix(outc, clamp(ov, 0.0, 1.0), a);
+			blended = clamp(mix(lo, hi, step(vec3(0.5), outc)), 0.0, 1.0);
+		} else if (rc_pic_mode == 2) {
+			blended = pic.rgb;                                             // the picture exactly
+		} else if (rc_pic_mode == 3) {
+			blended = outc * pic.rgb;                                      // multiply (darken)
+		} else if (rc_pic_mode == 4) {
+			blended = vec3(1.0) - (vec3(1.0) - outc) * (vec3(1.0) - pic.rgb); // screen (lighten)
+		} else {
+			blended = clamp(outc + pic.rgb, 0.0, 1.0);                    // add (glow)
 		}
+		outc = mix(outc, blended, a);
 	}
 
 	mat3 RGB_to_YIQ = mat3(

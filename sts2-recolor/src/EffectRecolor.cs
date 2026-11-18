@@ -28,15 +28,24 @@ internal static class EffectRecolor
 	/// A piece with its own colors still overrides the group.
 	/// </summary>
 	public const string AllFlames = "fx:All flames";
-	private static readonly HashSet<string> FlameGlowSlots = new(StringComparer.OrdinalIgnoreCase)
-	{ "glow_head", "eye_glow_l", "eye_glow_r", "scythe_glow" };
-
+	// Any "glow" piece counts, not just the Necrobinder's named ones: Osty's glow has other names and was left at
+	// the body color when matching her (Joseph, 2026-10-02: "the whole glow doesnt match the flame").
 	public static bool IsFlameSlot(string slot)
 		=> slot.Contains("flame", StringComparison.OrdinalIgnoreCase) || slot.Contains("fire", StringComparison.OrdinalIgnoreCase)
-		   || FlameGlowSlots.Contains(slot);
+		   || slot.Contains("glow", StringComparison.OrdinalIgnoreCase);
 
 	public static bool IsFlameEffect(string label)
-		=> label.Contains("flame", StringComparison.OrdinalIgnoreCase) || label.Contains("fire", StringComparison.OrdinalIgnoreCase);
+		=> label.Contains("flame", StringComparison.OrdinalIgnoreCase) || label.Contains("fire", StringComparison.OrdinalIgnoreCase)
+		   || label.Contains("glow", StringComparison.OrdinalIgnoreCase);
+
+	/// <summary>The look a creature's flames wear: the "All flames" group, else the first flame piece/effect with its own colors.</summary>
+	public static TargetRecolor? FlameLook(TargetRecolor t)
+	{
+		if (t.Parts == null) return null;
+		if (t.Parts.TryGetValue(AllFlames, out var g) && g.Enabled) return g;
+		return t.Parts.Where(kv => kv.Value.Enabled && (kv.Key.StartsWith(Prefix) ? IsFlameEffect(kv.Key) : IsFlameSlot(kv.Key)))
+			.OrderBy(kv => kv.Key.StartsWith(Prefix) ? 0 : 1).Select(kv => kv.Value).FirstOrDefault();
+	}
 
 	private static readonly Dictionary<string, string> Labels = new()
 	{
@@ -82,7 +91,7 @@ internal static class EffectRecolor
 		return sb.ToString().Trim();
 	}
 
-	private static bool IsEffect(Node n)
+	public static bool IsEffect(Node n)
 	{
 		if (n is GpuParticles2D || n is CpuParticles2D)
 			return true;

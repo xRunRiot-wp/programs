@@ -124,6 +124,15 @@ internal static class DevCommands
 			case "selectat":
 				EditorUi.DevSelectAt(float.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture));
 				break;
+			case "record": // record <ancient> <dir> <seconds> <fps>   (dir may not contain spaces)
+				Recorder.Start(a[1], a[2], float.Parse(a[3], System.Globalization.CultureInfo.InvariantCulture), int.Parse(a[4]));
+				break;
+			case "recordbg": // recordbg <title> <dir> <seconds> <fps> <layer files, comma separated>
+				Recorder.StartBackground(a[1], a[2], float.Parse(a[3], System.Globalization.CultureInfo.InvariantCulture), int.Parse(a[4]), a.Length > 5 ? a[5] : "");
+				break;
+			case "exporttex": // exporttex <res://path> <out.png>
+				Recorder.ExportTexture(a[1], string.Join(' ', a, 2, a.Length - 2));
+				break;
 			case "picktint":
 				EditorUi.DevPickTint(float.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture));
 				break;
@@ -138,6 +147,21 @@ internal static class DevCommands
 				break;
 			case "picmode":
 				EditorUi.DevPictureMode(a[1]);
+				break;
+			case "profile": // profile save|load|delete|list|undo [name]
+				EditorUi.DevProfile(a[1], a.Length > 2 ? string.Join(' ', a, 2, a.Length - 2) : "");
+				break;
+			case "follow": // follow on|off  (current creature wears its owner's look)
+				EditorUi.DevFollow(a.Length > 1 && a[1] == "on");
+				break;
+			case "paste": // paste <file with code>  (the editor's paste button: current character only)
+				EditorUi.PasteShareCode(File.ReadAllText(string.Join(' ', a, 1, a.Length - 1)));
+				break;
+			case "anim":
+				EditorUi.DevPreviewAnimation(a[1]);
+				break;
+			case "picopt": // picopt <place|repeat|flipx|flipy|pixel|res|reset> [value]
+				EditorUi.DevPictureOption(a[1], a.Length > 2 ? a[2] : "");
 				break;
 			case "inspect":
 				EditorUi.DevInspect();

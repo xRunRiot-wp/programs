@@ -60,6 +60,7 @@ internal sealed class RunAggregate
 
     public void Clear()
     {
+        _runSnap = null; _chartSnap = null;
         _playerCount = 0;
         _localSlot = 0;
         _labels = Array.Empty<string>();
@@ -81,6 +82,7 @@ internal sealed class RunAggregate
     // Add one finished combat. Reads the per-combat snapshots taken before the tracker is reset.
     public void Fold(SourceSnapshot src, ChartSnapshot chart)
     {
+        _runSnap = null; _chartSnap = null;
         if (src.PlayerCount <= 0) return;
         if (_playerCount != src.PlayerCount) Init(src);
 
@@ -193,7 +195,16 @@ internal sealed class RunAggregate
         return list;
     }
 
-    public SourceSnapshot RunSourceSnapshot()
+    // Run totals only change when a fight is folded in (or the run resets), but the meter asks for them
+    // every frame. Rebuilding them -- including a copy of the WHOLE run's combat log -- 60 times a second
+    // made the game slower the longer a run went on, so the result is built once per fight and reused.
+    private SourceSnapshot? _runSnap;
+    private ChartSnapshot? _chartSnap;
+
+    public SourceSnapshot RunSourceSnapshot() => _runSnap ??= BuildRunSourceSnapshot();
+    public ChartSnapshot RunChartSnapshot() => _chartSnap ??= BuildRunChartSnapshot();
+
+    private SourceSnapshot BuildRunSourceSnapshot()
     {
         var perPlayer = new PlayerSources[_playerCount];
         for (int s = 0; s < _playerCount; s++)
@@ -218,7 +229,7 @@ internal sealed class RunAggregate
 
     // Per-encounter chart: one row per combat, with the combat's dealt/taken totals. The "Round" field
     // carries the 1-based encounter index; one dealt segment per slot so the bar renders at full height.
-    public ChartSnapshot RunChartSnapshot()
+    private ChartSnapshot BuildRunChartSnapshot()
     {
         var rows = new List<ChartRow>(_encDealt.Count);
         for (int i = 0; i < _encDealt.Count; i++)

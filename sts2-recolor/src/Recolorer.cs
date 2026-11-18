@@ -15,6 +15,8 @@ namespace SpireRecolor;
 internal static class Recolorer
 {
 	public const string KeyMeta = "sts2rc_key";
+	/// <summary>Palette key of the Regent's Sovereign Blade (a separate object the game makes during combat).</summary>
+	public const string BladeKey = "sovereign_blade";
 	private const string OrigMeta = "sts2rc_orig";
 	private const string AppliedMeta = "sts2rc_applied";
 
@@ -36,6 +38,10 @@ internal static class Recolorer
 			else if (node is NRestSiteCharacter rest)
 			{
 				key = rest.Player?.Character?.Id.Entry.ToLowerInvariant();
+			}
+			else if (node is MegaCrit.Sts2.Core.Nodes.Vfx.NSovereignBladeVfx)
+			{
+				key = BladeKey; // the Regent's Sovereign Blade: its own palette entry
 			}
 			else if (node is NMerchantCharacter)
 			{
@@ -102,6 +108,10 @@ internal static class Recolorer
 		if (root is NCreatureVisuals && EditorUi.IsCharacterKey(key) && FindSpine(root) is { } spineNode)
 			ModelSwap.EnsureApplied(key, spineNode);
 		TargetRecolor? t = Palette.Get(key);
+		// "Match the Necrobinder's look" (Joseph, 2026-09-27: "make an option to make osty look like the current
+		// necrobinder skin"): wear the other creature's live look — body colors, pictures, groups and flame effects.
+		if (t != null && t.Enabled && !string.IsNullOrEmpty(t.Follow))
+			t = Palette.Get(t.Follow) is { } src ? FollowLook(src) : null;
 		bool highlighted = Highlight is { } hl && hl.key == key;
 		bool idPass = IdPickKey == key;
 		bool active = (((t != null && !t.IsIdentity) || highlighted) && !root.HasMeta("sts2rc_bypass")) || idPass;
@@ -111,6 +121,24 @@ internal static class Recolorer
 		// Fire / particle effects next to the body (e.g. the Necrobinder's head flames).
 		try { EffectRecolor.Apply(root, key, t, active); }
 		catch (Exception ex) { ModEntry.Log($"effect recolor failed: {ex.Message}"); }
+	}
+
+	private static TargetRecolor FollowLook(TargetRecolor src)
+	{
+		var m = src.CloneLook();
+		m.Enabled = src.Enabled;
+		m.CustomModel = false;
+		if (src.Parts != null)
+			m.Parts = src.Parts.ToDictionary(kv => kv.Key, kv => kv.Value); // pieces the other model lacks are ignored
+		// Every glow and flame on the follower wears the owner's flame color, one look for all of them (Joseph,
+		// 2026-10-02: "the whole glow doesnt match the flame"): the owner's per-piece glow colors don't carry over.
+		if (EffectRecolor.FlameLook(src) is { } flame && m.Parts != null)
+		{
+			foreach (var k in m.Parts.Keys.Where(k => k.StartsWith(EffectRecolor.Prefix) ? EffectRecolor.IsFlameEffect(k) : EffectRecolor.IsFlameSlot(k)).ToList())
+				m.Parts.Remove(k);
+			m.Parts[EffectRecolor.AllFlames] = flame;
+		}
+		return m;
 	}
 
 	public static Node? FindSpine(Node n)
@@ -129,11 +157,19 @@ internal static class Recolorer
 		if (node != root && node.HasMeta(KeyMeta))
 			return;
 
-		bool ancient = IsAncientKey(FindKey(root));
+		string rootKey = FindKey(root);
+		bool ancient = IsAncientKey(rootKey);
 		if (node.GetClass() == "SpineSprite")
-			ApplySpine(node, t, active);
+		{
+			if (IsNestedSpine(root, node))
+				ApplyNestedSpine(node, t, active);
+			else
+				ApplySpine(node, t, active);
+		}
 		else if (node is Sprite2D or AnimatedSprite2D or Polygon2D && !ancient)
 			ApplyCanvasItem((CanvasItem)node, t, active); // (Ancient scenes: never the room's lights/props)
+		else if (rootKey == BladeKey && node is TextureRect bladePic)
+			ApplyCanvasItem(bladePic, t, active);        // the Sovereign Blade's hilt and detail pictures
 		else if (ancient && node is TextureRect tr && tr.Texture is { } tex && tex.ResourcePath.Contains("/images/ancients/", StringComparison.Ordinal))
 		{
 			// Placeholder Ancients (Darv, Pael, Vakuu, ...) are one painted picture.
@@ -145,6 +181,70 @@ internal static class Recolorer
 
 		foreach (Node child in node.GetChildren())
 			Walk(root, child, t, active);
+	}
+
+	/// <summary>A Spine model drawn inside another one (the Regent's attack weapons live inside his body model).</summary>
+	private static bool IsNestedSpine(Node root, Node spine)
+	{
+		for (Node? p = spine.GetParent(); p != null && p != root.GetParent(); p = p.GetParent())
+			if (p.GetClass() == "SpineSprite") return true;
+		return false;
+	}
+
+	/// <summary>True when the model has weapons drawn as their own little models (so "Weapon" is always offered).</summary>
+	public static bool HasNestedSpines(Node root)
+	{
+		bool found = false;
+		void Look(Node n)
+		{
+			if (found) return;
+			if (n != root && n.GetClass() == "SpineSprite" && IsNestedSpine(root, n)) { found = true; return; }
+			foreach (Node c in n.GetChildren()) Look(c);
+		}
+		Look(root);
+		return found;
+	}
+
+	/// <summary>ID-pass index reserved for nested weapon models (click one → the Weapon group).</summary>
+	public const int NestedIdIndex = 3000;
+
+	// Nested weapon models take the "Weapon" group's colors (else the body's). They never get per-slot parts, and
+	// must not touch the click-to-select slot list (they used to overwrite it, which broke clicking on the Regent).
+	private static void ApplyNestedSpine(Node spine, TargetRecolor? t, bool active)
+	{
+		string key = FindKey(spine);
+		bool idPass = IdPickKey == key;
+		bool highlight = Highlight is { } hl && hl.key == key && hl.part == PartGroups.WeaponGroup;
+		Material? current = spine.Call("get_normal_material").As<Material>();
+		bool ours = current is ShaderMaterial sm && sm.Shader == Shader;
+		if (active && t != null)
+		{
+			TargetRecolor look = t;
+			if (t.Enabled && t.Parts != null && t.Parts.TryGetValue(PartGroups.WeaponGroup, out var w) && w.Enabled) look = w;
+			if (highlight) look = HighlightLook;
+			ShaderMaterial mat;
+			if (ours) mat = (ShaderMaterial)current!;
+			else
+			{
+				if (current is null) spine.RemoveMeta(OrigMeta); else spine.SetMeta(OrigMeta, current);
+				mat = NewMaterial(current);
+				spine.Call("set_normal_material", mat);
+			}
+			Configure(mat, look);
+			mat.SetShaderParameter("rc_pic_center", PicCenter(spine));
+			mat.SetShaderParameter("rc_id_on", idPass ? 1f : 0f);
+			if (idPass) mat.SetShaderParameter("rc_id", IdColor(NestedIdIndex));
+			spine.SetMeta(AppliedMeta, true);
+		}
+		else if (ours && spine.HasMeta(AppliedMeta))
+		{
+			Material? origMat = spine.HasMeta(OrigMeta) ? spine.GetMeta(OrigMeta).As<Material>() : null;
+			if (origMat is ShaderMaterial osm && current is ShaderMaterial csm)
+				CopyGameHsv(csm, osm);
+			spine.Call("set_normal_material", origMat!);
+			spine.RemoveMeta(AppliedMeta);
+		}
+		ApplyParts(spine, null, null); // clear any per-slot pieces an older version added here
 	}
 
 	private static void ApplySpine(Node spine, TargetRecolor? t, bool active)
@@ -168,6 +268,7 @@ internal static class Recolorer
 				spine.Call("set_normal_material", mat);
 			}
 			Configure(mat, t!);
+			mat.SetShaderParameter("rc_pic_center", PicCenter(spine));
 			spine.SetMeta(AppliedMeta, true);
 			ApplyParts(spine, mat, t!);
 		}
@@ -198,13 +299,21 @@ internal static class Recolorer
 	/// <summary>The slot order the ID colors were assigned in (index i → color IdColor(i)).</summary>
 	public static List<string> IdSlots = new();
 
-	public static Vector3 IdColor(int i) => new Vector3((i + 1) * 3 / 255f, 0.5f, 0.25f);
+	// Index spread over red and green in steps of 4 (up to 3600 pieces), blue fixed as the "this is an ID" marker.
+	public static Vector3 IdColor(int i)
+	{
+		int n = i + 1;
+		return new Vector3(((n % 60) * 4 + 2) / 255f, ((n / 60) * 4 + 2) / 255f, 64 / 255f);
+	}
 
 	/// <summary>Which slot an ID-pass pixel belongs to, or null (background / an effect / not an ID pixel).</summary>
 	public static string? SlotFromIdPixel(Color c)
 	{
-		if (c.A < 0.5f || Math.Abs(c.G - 0.5f) > 0.06f || Math.Abs(c.B - 0.25f) > 0.06f) return null;
-		int i = (int)Math.Round(c.R * 255f / 3f) - 1;
+		if (c.A < 0.5f || Math.Abs(c.B * 255f - 64f) > 2.5f) return null;
+		int lo = (int)Math.Round((c.R * 255f - 2f) / 4f), hi = (int)Math.Round((c.G * 255f - 2f) / 4f);
+		if (lo < 0 || lo >= 60 || hi < 0) return null;
+		int i = hi * 60 + lo - 1;
+		if (i == NestedIdIndex) return PartGroups.WeaponGroup;
 		return i >= 0 && i < IdSlots.Count ? IdSlots[i] : null;
 	}
 
@@ -326,6 +435,7 @@ internal static class Recolorer
 			if (bodyMat != null)
 				CopyGameHsv(bodyMat, mat);
 			Configure(mat, look);
+			mat.SetShaderParameter("rc_pic_center", PicCenter(spine));
 			int idIndex = IdPickKey == key ? IdSlots.IndexOf(slot) : -1;
 			mat.SetShaderParameter("rc_id_on", idIndex >= 0 ? 1f : 0f);
 			if (idIndex >= 0) mat.SetShaderParameter("rc_id", IdColor(idIndex));
@@ -365,6 +475,7 @@ internal static class Recolorer
 			ShaderMaterial mat = ours ? (ShaderMaterial)item.Material! : NewMaterial(null);
 			item.Material = mat;
 			Configure(mat, t!);
+			mat.SetShaderParameter("rc_pic_center", item is Control ctl ? ctl.Size / 2f : Vector2.Zero);
 		}
 		else if (ours)
 		{
@@ -425,6 +536,25 @@ internal static class Recolorer
 		}
 	}
 
+	/// <summary>Picture mix modes in shader order (palette "pictureMode" values).</summary>
+	public static readonly string[] PictureModes = { "colors", "texture", "replace", "multiply", "screen", "add" };
+
+	/// <summary>The middle of a creature's skeleton (local pixels), measured once, so "flat" pictures center on the body.</summary>
+	private static Vector2 PicCenter(Node spine)
+	{
+		if (spine.HasMeta("sts2rc_piccenter")) return spine.GetMeta("sts2rc_piccenter").AsVector2();
+		Vector2 c = new Vector2(0, -200);
+		try
+		{
+			var skel = spine.Call("get_skeleton").AsGodotObject();
+			Rect2 b = skel != null ? skel.Call("get_bounds").AsRect2() : default;
+			if (b.Size.X > 1 && b.Size.Y > 1) c = b.Position + b.Size / 2f;
+		}
+		catch { }
+		spine.SetMeta("sts2rc_piccenter", c);
+		return c;
+	}
+
 	public static void Configure(ShaderMaterial mat, TargetRecolor t)
 	{
 		if (!t.Enabled)
@@ -451,8 +581,17 @@ internal static class Recolorer
 		Texture2D? pic = t.HasPicture ? PictureStore.Get(t.Picture) : null;
 		mat.SetShaderParameter("rc_pic_amt", pic != null ? Math.Clamp(t.PictureOpacity, 0f, 1f) : 0f);
 		if (pic != null) mat.SetShaderParameter("rc_pic", pic);
-		mat.SetShaderParameter("rc_pic_mode", t.PictureMode == "texture" ? 1 : 0);
+		mat.SetShaderParameter("rc_pic_mode", Math.Max(0, Array.IndexOf(PictureModes, t.PictureMode)));
 		mat.SetShaderParameter("rc_pic_scale", Math.Clamp(t.PictureScale, 0.1f, 64f));
+		mat.SetShaderParameter("rc_pic_map", t.PicturePlacement == "flat" ? 1 : 0);
+		float st = Math.Clamp(t.PictureStretch, -3f, 3f);
+		mat.SetShaderParameter("rc_pic_stretch", new Vector2(MathF.Pow(2f, -st / 2f), MathF.Pow(2f, st / 2f)));
+		mat.SetShaderParameter("rc_pic_offset", new Vector2(t.PictureOffsetX, t.PictureOffsetY));
+		mat.SetShaderParameter("rc_pic_rot", Mathf.DegToRad(t.PictureRotation));
+		mat.SetShaderParameter("rc_pic_flip", new Vector2(t.PictureFlipX ? -1f : 1f, t.PictureFlipY ? -1f : 1f));
+		mat.SetShaderParameter("rc_pic_repeat", t.PictureRepeat ? 1f : 0f);
+		mat.SetShaderParameter("rc_pic_pixel", t.PicturePixelated ? 1f : 0f);
+		mat.SetShaderParameter("rc_pic_adj", new Vector3(t.PictureHue / 360f, t.PictureSaturation, t.PictureBrightness));
 		mat.SetShaderParameter("rc_swap_count", n);
 		mat.SetShaderParameter("rc_src", src);
 		mat.SetShaderParameter("rc_dst", dst);

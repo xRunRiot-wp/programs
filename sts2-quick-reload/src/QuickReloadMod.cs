@@ -51,7 +51,7 @@ public static class QuickReloadMod
         catch { }
     }
 
-    // Don't fire while typing in a text box (an in-game chat box, the dev console).
+    // Don't fire while typing in a text box (the Claude chat, the dev console).
     private static bool Typing()
     {
         try

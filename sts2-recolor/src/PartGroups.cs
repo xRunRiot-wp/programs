@@ -23,13 +23,21 @@ internal static class PartGroups
 	private static bool Has(string s, params string[] words) => words.Any(w => s.Contains(w, StringComparison.OrdinalIgnoreCase));
 
 	// Which side a slot is on from names like "l hand", "l_hand_back", "sleeve_l_extended", "left_arm", "arm_r".
+	// A lone "l"/"r" wins over the words left/right: the Defect's "r toe left" is the right foot's left toe
+	// (Joseph, 2026-09-27: "defect left leg includes a part of his right leg").
 	private static char Side(string s)
 	{
 		string x = " " + s.ToLowerInvariant().Replace('_', ' ').Replace('-', ' ').Replace('.', ' ') + " ";
-		if (x.Contains(" l ") || x.Contains(" left ")) return 'l';
-		if (x.Contains(" r ") || x.Contains(" right ")) return 'r';
+		bool l = x.Contains(" l "), r = x.Contains(" r ");
+		if (l != r) return l ? 'l' : 'r';
+		if (l && r) return x.IndexOf(" l ", StringComparison.Ordinal) < x.IndexOf(" r ", StringComparison.Ordinal) ? 'l' : 'r';
+		bool left = x.Contains(" left "), right = x.Contains(" right ");
+		if (left != right) return left ? 'l' : 'r';
 		return ' ';
 	}
+
+	/// <summary>The "Weapon" group key; also used for weapons drawn as their own little models (the Regent's).</summary>
+	public const string WeaponGroup = Prefix + "Weapon";
 
 	private static readonly (string Name, Func<string, bool> Match)[] Defs =
 	{

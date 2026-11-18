@@ -62,11 +62,9 @@ public static partial class DamageChartsMod
         {
             case "newrun":
             {
-                var ch = ModelDb.AllCharacters.FirstOrDefault(c => c.Id.Entry.Equals(arg, StringComparison.OrdinalIgnoreCase))
-                         ?? ModelDb.AllCharacters.First();
-                _ = NGame.Instance.StartNewSingleplayerRun(ch, false, ActModel.GetDefaultList(),
-                        Array.Empty<ModifierModel>(), "DCTEST", GameMode.Standard);
-                return $"starting run as {ch.Id.Entry}";
+                // v0.113 changed StartNewSingleplayerRun to take a lobby-generated Player; start runs from
+                // the character select screen instead (or the dev console via "con").
+                return "newrun not available on this game version; start a run from the menu";
             }
             case "con":
             {

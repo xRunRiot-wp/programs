@@ -327,7 +327,7 @@ internal sealed class PostFightView
 
     private Texture2D? Tex(string path)
     {
-        if (_texCache.TryGetValue(path, out var c)) return c;
+        if (_texCache.TryGetValue(path, out var c) && (c == null || GodotObject.IsInstanceValid(c))) return c;
         Texture2D? tex = null;
         try { if (ResourceLoader.Exists(path)) tex = ResourceLoader.Load<Texture2D>(path, null, ResourceLoader.CacheMode.Reuse); } catch { }
         _texCache[path] = tex;
