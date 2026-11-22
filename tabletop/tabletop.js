@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=107';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=107';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=108';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=108';
 
-const VERSION = 107;                              // raised by bump.py on every publish
+const VERSION = 108;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -996,8 +996,11 @@ function handle(msg, from) {
     case 'boardPlace': {                        // put a saved board on the table, to the right of the others
       const L = gm && state.boardLib?.[msg.lib];
       if (!L) return;
-      const box = boardsBox(gmLayer);
-      const b = { id: 'b' + rid(5), x: box.x1, z: box.z0, cols: L.cols, rows: L.rows, grid: L.grid !== false, hidden: !!msg.hidden, layer: gmLayer };
+      // msg.layer (11-22 places bar): open the place on its own layer, like a Roll20 page; else next to the GM's boards
+      const lay = msg.layer ? Math.max(1, Math.min(20, Math.round(+msg.layer))) : gmLayer;
+      const first = !state.boards.some(x => layerOf(x) === lay), box = boardsBox(lay);
+      const b = { id: 'b' + rid(5), x: first ? (lay - 1) * LAYER_GAP - 10 : box.x1, z: first ? -7 : box.z0, cols: L.cols, rows: L.rows,
+        grid: L.grid !== false, hidden: !!msg.hidden, layer: lay, lib: msg.lib };
       state.boards.push(b);
       const set = {};
       for (const [k, t] of Object.entries(L.tiles || {})) { const [i, j] = k.split(',').map(Number); set[(i + b.x) + ',' + (j + b.z)] = t; }
@@ -2491,6 +2494,112 @@ function renderLayers() {
   }
   sel.value = gmLayer;
   $('layerLive').disabled = gmLayer === (state.live || 1);
+  renderPlaces();
+}
+
+// ---------- the places bar (Twistedfocus 11-22: "select places I've created from a folder at the top (like Roll20)") ----------
+// Roll20's page toolbar: folders = the saved-board groups, a card = a saved place. Clicking a card opens that place on its
+// own layer for the GM only (a Roll20 page); "Players here" moves the team there (Roll20's player ribbon). "On the table"
+// lists the layers already in use. Only the GM's browser has this.
+const placePics = new Map();                     // lib id -> map picture (data URL) or '' when it has none
+let placesFolder = null;
+try { placesFolder = localStorage.getItem('tabletop.placesFolder'); } catch {}
+const ON_TABLE = '\u0001table';
+function placeLayer(lib) {                       // the layer a saved place is open on, if it is
+  const b = state.boards.find(x => x.lib === lib);
+  return b ? layerOf(b) : 0;
+}
+function layerName(L) {
+  const bs = state.boards.filter(b => layerOf(b) === L), lib = bs.map(b => state.boardLib?.[b.lib]).find(Boolean);
+  const P = state.prep?.[L], D = L === (state.live || 1) && state.dungeon;
+  return lib ? lib.name : D ? `${D.name} B${D.floor}F` : P ? `${P.name} B${P.floor}F` : `Layer ${L}`;
+}
+function openPlace(lib) {
+  let L = placeLayer(lib);
+  if (!L) {
+    L = Math.max(1, ...state.boards.map(layerOf)) + 1;
+    if (L > 20) { alert('All 20 layers are in use: delete a layer\'s boards first (Boards tab), or use Place in the Saved boards list.'); return; }
+    const nid = handle({ t: 'boardPlace', lib, layer: L }, clientId);
+    if (!nid) return;
+    viewLayer(L); pickBoard(nid);
+  } else viewLayer(L);
+  status(`Now looking at ${layerName(L)}` + (L === (state.live || 1) ? ' (the team is here)' : ' (only you see it: "Players here" moves the team)'));
+  setTimeout(() => status(''), 4000);
+}
+function playersTo(L) {
+  if (L === (state.live || 1)) return;
+  if (confirm(`Move the team to "${layerName(L)}"? Players will only see that place from now on.`)) handle({ t: 'layerLive', layer: L }, clientId);
+}
+function renderPlaces() {
+  const bar = $('placesBar');
+  if (!bar || !isHost) return;
+  const lib = Object.entries(state.boardLib || {}), groups = [...new Set(lib.map(([, b]) => b.group || 'Ungrouped'))].sort();
+  if (placesFolder !== ON_TABLE && !groups.includes(placesFolder)) placesFolder = groups[0] || ON_TABLE;
+  const fb = $('placesFolders'); fb.innerHTML = '';
+  const chip = (key, text) => {
+    const x = document.createElement('button'); x.textContent = text; x.classList.toggle('on', key === placesFolder);
+    x.onclick = () => { placesFolder = key; try { localStorage.setItem('tabletop.placesFolder', key); } catch {} renderPlaces(); };
+    fb.appendChild(x);
+  };
+  const nLayers = new Set(state.boards.map(layerOf)).size;
+  chip(ON_TABLE, `🎲 On the table (${nLayers})`);
+  for (const g of groups) chip(g, `📁 ${g} (${lib.filter(([, b]) => (b.group || 'Ungrouped') === g).length})`);
+  const sv = document.createElement('button'); sv.className = 'pfSave'; sv.textContent = '＋ Save this board';
+  sv.title = 'Save the board you picked as a place, in a folder';
+  sv.onclick = () => {
+    const b = curBoard(); if (!b) return;
+    const name = prompt('Name for this place', state.boardLib?.[b.lib]?.name || ''); if (name == null) return;
+    const group = prompt('Folder (type a new one to make it)', placesFolder && placesFolder !== ON_TABLE ? placesFolder : 'Ungrouped'); if (group == null) return;
+    placesFolder = group.trim() || 'Ungrouped'; try { localStorage.setItem('tabletop.placesFolder', placesFolder); } catch {}
+    act({ t: 'boardSave', id: b.id, name, group: placesFolder });
+  };
+  fb.appendChild(sv);
+  const box = $('placesCards'); box.innerHTML = '';
+  const live = state.live || 1;
+  const card = ({ name, sub, pic, here, team, onOpen, onTeam }) => {
+    const c = document.createElement('div'); c.className = 'placeCard' + (here ? ' here' : ''); c.tabIndex = 0; c.title = `Open ${name}`;
+    const p = document.createElement('div'); p.className = 'pcPic';
+    if (pic) p.style.backgroundImage = `url("${pic}")`; else p.textContent = '🗺';
+    const n = document.createElement('div'); n.className = 'pcName'; n.textContent = name;
+    const s = document.createElement('div'); s.className = 'pcSub'; s.textContent = sub;
+    const tg = document.createElement('div'); tg.className = 'pcTags';
+    if (here) { const t = document.createElement('b'); t.textContent = 'You'; tg.appendChild(t); }
+    if (team) { const t = document.createElement('b'); t.textContent = '👥 Players'; tg.appendChild(t); }
+    c.append(p, n, s, tg);
+    if (onTeam && !team) {
+      const go = document.createElement('button'); go.className = 'pcGo fit'; go.textContent = '👥 Players here';
+      go.title = 'Move the team to this place'; go.onclick = e => { e.stopPropagation(); onTeam(); };
+      c.appendChild(go);
+    }
+    c.onclick = onOpen; c.onkeydown = e => { if (e.key === 'Enter') onOpen(); };
+    box.appendChild(c);
+  };
+  if (placesFolder === ON_TABLE) {
+    const Ls = [...new Set(state.boards.map(layerOf))].sort((a, b) => a - b);
+    for (const L of Ls) {
+      const bs = state.boards.filter(b => layerOf(b) === L), pic = bs.map(b => state.maps[b.id]).find(Boolean);
+      card({ name: layerName(L), sub: `Layer ${L} · ${bs.length} board${bs.length > 1 ? 's' : ''}`, pic, here: L === gmLayer, team: L === live,
+        onOpen: () => viewLayer(L), onTeam: () => playersTo(L) });
+    }
+    return;
+  }
+  const items = lib.filter(([, b]) => (b.group || 'Ungrouped') === placesFolder).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  if (!items.length) { box.innerHTML = '<div id="placesEmpty">No places in this folder yet. Pick a board and click <b>＋ Save this board</b>.</div>'; return; }
+  for (const [id, b] of items) {
+    const L = placeLayer(id);
+    if (b.map && !placePics.has(id)) {
+      placePics.set(id, '');
+      blobs.get('boardlib:' + id).then(m => { if (m) { placePics.set(id, m); renderPlaces(); } });
+    }
+    card({ name: b.name, sub: `${b.cols}×${b.rows}` + (L ? ` · open on layer ${L}` : ''), pic: placePics.get(id), here: L && L === gmLayer,
+      team: L && L === live, onOpen: () => openPlace(id), onTeam: L ? () => playersTo(L) : () => { openPlace(id); const n = placeLayer(id); if (n) playersTo(n); } });
+  }
+}
+function setPlacesOpen(on) {
+  document.body.classList.toggle('placesOpen', on);
+  $('placesArrow').textContent = on ? '▴' : '▾';
+  try { localStorage.setItem('tabletop.placesOpen', on ? '1' : ''); } catch {}
+  if (on) renderPlaces();
 }
 
 // ---------- rules helpers (host) ----------
@@ -4410,6 +4519,7 @@ const openGroups = new Set();
 function renderBoardLib() {
   const box = $('boardLibList');
   if (!box || !isHost) return;
+  renderPlaces();                                // the places bar shows the same saved boards (11-22)
   const L = Object.entries(state.boardLib || {}), groups = [...new Set(L.map(([, b]) => b.group))].sort();
   const dl = $('boardGroups'); dl.innerHTML = '';
   for (const g of groups) { const o = document.createElement('option'); o.value = g; dl.appendChild(o); }
@@ -5297,6 +5407,23 @@ async function checkVersion() {
 }
 
 for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
+// 11-22 places bar + a panel you can make wider by dragging its left edge (Twistedfocus: "more like Roll20")
+$('placesTab').onclick = () => setPlacesOpen(!document.body.classList.contains('placesOpen'));
+try { if (localStorage.getItem('tabletop.placesOpen')) setPlacesOpen(true); } catch {}
+(() => {
+  const setW = w => { w = Math.max(260, Math.min(Math.round(w), 600, innerWidth - 320)); document.documentElement.style.setProperty('--sideW', w + 'px'); return w; };
+  try { const w = +localStorage.getItem('tabletop.sideW'); if (w) setW(w); } catch {}
+  const grip = $('sideGrip');
+  grip.onpointerdown = e => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); document.body.classList.add('sideDrag');
+    grip.onpointermove = ev => setW(innerWidth - ev.clientX);
+    grip.onpointerup = ev => {
+      grip.onpointermove = grip.onpointerup = null; document.body.classList.remove('sideDrag');
+      try { localStorage.setItem('tabletop.sideW', String(setW(innerWidth - ev.clientX))); } catch {}
+    };
+  };
+  grip.ondblclick = () => { setW(300); try { localStorage.removeItem('tabletop.sideW'); } catch {} };
+})();
 // while the bag is open, a see-through cover lies over the board: a click on it only closes the bag (Adam)
 new MutationObserver(() => { $('bagShade').style.display = $('bagPanel').style.display === 'none' ? 'none' : 'block'; })
   .observe($('bagPanel'), { attributes: true, attributeFilter: ['style'] });
