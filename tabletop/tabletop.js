@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=108';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=108';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=109';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=109';
 
-const VERSION = 108;                              // raised by bump.py on every publish
+const VERSION = 109;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -868,7 +868,11 @@ function handle(msg, from) {
       }
       if (gm && msg.job != null) f.job = clean(msg.job, 30);
       if (gm && msg.hidden != null) f.hidden = !!msg.hidden;
-      if (gm && msg.model !== undefined) f.model = msg.model && state.models[msg.model] ? msg.model : '';
+      if (gm && msg.model !== undefined) { f.model = msg.model && state.models[msg.model] ? msg.model : ''; if (f.model) { delete f.sprite; delete f.spriteSheet; } }
+      if (gm && msg.sprite !== undefined) {       // 11-22 Friend Zone sprite ('' = none); a sprite replaces the 3D model
+        if (okSprite(msg.sprite)) { f.sprite = msg.sprite; f.model = ''; const sh = okSheet(msg.sheet); if (sh) f.spriteSheet = sh; else delete f.spriteSheet; }
+        else { delete f.sprite; delete f.spriteSheet; }
+      }
       if (msg.pic != null) {                      // the mini's portrait for the tiles and the turn order ('' = back to its own picture)
         if (msg.pic === '') delete f.pic;
         else if (typeof msg.pic === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(msg.pic) && msg.pic.length <= 90000) f.pic = msg.pic;
@@ -895,7 +899,7 @@ function handle(msg, from) {
         sendAll({ t: 'model', id: msg.id, name: state.models[msg.id].name, data: msg.data });
       }
       const tf = state.figures[msg.figId];
-      if (tf) { tf.model = msg.id; pushFig(tf); }
+      if (tf) { tf.model = msg.id; delete tf.sprite; delete tf.spriteSheet; pushFig(tf); }
       save();
       break;
     }
@@ -1391,6 +1395,7 @@ const SITE_DB = 'https://voiceoftheforest-e071c-default-rtdb.firebaseio.com';
 let siteParty = {}, siteBagRaw = {}, siteES = null, siteBagES = null, siteCodeOn = '';
 function siteFeed() {
   const code = (state.siteCode || 'VOICE').toUpperCase();
+  if (isHost) renderFzList();                    // 11-22 Friend Zone minis follow the site's table code
   if (!isHost || (siteES && siteCodeOn === code)) return;
   siteES?.close(); siteBagES?.close(); siteParty = {}; siteBagRaw = {}; siteCodeOn = code;
   siteES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/party.json`);
@@ -3774,17 +3779,20 @@ function upsertFig(f, live) {
   const sideways = w !== d && (f.rot || 0) % 180 === 90;
   const lw = sideways ? d : w, ld = sideways ? w : d;
   const want = f.model && modelData.has(f.model) ? f.model : '';
-  const modelKey = want && `${want}|${lw}x${ld}`;
-  if (u.modelKey !== modelKey) setModel(g, want, lw, ld, modelKey);
+  // 11-22 (Twistedfocus: "add the minis (the sprites from the website Friend Zone)"): no 3D model + a sprite = the site's walking sprite
+  const spr = !want && okSprite(f.sprite) ? f.sprite : '', ssc = small ? 0.7 : Math.min(w, d);
+  const modelKey = want ? `${want}|${lw}x${ld}` : spr ? `spr|${spr}|${f.spriteSheet || ''}|${ssc}` : '';
+  if (u.modelKey !== modelKey) setModel(g, want, lw, ld, modelKey, spr && { d4: spr, sheet: okSheet(f.spriteSheet), sc: ssc });
   const sc = small ? 0.7 : Math.min(w, d);
   u.pawn.scale.setScalar(sc);
-  u.labelY = u.label.position.y = (want ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
+  u.labelY = u.label.position.y = (want || spr ? (u.modelTop || 1.1) : 1.1 * sc) + 0.35;
   u.mine.visible = !!viewerId() && f.owner === viewerId();
   u.side.material.color.set(SIDES[sideOf(f)].color);
   g.visible = !isHost || (gmView() ? gmSees(boardAt(f.x, f.z)) : figVisible(f));
   u.ring.visible = selectedId === f.id;
   const out = fainted(f) ? 0.5 : 1, op = (f.hidden ? 0.4 : 1) * out;
   for (const m of [u.col, u.dark]) { m.transparent = op < 1; m.opacity = op; }
+  if (u.spr) u.spr.mat.opacity = op;
   // a model shares its materials with every copy, so a fainted one gets its own before fading
   if (u.holder.children.length && (out < 1 || u.faded)) {
     u.holder.traverse(o => {
@@ -3809,13 +3817,15 @@ function modelScene(id) {
   return modelScenes.get(id);
 }
 
-function setModel(g, id, lw, ld, key) {
+function setModel(g, id, lw, ld, key, sprite) {
   const u = g.userData;
   u.modelKey = key;
   u.holder.clear();
+  dropSprite(u);
   if (u.mixer) { u.mixer.stopAllAction(); u.mixer = null; u.anim = null; }
-  u.pawn.visible = !id;
+  u.pawn.visible = !id && !sprite;
   u.modelTop = 0;
+  if (sprite) { setSprite(g, sprite, key); return; }
   if (!id) return;
   modelScene(id).then(scene => {
     if (u.modelKey !== key) return;
@@ -3840,6 +3850,90 @@ function setModel(g, id, lw, ld, key) {
     u.modelTop = 0.11 + size.y * k;
     if (state.figures[u.id]) upsertFig(state.figures[u.id], true);
   }).catch(() => { if (u.modelKey === key) { u.pawn.visible = true; status('A 3D model could not be loaded.'); setTimeout(() => status(''), 4000); } });
+}
+
+// ---------- Friend Zone sprites (11-22): the site's PMD-style walking sprites from SpriteCollab, standing on the mini's base ----------
+// They always face the camera like a paper mini; the picture row follows which way the mini faces (8 directions) and the
+// walk plays in place: the same sheets the site's Friend Zone uses.
+const SPR_RAW = 'https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/sprite/';
+const okSprite = v => typeof v === 'string' && /^\d{4}(\/\d{4}\/\d{4})?$/.test(v);
+const okSheet = v => (typeof v === 'string' && /^assets\/[\w\/.-]+\.png$/.test(v) && !v.includes('..') ? v : '');
+const sprData = new Map();                       // d4 -> Promise of { w, h, n, durs } for its Walk
+function spriteData(d4) {
+  if (!sprData.has(d4)) sprData.set(d4, fetch(`${SPR_RAW}${d4}/AnimData.xml`).then(r => (r.ok ? r.text() : '')).then(x => {
+    const an = [...x.matchAll(/<Anim>([\s\S]*?)<\/Anim>/g)].map(m => m[1]).find(a => a.includes('<Name>Walk</Name>'));
+    if (!an) return null;
+    const num = t => Number((an.match(new RegExp(`<${t}>(\\d+)</${t}>`)) || [])[1]);
+    const durs = [...an.matchAll(/<Duration>(\d+)<\/Duration>/g)].map(m => +m[1]);
+    return { w: num('FrameWidth'), h: num('FrameHeight'), n: durs.length || 1, durs: durs.length ? durs : [8] };
+  }).catch(() => null));
+  return sprData.get(d4);
+}
+const sprTex = new Map();                        // picture url -> Promise of { tex, foot }
+function spriteTex(url, a) {
+  if (!sprTex.has(url)) sprTex.set(url, new Promise((ok, bad) => {
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onerror = () => { sprTex.delete(url); bad(new Error('sprite picture')); };
+    img.onload = () => {
+      let foot = 0;                              // empty pixel rows under the feet in the facing-down frames
+      try {
+        const c = document.createElement('canvas'); c.width = a.w * a.n; c.height = a.h;
+        const g2 = c.getContext('2d', { willReadFrequently: true }); g2.drawImage(img, 0, 0, a.w * a.n, a.h, 0, 0, a.w * a.n, a.h);
+        const d = g2.getImageData(0, 0, c.width, c.height).data;
+        out: for (let y = a.h - 1; y >= 0; y--) for (let x = 0; x < c.width; x++) if (d[(y * c.width + x) * 4 + 3] > 40) { foot = a.h - 1 - y; break out; }
+      } catch {}
+      const tex = new THREE.Texture(img);
+      tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+      tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+      ok({ tex, foot });
+    };
+    img.src = url;
+  }));
+  return sprTex.get(url);
+}
+function dropSprite(u) {
+  if (!u.spr) return;
+  u.spr.mat.map?.dispose(); u.spr.mat.dispose(); u.spr = null;
+}
+async function setSprite(g, sp, key) {
+  const u = g.userData;
+  try {
+    const a = await spriteData(sp.d4);
+    if (!a || u.modelKey !== key) throw 0;
+    const { tex: base, foot } = await spriteTex(sp.sheet ? SITE_BASE + sp.sheet : `${SPR_RAW}${sp.d4}/Walk-Anim.png`, a);
+    if (u.modelKey !== key) return;
+    const tex = base.clone(); tex.needsUpdate = true;
+    tex.repeat.set(1 / a.n, 1 / 8);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.35 });
+    const s = new THREE.Sprite(mat), k = 0.042 * sp.sc;    // world size of one sprite pixel
+    s.center.set(0.5, foot / a.h);                // the feet stand on the base
+    s.scale.set(a.w * k, a.h * k, 1);
+    s.position.y = 0.11;
+    dropSprite(u); u.holder.clear();
+    u.holder.add(s);
+    u.spr = { mat, tex, a, total: a.durs.reduce((x, y) => x + y, 0), frame: -1, row: -1 };
+    u.modelTop = 0.11 + (a.h - foot) * k * 0.92;
+    u.pawn.visible = false;
+    if (state.figures[u.id]) upsertFig(state.figures[u.id], true);
+  } catch {
+    if (u.modelKey === key) u.pawn.visible = true;   // no sprite for it: the plain pawn
+  }
+}
+const _sprC = new THREE.Vector3();
+function animateSprite(g, now) {
+  const S = g.userData.spr;
+  if (!S) return;
+  // which way it faces on screen: its facing against the direction to the camera
+  _sprC.copy(camera.position).sub(g.position); _sprC.y = 0;
+  const L = Math.hypot(_sprC.x, _sprC.z) || 1, cx = _sprC.x / L, cz = _sprC.z / L;
+  const r = -(g.userData.rotNow || 0), fx = Math.sin(r), fz = Math.cos(r);
+  const ang = Math.atan2(fx * cz - fz * cx, fx * cx + fz * cz) * 180 / Math.PI;   // 0 = towards the camera, 90 = to screen right
+  const row = ((Math.round(ang / 45) % 8) + 8) % 8;
+  let t = (now / (1000 / 60)) % S.total, frame = 0;
+  for (; frame < S.a.n - 1 && t >= S.a.durs[frame]; frame++) t -= S.a.durs[frame];
+  if (frame === S.frame && row === S.row) return;
+  S.frame = frame; S.row = row;
+  S.tex.offset.set(frame / S.a.n, 1 - (row + 1) / 8);
 }
 
 function playAnim(u, name, once) {
@@ -3905,6 +3999,7 @@ async function modelId(buf) {
 function removeFigMesh(id) {
   const g = figMeshes.get(id);
   if (g) {
+    dropSprite(g.userData);
     figRoot.remove(g);
     g.remove(g.userData.holder);                // model parts are shared with other minis
     g.traverse(m => { m.geometry?.dispose(); m.material?.map?.dispose(); m.material?.dispose(); });
@@ -4304,9 +4399,15 @@ function renderFloor(fresh) {
 // ---------- the attack panel (pick a move, then roll accuracy and, on a hit, damage) ----------
 // moves come from the Voice of the Forest site's public index (read only)
 let indexP = null, attackFor = null, atk = null;
-const INDEX_URL = 'https://xrunriot-wp.github.io/thevoiceoftheforest/data/index.json';
+// 11-22: the site moved to Twistedfocus's own GitHub (twistedfocus13); the old address is tried second
+const SITE_BASES = ['https://twistedfocus13.github.io/thevoiceoftheforest/', 'https://xrunriot-wp.github.io/thevoiceoftheforest/'];
+const SITE_BASE = SITE_BASES[0];
+const fetchSite = (path, i = 0) => fetch(SITE_BASES[i] + path).then(r => { if (!r.ok) throw new Error(r.status); return r; })
+  .catch(e => (i + 1 < SITE_BASES.length ? fetchSite(path, i + 1) : Promise.reject(e)));
+const dexByName = new Map();                     // species name (lower case) -> 4-digit Pokedex number (for the sprites)
 function loadIndex() {
-  return indexP ||= fetch(INDEX_URL).then(r => r.json()).then(E => {
+  return indexP ||= fetchSite('data/index.json').then(r => r.json()).then(E => {
+    for (const e of E) if (e.kind === 'Species') { const d = (String(e.aka || '').match(/#(\d+)/) || [])[1]; if (d) dexByName.set(e.name.toLowerCase(), d.padStart(4, '0')); }
     const moves = E.filter(e => e.kind === 'Move' && e.mv).map(e => ({ name: e.name, ...e.mv, target: (/Target ([^.]*)\./.exec(e.outcome || '') || [])[1] || 'Foe', text: e.trigger || '' })).sort((a, b) => a.name.localeCompare(b.name));
     const species = E.filter(e => e.kind === 'Species').map(parseSpecies).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
     return { moves, species };
@@ -4332,7 +4433,7 @@ function lootSuggest(tier) {
   return all.length ? all[Math.floor(Math.random() * all.length)] : '';
 }
 function loadItems() {
-  fetch(INDEX_URL).then(r => r.json()).then(E => {
+  fetchSite('data/index.json').then(r => r.json()).then(E => {
     for (const e of E) if (e.kind === 'Status' && e.name) STATUS_HELP[e.name] = e.outcome || '';
     for (const e of E) if (e.kind === 'Item' && e.name && !/^(Seeds and Orbs|Garments|Weapons|Small Craft Material)$/.test(e.name)) {
       ITEM_TIER[e.name] = tierOfItem(e.outcome);
@@ -4551,6 +4652,73 @@ function renderBoardLib() {
   }
 }
 
+// ---------- Friend Zone minis (Twistedfocus 11-22: "add the minis (the sprites from the website Friend Zone)") ----------
+// The recruits living in the site's Friend Zone camps (read only from the site's database), each with the walking sprite the
+// site shows; a click puts one on the table with its Pokemon's stats. "Any Pokemon" adds one by name.
+async function spriteFor(name) {
+  await loadIndex();
+  const n = String(name || '').toLowerCase().trim();
+  if (dexByName.has(n)) return dexByName.get(n);
+  const words = n.replace(/[^\w\s'-]/g, ' ').split(/\s+/).filter(Boolean);   // "Bramble the Scolipede" -> Scolipede
+  for (let i = words.length - 1; i >= 0; i--) if (dexByName.has(words[i])) return dexByName.get(words[i]);
+  return '';
+}
+const nice = k => String(k).replace(/-s-/g, "'s ").replace(/-/g, ' ').replace(/(^|\s)\w/g, c => c.toUpperCase());
+async function addFzMini(name, species, sheet = '') {
+  const d4 = await spriteFor(species || name);
+  if (!d4) { alert(`"${species || name}" isn't a Pokémon on the site's list.`); return; }
+  const t = controls.target;
+  const id = handle({ t: 'add', name: name || species, color: '#7a9e3f', side: 'npc', x: t.x, z: t.z }, clientId);
+  if (!id) return;
+  const sp = (await loadIndex()).species.find(x => x.name.toLowerCase() === String(species || name).toLowerCase())
+    || (await loadIndex()).species.find(x => dexByName.get(x.name.toLowerCase()) === d4);
+  if (sp) handle({ t: 'species', id, name: sp.name, attr: sp.attr, hp: sp.hp, types: sp.types, moves: sp.moves }, clientId);
+  handle({ t: 'edit', id, sprite: d4, sheet }, clientId);
+  select(id);
+}
+let fzLoaded = '';
+async function renderFzList(force) {
+  const box = $('fzList');
+  if (!box || !isHost) return;
+  const code = (state.siteCode || 'VOICE').toUpperCase();
+  if (fzLoaded === code && !force) return;
+  fzLoaded = code;
+  box.innerHTML = '<div class="fzNote">Loading the Friend Zone…</div>';
+  let rec = null;
+  try { rec = await (await fetch(`${SITE_DB}/tables/${encodeURIComponent(code)}/recruits.json`)).json(); } catch {}
+  await loadIndex();
+  box.innerHTML = '';
+  const camps = Object.entries(rec || {});
+  if (!camps.length) { box.innerHTML = '<div class="fzNote">No Friend Zone recruits on the site yet (or it could not be reached). Type any Pokémon above.</div>'; return; }
+  for (const [loc, spots] of camps) {
+    for (const [spot, rs] of Object.entries(spots || {})) {
+      const list = Object.values(rs || {}).filter(r => r && r.name);
+      if (!list.length) continue;
+      const hd = document.createElement('div'); hd.className = 'fzGroup'; hd.textContent = `📁 ${nice(loc)} · ${nice(spot)}`;
+      const row = document.createElement('div'); row.className = 'fzRow';
+      for (const r of list.sort((a, b) => a.name.localeCompare(b.name))) {
+        const b = document.createElement('button'); b.className = 'fzBtn fit'; b.title = `Put ${r.name} on the table` + (r.type ? ` (${r.type})` : '');
+        const pic = document.createElement('span'); pic.className = 'fzPic';
+        const nm = document.createElement('span'); nm.textContent = r.name;
+        b.append(pic, nm);
+        const sheet = okSheet(r.walk);
+        b.onclick = () => addFzMini(r.name, r.name, sheet);
+        spriteFor(r.name).then(async d4 => {
+          const a = d4 && await spriteData(d4);
+          if (!a) return;
+          // the frames have lots of empty room round the Pokémon: show the middle of the first frame at twice the size
+          const k = 56 / Math.max(a.w, a.h);
+          pic.style.backgroundImage = `url("${sheet ? SITE_BASE + sheet : `${SPR_RAW}${d4}/Walk-Anim.png`}")`;
+          pic.style.backgroundSize = `${a.w * a.n * k}px ${a.h * 8 * k}px`;
+          pic.style.backgroundPosition = `${-(a.w * k - 28) / 2}px ${-(a.h * k - 28) / 2}px`;
+        });
+        row.appendChild(b);
+      }
+      box.append(hd, row);
+    }
+  }
+}
+
 // ---------- the GM's saved minis ----------
 function renderLibrary() {
   const box = $('libList');
@@ -4652,6 +4820,7 @@ function tick(now) {
       U.rotNow = Math.abs(dl) < 0.01 ? U.rotWant : U.rotNow + dl * 0.2;
       U.holder.rotation.y = U.pawn.rotation.y = U.rotNow;
     }
+    if (U.spr) animateSprite(g, performance.now());
     if (U.mixer) {
       const moving = dragging?.id === U.id || g.position.distanceTo(_shareT) > 0.03;
       if (!(U.anim.until && performance.now() < U.anim.until)) playAnim(U, moving && U.anim.walk ? 'walk' : 'idle');
@@ -4902,7 +5071,7 @@ function showSelected() {
   for (const b of chips.children) b.disabled = !all;
   if (!all) for (const b of chips.children) b.textContent = b.textContent.replace(' ×', '');
   if (isHost) {
-    const sm = $('selModel'); sm.innerHTML = '<option value="">Pawn (no model)</option>';
+    const sm = $('selModel'); sm.innerHTML = '<option value="">Pawn (no model)</option><option value="fzsprite">🐾 Friend Zone sprite (its Pokémon)</option>';
     for (const [id, m] of Object.entries(state.models)) { const o = document.createElement('option'); o.value = id; o.textContent = m.name; sm.appendChild(o); }
     const have = new Set(Object.values(state.models).map(m => m.name));
     for (const [key, b] of Object.entries(BUILTIN)) if (!have.has(b.name)) { const o = document.createElement('option'); o.value = 'builtin:' + key; o.textContent = b.name; sm.appendChild(o); }
@@ -4912,7 +5081,7 @@ function showSelected() {
       for (const k of pk.sort((a, b) => (PIXMON[a].name || a).localeCompare(PIXMON[b].name || b))) { const nm = (PIXMON[k]?.name || k) + ' (Pixelmon)'; if (have.has(nm)) continue; const o = document.createElement('option'); o.value = 'builtin:pix:' + k; o.textContent = nm; g.appendChild(o); }
       sm.appendChild(g);
     }
-    sm.value = f.model || '';
+    sm.value = f.model || (f.sprite ? 'fzsprite' : '');
   }
   if (isHost) {
     const par = f.parent && state.figures[f.parent];
@@ -5259,6 +5428,7 @@ function setTab(t) {
   for (const b of document.querySelectorAll('#gmTabs button')) b.classList.toggle('on', b.dataset.tab === t);
   for (const sec of document.querySelectorAll('section[data-tab]')) sec.classList.toggle('tabOn', sec.dataset.tab.split(' ').includes(t));
   try { localStorage.setItem('tabletop.gmTab', t); } catch {}
+  if (t === 'minis' && isHost) renderFzList();
 }
 
 function pickPaint(type) {
@@ -5409,6 +5579,10 @@ async function checkVersion() {
 for (const b of document.querySelectorAll('#gmTabs button')) b.onclick = () => setTab(b.dataset.tab);
 // 11-22 places bar + a panel you can make wider by dragging its left edge (Twistedfocus: "more like Roll20")
 $('placesTab').onclick = () => setPlacesOpen(!document.body.classList.contains('placesOpen'));
+// 11-22 Friend Zone minis
+$('fzAnyAdd').onclick = () => { const v = $('fzAny').value.trim(); if (v) { addFzMini(v, v); $('fzAny').value = ''; } };
+$('fzAny').onkeydown = e => { if (e.key === 'Enter') $('fzAnyAdd').click(); };
+$('fzAny').onfocus = () => $('selSpecies').onfocus?.();
 try { if (localStorage.getItem('tabletop.placesOpen')) setPlacesOpen(true); } catch {}
 (() => {
   const setW = w => { w = Math.max(260, Math.min(Math.round(w), 600, innerWidth - 320)); document.documentElement.style.setProperty('--sideW', w + 'px'); return w; };
@@ -5626,7 +5800,13 @@ function wirePanel() {
     const v = $('selModel').value;
     if (!selectedId) return;
     if (v.startsWith('builtin:')) useBuiltin(v.slice(8), selectedId);
-    else act({ t: 'edit', id: selectedId, model: v });
+    else if (v === 'fzsprite') {
+      const f = state.figures[selectedId];
+      spriteFor(f?.st?.species || f?.name || '').then(d4 => {
+        if (d4) act({ t: 'edit', id: selectedId, sprite: d4 });
+        else { alert('No Friend Zone sprite found: pick its Pokémon first (the "Pokémon" box above), then try again.'); showSelected(); }
+      });
+    } else act({ t: 'edit', id: selectedId, model: v, ...(v ? {} : { sprite: '' }) });
   };
   $('modelFile').onchange = async () => {
     const file = $('modelFile').files[0];

@@ -557,6 +557,12 @@
   .placeCard .pcGo { position: absolute; right: 4px; bottom: 30px; padding: 2px 6px; font-size: 11px; display: none; }
   .placeCard:hover .pcGo, .placeCard .pcGo.show { display: block; }
   #placesEmpty { color: var(--dim); font-size: 13px; padding: 10px 4px; }
+  /* Friend Zone minis (11-22): camp folders of sprite buttons */
+  #fzList .fzGroup { font-size: 12px; color: var(--accent); margin: 8px 0 4px; font-weight: 700; }
+  #fzList .fzRow { display: flex; flex-wrap: wrap; gap: 4px; }
+  #fzList .fzBtn { display: flex; align-items: center; gap: 4px; padding: 3px 8px 3px 3px; font-size: 12px; }
+  #fzList .fzBtn .fzPic { width: 28px; height: 28px; background-repeat: no-repeat; image-rendering: pixelated; flex: 0 0 auto; }
+  #fzList .fzNote { color: var(--dim); font-size: 12px; }
   /* the floor name tag sat where the Places tab hangs: below it for the GM */
   body.gm:not(.previewing) #floorTag { top: 40px; }
 </style>
@@ -788,6 +794,14 @@
       </div>
       <div style="color:var(--dim);font-size:12px;margin-top:4px"><b style="color:#e0503c">Enemies</b> fight. <b style="color:#4aa3e0">NPCs</b> can't be attacked by players; a player standing next to one gets a <b>Talk</b> button. <b style="color:#46c46a">Players</b> are controlled by whoever you pick.</div>
       <label style="color:var(--text);margin-top:6px"><input id="newHidden" type="checkbox"> Hidden from players while I work on it</label>
+      <!-- Twistedfocus 11-22 "add the minis (the sprites from the website Friend Zone)" -->
+      <h3 style="margin-top:12px">Friend Zone minis</h3>
+      <div style="color:var(--dim);font-size:12px">The walking sprites from the site's Friend Zone. Click one to put it on the table (with its Pokémon's stats), or type any Pokémon.</div>
+      <div class="row" style="margin-top:6px">
+        <input id="fzAny" list="speciesList" placeholder="Any Pokémon (e.g. Pikachu)" autocomplete="off">
+        <button id="fzAnyAdd" class="fit primary">Add</button>
+      </div>
+      <div id="fzList" style="margin-top:6px"></div>
       <h3 style="margin-top:12px">Saved minis</h3>
       <input id="miniGroup" maxlength="30" list="miniGroups" placeholder="Group for Save to list (e.g. Floor 1 enemies)" style="width:100%">
       <datalist id="miniGroups"></datalist>
@@ -969,6 +983,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=108"></script>
+<script type="module" src="tabletop.js?v=109"></script>
 </body>
 </html>
