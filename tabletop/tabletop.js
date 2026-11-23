@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=111';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=111';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=112';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=112';
 
-const VERSION = 111;                              // raised by bump.py on every publish
+const VERSION = 112;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -202,7 +202,18 @@ function openPeer(id, tries) {
       peer.destroy(); setTimeout(() => openPeer(id, tries + 1), 2500);
       lobbyMsg('That room is still closing, trying again...');
     } else if (err.type === 'unavailable-id') {
-      lobbyMsg('This room is already open in another tab or browser.');
+      // 11-22 (Twistedfocus, after moving to her own copy): the old tab still held her room. Close it, or keep everything
+      // and open the game under a new room code (players then need the new invite link).
+      lobbyMsg('This room is already open in another tab or browser (an old tabletop tab?). Close it and press Create game again, or:');
+      const nb = document.createElement('button'); nb.className = 'primary'; nb.style.cssText = 'width:100%;margin-top:8px';
+      nb.textContent = 'Open my game with a new room code';
+      nb.onclick = () => {
+        nb.remove(); peer?.destroy(); roomCode = rid(6);
+        store.set('tabletop.host', { ...(store.get('tabletop.host') || {}), code: roomCode });
+        lobbyMsg('Opening your game with room code ' + roomCode + '… (send players the new invite link)');
+        openPeer(PREFIX + roomCode, 0);
+      };
+      $('lobbyMsg').appendChild(nb);
     } else if (!$('game').style.display || $('game').style.display === 'none') {
       lobbyMsg('Could not connect: ' + err.type);
     } else status('Connection problem: ' + err.type);
@@ -1168,6 +1179,9 @@ function handle(msg, from) {
       const D = { board: b.id, name: clean(o.name, 30) || 'Mystery Dungeon', floor: num(o.floor, 1, 99, 1), look: FLOOR_LOOKS[o.look] ? o.look : 'cave',
         size: FLOOR_SIZES[o.size] ? o.size : '', enemies: num(o.enemies, 0, 12, 3), foes: clean(o.foes, 200), items: num(o.items, 0, 8, 2),
         events: num(o.events, 0, 8, 2), traps: num(o.traps, 0, 10, 2) };
+      // 11-22 (Twistedfocus): a dungeon description, typed here or sent from the site's Dungeon panel; a next floor keeps it
+      D.desc = String(o.desc ?? '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '').trim().slice(0, 600) ||
+        (state.dungeon?.name === D.name ? state.dungeon.desc || '' : '');
       if (layerOf(b) === (state.live || 1)) { state.dungeon = D; setBackdrop(D.look); } else (state.prep ||= {})[layerOf(b)] = D;
       makeFloor(b, D);
       break;
@@ -1398,13 +1412,38 @@ async function chanceRoll(f, tg, mv, from, at, dir) {
 
 // ---------- characters from the Voice of the Forest site: read only, the site is never changed from here ----------
 const SITE_DB = 'https://voiceoftheforest-e071c-default-rtdb.firebaseio.com';
-let siteParty = {}, siteBagRaw = {}, siteES = null, siteBagES = null, siteCodeOn = '';
+let siteParty = {}, siteBagRaw = {}, siteES = null, siteBagES = null, siteCodeOn = '', siteReqES = null, siteReq = {}, siteReqBusy = false;
+// a floor asked for by the site's Dungeon panel: once per request, never one older than 10 minutes the first time
+function siteRequest(r) {
+  if (!isHost || !r || !r.t || !r.dungeon || siteReqBusy) return;
+  const seen = state.siteReqT || 0;
+  if (+r.t <= seen || (!seen && Date.now() - r.t > 10 * 60e3)) { if (!seen) { state.siteReqT = +r.t; save(); } return; }
+  state.siteReqT = +r.t; save();
+  const name = clean(r.dungeon, 30), floor = Math.max(1, Math.min(99, Math.round(+r.floor) || 1)), b = curBoard();
+  siteReqBusy = true;
+  setTimeout(() => {                             // after the page has drawn (a confirm right away can freeze the first frame)
+    try {
+      const ok = b && confirm(`The site's Dungeon panel asks for a floor: ${name} B${floor}F` + (r.desc ? `\n\n${String(r.desc).slice(0, 300)}` : '') +
+        `\n\nMake it now on board "${b.name || b.id}"? Its terrain and every mini on it except the players' are replaced.`);
+      if (!ok) { addLog({ kind: 'sys', text: `Site asked for ${name} B${floor}F (not made).` }); return; }
+      $('floorName').value = name; $('floorNum').value = floor;
+      if (r.desc != null) $('floorDesc').value = String(r.desc).slice(0, 600);
+      act({ t: 'floorGen', board: b.id, opts: floorOptsNow() });
+      if (r.event) addLog({ kind: 'sys', text: `Site event: ${clean(r.event, 60)}` });
+    } finally { siteReqBusy = false; }
+  }, 300);
+}
 function siteFeed() {
   const code = (state.siteCode || 'VOICE').toUpperCase();
   if (isHost) renderFzList();                    // 11-22 Friend Zone minis follow the site's table code
   if (!isHost || (siteES && siteCodeOn === code)) return;
   siteES?.close(); siteBagES?.close(); siteParty = {}; siteBagRaw = {}; siteCodeOn = code;
   siteES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/party.json`);
+  // 11-22 (Twistedfocus: "I want this to send the request to the table top and make something for me"): the site's Dungeon
+  // panel writes tables/<code>/ttreq = { t, dungeon, floor, floors, desc, event }; the GM's tabletop offers to build that floor
+  siteReqES?.close();
+  siteReqES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/ttreq.json`);
+  siteStream(siteReqES, () => siteReq, v => { siteReq = v; }, () => siteRequest(siteReq));
   // the site's bag is only read: each character's items show in the tabletop bag
   siteBagES = new EventSource(`${SITE_DB}/tables/${encodeURIComponent(code)}/bag.json`);
   siteStream(siteBagES, () => siteBagRaw, v => { siteBagRaw = v; }, syncSiteBag);
@@ -4388,12 +4427,16 @@ function renderFloor(fresh) {
   tag.textContent = `${D.name} · B${D.floor}F`;
   if ($('floorName') && document.activeElement !== $('floorName')) $('floorName').value = D.name;
   if ($('floorNum') && document.activeElement !== $('floorNum')) $('floorNum').value = D.floor;
+  if ($('floorDesc') && document.activeElement !== $('floorDesc')) $('floorDesc').value = D.desc || '';
+  tag.title = D.desc || '';
   if (!fresh) return;
   const ban = $('floorBanner');
   ban.innerHTML = '';
   const a = document.createElement('div'); a.textContent = D.name;
   const n = document.createElement('div'); n.className = 'fl'; n.textContent = `B${D.floor}F`;
   ban.append(a, n);
+  if (D.desc) { const ds = document.createElement('div'); ds.className = 'fdesc'; ds.textContent = D.desc; ban.appendChild(ds); }
+  ban.classList.toggle('long', !!D.desc);
   ban.classList.remove('show'); void ban.offsetWidth; ban.classList.add('show');
   const b = state.boards.find(x => x.id === D.board);
   if (b && camera) {                             // look at the new floor
@@ -5426,6 +5469,7 @@ function renderParty() {
   $('partyNext').style.display = gmView() ? '' : 'none';
 }
 
+let floorOptsNow = () => ({});                    // the Floors tab's settings (set by the UI setup below)
 // the GM's panel tabs (remembered per browser)
 let gmTab = 'minis';
 function setTab(t) {
@@ -5838,8 +5882,9 @@ function wirePanel() {
     else if (e.key === 'Escape' && selectedId && !attachFor && !attackFor && document.activeElement?.tagName !== 'INPUT') select(null);
   });
   $('areaPlace').onclick = startAreaDraft;
-  const floorOpts = () => ({ name: $('floorName').value, floor: $('floorNum').value, look: $('floorLook').value, size: $('floorSize').value,
-    enemies: $('floorFoes').value, foes: $('floorFoeNames').value, items: $('floorItems').value, events: $('floorEvents').value, traps: $('floorTraps').value });
+  const floorOpts = floorOptsNow = () => ({ name: $('floorName').value, floor: $('floorNum').value, look: $('floorLook').value, size: $('floorSize').value,
+    enemies: $('floorFoes').value, foes: $('floorFoeNames').value, items: $('floorItems').value, events: $('floorEvents').value, traps: $('floorTraps').value,
+    desc: $('floorDesc').value });
   $('bgPick').onchange = () => act({ t: 'bg', bg: $('bgPick').value });
   $('floorLook').addEventListener('change', () => act({ t: 'bg', bg: $('floorLook').value }));   // a new floor look brings its background (Adam)
   $('floorMake').onclick = () => {

@@ -115,6 +115,9 @@
     font-size: 40px; font-weight: 800; color: #fff; text-shadow: 0 3px 12px #000; background: #000c; opacity: 0; z-index: 6; }
   #floorBanner .fl { font-size: 64px; color: #ffd27a; }
   #floorBanner.show { animation: floorIn 3.2s ease forwards; }
+  /* 11-22 dungeon description under the floor name: wraps, and the banner stays up longer so it can be read */
+  #floorBanner .fdesc { font-size: 20px; line-height: 1.4; max-width: min(760px, 86%); text-align: center; margin-top: 14px; color: #f3e6cf; }
+  #floorBanner.show.long { animation-duration: 7.5s; }
   /* the end of a dungeon run: Dungeon Complete / Escaped / whited out (the screen fades to black first) */
   #endScreen { position: absolute; inset: 0; z-index: 12; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
     font-family: var(--pix); color: #fff; text-align: center; padding: 16px; }
@@ -870,6 +873,8 @@
       <div class="row">
         <div><label>Background</label><select id="bgPick" title="The picture behind the table, for everyone. Picking a floor Look switches it to the matching one."><option value="">None (plain dark)</option><option value="cave">Cave</option><option value="forest">Forest</option><option value="ice">Ice</option><option value="ruins">Ruins</option><option value="volcano">Volcano</option><option value="beach">Beach cave</option><option value="sky">Open sky</option><option value="night">Starry night</option><option value="dungeon">Dark dungeon</option><option value="sea">Under the sea</option></select></div>
       </div>
+      <label>Dungeon description (shown to everyone when the floor starts)</label>
+      <textarea id="floorDesc" maxlength="600" rows="3" placeholder="e.g. A damp cave where the walls hum at night…" style="width:100%"></textarea>
       <label>Wild Pokémon on this dungeon (picked at random)</label>
       <input id="floorFoeNames" maxlength="200" placeholder="Golett, Zubat, Geodude" style="width:100%">
       <div class="row" style="margin-top:8px">
@@ -990,6 +995,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=111"></script>
+<script type="module" src="tabletop.js?v=112"></script>
 </body>
 </html>
