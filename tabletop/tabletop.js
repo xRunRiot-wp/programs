@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=110';
-import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=110';
+import { dieKit, dieMaterials, simulate, readDie } from './dice.js?v=111';
+import { reachable, lineOfSight, distance, adjacent, cellsOf, BLOCKS_MOVE, STATUSES, DUNGEON_EVENTS, EVENT_INFO, directionFor, lootFor } from './rules.js?v=111';
 
-const VERSION = 110;                              // raised by bump.py on every publish
+const VERSION = 111;                              // raised by bump.py on every publish
 // The page and this code must be the same version. GitHub Pages' cache can hand out an old copy of the page together
 // with the newest code; new windows (like the turn order) are then missing from the page and never show (Adam 11-04).
 // When they don't match, load a fresh copy of the page once (the extra 'fresh' word makes every cache fetch it anew).
@@ -97,7 +97,13 @@ const blobs = (() => {
     const t = d.transaction('b', mode), r = fn(t.objectStore('b'));
     t.oncomplete = () => ok(r.result); t.onerror = () => bad(t.error);
   })).catch(() => null);
-  return { get: k => run('readonly', s => s.get(k)), set: (k, v) => run('readwrite', s => s.put(v, k)) };
+  // dump/load (11-22): every stored picture and model, to copy a game to another copy of the tabletop
+  const dump = () => db().then(d => new Promise((ok, bad) => {
+    const out = [], c = d.transaction('b', 'readonly').objectStore('b').openCursor();
+    c.onsuccess = () => { const x = c.result; if (!x) return ok(out); if (x.value != null) out.push([x.key, x.value]); x.continue(); };
+    c.onerror = () => bad(c.error);
+  })).catch(() => []);
+  return { get: k => run('readonly', s => s.get(k)), set: (k, v) => run('readwrite', s => s.put(v, k)), dump };
 })();
 const MAX_MODEL = 15 * 1024 * 1024;
 // models that come with the site; a mini linked to a site character of that species gets it by itself
@@ -6052,6 +6058,61 @@ function wirePanel() {
 
 // ---------- lobby ----------
 const params = new URLSearchParams(location.search);
+// ---------- copy a GM's game to another copy of the tabletop (11-22: Twistedfocus moved it to her own GitHub) ----------
+// A browser keeps a game per web address, so a new address starts empty. Open the OLD page with ?moveto=<new page> and click
+// the button: the new page opens with ?import=<old origin>, asks for the game, and the old page sends its saved game,
+// saved boards/minis, pictures and models straight across (window messages, only between these two addresses).
+const MOVE_OK = ['https://xrunriot-wp.github.io', 'https://twistedfocus13.github.io', 'http://127.0.0.1:8793', 'http://localhost:8793'];
+(() => {
+  const to = params.get('moveto'), from = params.get('import');
+  if (to) {
+    let url; try { url = new URL(to); } catch { return; }
+    if (!MOVE_OK.includes(url.origin) || url.origin === location.origin) return;
+    const has = !!store.get('tabletop.host');
+    $('moveBox').style.display = '';
+    $('moveText').textContent = has ? `Copy the game saved in this browser (room ${store.get('tabletop.host').code}, saved boards, minis, pictures and models) to your tabletop at ${url.href}` : 'There is no game saved in this browser to copy.';
+    $('moveBtn').textContent = '📦 Copy my game there';
+    $('moveBtn').disabled = !has;
+    $('moveBtn').onclick = () => {
+      const w = window.open(url.origin + url.pathname + '?import=' + encodeURIComponent(location.origin), '_blank');
+      if (!w) { $('moveMsg').textContent = 'Your browser blocked the new tab: allow pop-ups for this page and click again.'; return; }
+      $('moveMsg').textContent = 'Opening your new tabletop…';
+      const onMsg = async e => {
+        if (e.origin !== url.origin || e.source !== w) return;
+        if (e.data?.t === 'tt-ready') {
+          const ls = {};
+          for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('tabletop.')) ls[k] = localStorage.getItem(k); }
+          const idb = await blobs.dump();
+          $('moveMsg').textContent = `Sending your game (${idb.length} pictures/models)…`;
+          w.postMessage({ t: 'tt-move', ls, idb }, url.origin);
+        } else if (e.data?.t === 'tt-done') {
+          removeEventListener('message', onMsg);
+          $('moveMsg').innerHTML = '';
+          $('moveMsg').append('✅ Done! Your game is at ', Object.assign(document.createElement('a'), { href: url.href, textContent: url.href, style: 'color:var(--accent)' }), '. Use that address from now on (this copy stays here, untouched).');
+        } else if (e.data?.t === 'tt-no') {
+          $('moveMsg').textContent = 'Not copied: ' + (e.data.why || 'the new tabletop said no.');
+        }
+      };
+      addEventListener('message', onMsg);
+    };
+  } else if (from && MOVE_OK.includes(from) && from !== location.origin && window.opener) {
+    lobbyMsg('Getting your game from the old tabletop…');
+    addEventListener('message', async e => {
+      if (e.origin !== from || e.source !== window.opener || e.data?.t !== 'tt-move') return;
+      const { ls, idb } = e.data;
+      const mine = store.get('tabletop.host');
+      if (mine && !confirm(`This tabletop already has a game saved (room ${mine.code}). Replace it with the one from the old tabletop?`)) {
+        window.opener.postMessage({ t: 'tt-no', why: 'you kept the game that was already at the new address.' }, from); lobbyMsg('Kept the game that was here.'); return;
+      }
+      for (const [k, v] of Object.entries(ls || {})) if (typeof k === 'string' && k.startsWith('tabletop.') && typeof v === 'string') localStorage.setItem(k, v);
+      for (const [k, v] of Array.isArray(idb) ? idb : []) if (typeof k === 'string' && /^(map|boardlib|model):/.test(k)) await blobs.set(k, v);
+      window.opener.postMessage({ t: 'tt-done' }, from);
+      lobbyMsg('✅ Your game is here now. Opening it…');
+      setTimeout(() => { location.href = location.pathname; }, 1200);
+    });
+    window.opener.postMessage({ t: 'tt-ready' }, from);
+  }
+})();
 $('nameIn').value = store.get('tabletop.name') || '';
 if (params.get('room')) { $('codeIn').value = params.get('room').toUpperCase(); $('createBtn').style.display = 'none'; $('joinBtn').classList.add('primary'); }
 const needName = () => {

@@ -583,6 +583,12 @@
       <button id="joinBtn" class="fit">Join</button>
     </div>
     <div id="lobbyMsg"></div>
+    <!-- 11-22 moving a GM's game to another copy of the tabletop (Twistedfocus's own GitHub): shown only with ?moveto= -->
+    <div id="moveBox" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+      <div id="moveText" style="font-size:14px;margin-bottom:8px"></div>
+      <button id="moveBtn" class="primary" style="width:100%"></button>
+      <div id="moveMsg" style="font-size:13px;margin-top:6px;color:var(--dim)"></div>
+    </div>
   </div>
 </div>
 
@@ -984,6 +990,6 @@
     "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="tabletop.js?v=110"></script>
+<script type="module" src="tabletop.js?v=111"></script>
 </body>
 </html>
